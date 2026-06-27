@@ -113,8 +113,8 @@ function localized(obj, lang = "zh") {
 
 // Render persona fields that may be string / string[] / object[].
 const SUBFIELD_LABELS = {
-  summary: "概述", decisive_event: "决定性事件",
-  response: "应对方式", cost: "代价/反噬", desire_outer: "声称要的",
+  summary: "概述", decisive_event: "关键经历",
+  response: "性格底色", cost: "另一面/盲区", desire_outer: "声称要的",
   desire_inner: "真正要的", desire_bottom_line: "底线", healing: "治愈条件",
   note: "注释", messages: "开场白",
 };
