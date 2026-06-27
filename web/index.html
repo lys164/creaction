@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>POPOP 角色生产链路</title>
+<link rel="stylesheet" href="/style.css?v=11" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">POPOP <span>角色生产链路</span></div>
+  <nav class="steps">
+    <a class="step active" data-view="upload">① 批量上传 / 生成人设</a>
+    <a class="step" data-view="characters">② 角色 / 人设 / 封面</a>
+    <a class="step" data-view="igposts">③ 生成 INS 帖子（9条）</a>
+    <a class="step" data-view="landing">④ 生成落地页</a>
+    <a class="step" data-view="posts">帖子类型生产</a>
+    <a class="step" data-view="styles">画风库</a>
+  </nav>
+</header>
+
+<main>
+  <!-- VIEW: UPLOAD -->
+  <section id="view-upload" class="view active">
+    <h2>批量上传图片 → 扩写人设</h2>
+    <div class="card">
+      <div id="dropzone" class="dropzone">
+        <input type="file" id="fileInput" accept="image/*" multiple hidden />
+        <p>点击或拖拽图片到此处（支持多选）</p>
+        <div id="thumbs" class="thumbs"></div>
+      </div>
+      <label class="field">
+        <span>创作补充要求（选填）</span>
+        <textarea id="userHint" rows="2" placeholder="例如：希望偏成熟御姐风、设定为财阀千金…"></textarea>
+      </label>
+      <div class="field">
+        <span>语言（多选，每个语言各生成一个独立的本土化角色）</span>
+        <div id="langPick" class="lang-pick"></div>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="onePerImage" checked />
+        每张图片各生成一个角色（取消则所有图描述同一角色）
+      </label>
+      <div class="field">
+        <span>封面图（选填，可在人设生成后直接批量产出）</span>
+        <div class="row">
+          <label class="check">
+            <input type="checkbox" id="withCoverOnCreate" checked />
+            同时生成封面图
+          </label>
+          <label class="field small">
+            <span>封面画风</span>
+            <select id="createCoverStyle"></select>
+          </label>
+        </div>
+      </div>
+      <button id="btnPersona" class="primary">生成人设（按所选语言各自生成）</button>
+      <div id="uploadStatus" class="status"></div>
+    </div>
+  </section>
+
+  <!-- VIEW: CHARACTERS -->
+  <section id="view-characters" class="view">
+    <h2>角色库</h2>
+    <div id="charLangFilter" class="lang-filter"></div>
+    <div id="charToolbar" class="char-toolbar">
+      <button id="btnSelAll" class="ghost">全选</button>
+      <button id="btnSelNone" class="ghost">取消选择</button>
+      <button id="btnBatchPersona" class="ghost">↻ 批量重生人设</button>
+      <button id="btnBatchOpening" class="ghost">💬 批量重写开场白</button>
+      <div class="char-cover-batch">
+        <select id="batchStyle" title="封面画风"></select>
+        <select id="batchCoverMode" title="封面生成模式">
+          <option value="fill_missing">补缺失+生图</option>
+          <option value="full">全套重跑+生图</option>
+          <option value="image_only">只生图</option>
+        </select>
+        <button id="btnBatchCover" class="ghost">🖼 批量生成封面</button>
+      </div>
+      <button id="btnBatchDelete" class="ghost danger">🗑 批量删除</button>
+      <button id="btnBatchExport" class="ghost">📦 批量导出</button>
+      <span id="selCount" class="muted"></span>
+    </div>
+    <div id="charList" class="char-grid"></div>
+    <div id="charDetail" class="card hidden"></div>
+  </section>
+
+  <!-- VIEW: IG POSTS -->
+  <section id="view-igposts" class="view">
+    <h2>生成 INS 帖子（推断最近 9 条）</h2>
+    <p class="muted">根据角色兴趣、生活方式、在意的东西，推断 TA 最近会发的 9 条 ins。自拍(selfie)拼入重绘封面做图生图，photo 直接文生图，也可能是纯文本。</p>
+    <div class="card">
+      <div class="field">
+        <span>选择角色（勾选可批量生成；点击头像/卡片查看已生成帖子）</span>
+        <div id="igLangFilter" class="lang-filter"></div>
+        <div class="ig-toolbar">
+          <button id="btnIgSelAll" class="ghost">全选</button>
+          <button id="btnIgSelNone" class="ghost">取消选择</button>
+          <span id="igSelCount" class="muted"></span>
+        </div>
+        <div id="igCharGrid" class="char-grid ig-char-grid"></div>
+      </div>
+      <div class="row">
+        <label class="field small">
+          <span>帖子条数（选填）</span>
+          <input type="number" id="igCount" placeholder="空=模型规划3~9条" min="3" max="9" />
+        </label>
+        <label class="check">
+          <input type="checkbox" id="igWithImages" checked /> 同时生成配图
+        </label>
+      </div>
+      <button id="btnIg" class="primary">为勾选角色生成 INS 帖子</button>
+      <div id="igStatus" class="status"></div>
+    </div>
+    <h3 id="igViewingTitle" class="ig-viewing-title"></h3>
+    <div id="igResults" class="post-grid"></div>
+  </section>
+
+  <!-- VIEW: LANDING -->
+  <section id="view-landing" class="view">
+    <h2>生成角色落地页</h2>
+    <p class="muted">用角色人设 + 重绘封面，对话式生成一屏 ins 风格的角色主页（展示页）。可选画风预设或自由描述，生成后可在右侧编辑代码并继续追加要求迭代。</p>
+    <div class="landing-grid">
+      <div class="landing-left card">
+        <label class="field">
+          <span>选择角色（勾选可批量生成；点击卡片载入右侧编辑/迭代）</span>
+          <div id="ldLangFilter" class="lang-filter"></div>
+          <div class="ig-toolbar">
+            <button id="btnLdSelAll" class="ghost">全选</button>
+            <button id="btnLdSelNone" class="ghost">取消选择</button>
+            <span id="ldSelCount" class="muted"></span>
+          </div>
+          <div id="ldCharGrid" class="char-grid ig-char-grid"></div>
+        </label>
+        <div class="field">
+          <span>风格（点选预设，或在下方自由输入）</span>
+          <div id="ldStyleChips" class="lstyle-chips"></div>
+          <input id="ldStyleInput" class="lstyle-input" placeholder="或自由输入，如「Dossier 档案风」「暗黑学院」…" />
+        </div>
+        <label class="field">
+          <span>要求 / 追加修改（选填）</span>
+          <textarea id="ldReq" rows="3" placeholder="首次可留空（自动套用设计指令）。已生成后在此输入「加一个歌单模块」「换成深色」等迭代。"></textarea>
+        </label>
+        <div class="row">
+          <button id="btnLanding" class="primary">生成落地页</button>
+          <button id="btnLandingReset" class="ghost" title="清空当前代码，下次从零生成">重置</button>
+        </div>
+        <div id="ldStatus" class="status"></div>
+        <div id="ldHistory" class="ld-history"></div>
+      </div>
+      <div class="landing-right">
+        <div class="ld-rhead">
+          <span class="ld-title">页面 · HTML</span>
+          <div class="ld-seg" id="ldSeg">
+            <button data-v="preview" class="on">预览</button>
+            <button data-v="code">代码</button>
+          </div>
+          <button id="ldCopy" class="ghost">复制</button>
+          <button id="ldOpen" class="ghost">新窗口打开</button>
+        </div>
+        <div class="ld-body preview-on">
+          <iframe id="ldFrame" sandbox="allow-scripts allow-popups"></iframe>
+          <textarea id="ldEditor" spellcheck="false" class="mono hidden" placeholder="生成的 HTML 会显示在这里，可直接编辑。"></textarea>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIEW: POSTS -->
+  <section id="view-posts" class="view">
+    <h2>批量生产帖子</h2>
+    <div class="card">
+      <label class="field">
+        <span>选择角色</span>
+        <div id="postLangFilter" class="lang-filter"></div>
+        <select id="postChar"></select>
+      </label>
+      <div class="field">
+        <span>勾选帖子类型</span>
+        <div id="postTypes" class="type-list"></div>
+      </div>
+      <div class="row">
+        <label class="field small">
+          <span>每类生成条数</span>
+          <input type="number" id="countPerType" value="2" min="1" max="10" />
+        </label>
+        <label class="check">
+          <input type="checkbox" id="withImages" checked /> 同时生成配图
+        </label>
+      </div>
+      <button id="btnPosts" class="primary">批量生成帖子</button>
+      <div id="postStatus" class="status"></div>
+    </div>
+    <div id="postResults" class="post-grid"></div>
+  </section>
+
+  <!-- VIEW: STYLES -->
+  <section id="view-styles" class="view">
+    <h2>画风库</h2>
+    <p class="muted">画风词稍后批量提供。可在此粘贴 JSON 覆盖（数组，元素含 id / name / prompt）。</p>
+    <div class="card">
+      <textarea id="stylesJson" rows="14" class="mono"></textarea>
+      <button id="btnSaveStyles" class="primary">保存画风库</button>
+      <div id="styleStatus" class="status"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+<script src="/app.js?v=17"></script>
+</body>
+</html>

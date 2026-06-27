@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.Python
+
+# 运行时数据（用户生成的人设/图片/上传，不入库）
+data/
+
+# 环境变量与密钥
+.env
+.env.*
+*.key
+
+# 构建产物
+*.tar.gz
+popop-pipeline-image.tar.gz
+
+# 日志
+*.log
+nohup.out
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store
+
+# 临时脚本
+_fix*.py

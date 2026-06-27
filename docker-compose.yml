@@ -1,0 +1,33 @@
+services:
+  popop-pipeline:
+    image: popop-pipeline:latest
+    container_name: popop-pipeline
+    restart: unless-stopped
+
+    # API 凭证可选：在项目根目录放一个 .env 覆盖默认值（不放则用 config.py 内置默认）。
+    # .env 示例：POPOP_API_KEY=sk-xxxx
+    env_file:
+      - path: .env
+        required: false
+
+    volumes:
+      # 持久化生成的人设/帖子/图片/上传，重新部署不丢数据
+      - ./data:/app/data
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+
+      # 内网域名路由
+      - "traefik.http.routers.popop-pipeline.rule=Host(`popop-pipeline.internal-app.imaginewithu.com`)"
+      - "traefik.http.routers.popop-pipeline.entrypoints=web"
+
+      # 后端服务端口
+      - "traefik.http.services.popop-pipeline.loadbalancer.server.port=8077"
+
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
