@@ -310,6 +310,18 @@ def clean_html(out: str) -> str:
     return s
 
 
+def _set_img_src(tag: str, url: str) -> str:
+    """Set an <img> tag's src to url. Handles three cases:
+    already has a non-empty src (leave it), has an empty src="" (fill it),
+    or has no src at all (append one)."""
+    if re.search(r'\bsrc\s*=\s*["\'][^"\']+["\']', tag):
+        return tag  # already points somewhere real
+    empty = re.search(r'\bsrc\s*=\s*["\']["\']', tag)
+    if empty:
+        return tag[:empty.start()] + f'src="{url}"' + tag[empty.end():]
+    return tag[:-1] + f' src="{url}">'
+
+
 def inject_cover(html: str, cover_url: str | None) -> str:
     """Best-effort inject the cover image into oc-cover / oc-img-1 slots so a
     saved/standalone page (and the live preview) shows the portrait.
@@ -324,10 +336,7 @@ def inject_cover(html: str, cover_url: str | None) -> str:
     url = cover_url
 
     def _img_src(m):
-        tag = m.group(0)
-        if re.search(r'\bsrc\s*=\s*["\'][^"\']+["\']', tag):
-            return tag
-        return tag[:-1] + f' src="{url}">'
+        return _set_img_src(m.group(0), url)
 
     html = re.sub(
         r'<img\b[^>]*\bclass=["\'][^"\']*oc-(?:cover|img-1)(?![\w-])[^"\']*["\'][^>]*>',
@@ -369,10 +378,7 @@ def inject_post_images(html: str, post_urls: list[str] | None) -> str:
         cls = f"oc-post-{idx}"
 
         def _img_src(m):
-            tag = m.group(0)
-            if re.search(r'\bsrc\s*=\s*["\'][^"\']+["\']', tag):
-                return tag
-            return tag[:-1] + f' src="{url}">'
+            return _set_img_src(m.group(0), url)
 
         html = re.sub(
             rf'<img\b[^>]*\bclass=["\'][^"\']*{cls}(?![\w-])[^"\']*["\'][^>]*>',
