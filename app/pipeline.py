@@ -28,6 +28,17 @@ def _char_path(char_id: str) -> Path:
     return config.PERSONA_DIR / f"{char_id}.json"
 
 
+def _existing_source_images(record: dict) -> list[str]:
+    """Source image paths that still exist on disk (uploads may be cleaned up)."""
+    return [p for p in record.get("source_images", []) if p and Path(p).exists()]
+
+
+def _first_source_image(record: dict) -> str | None:
+    """First source image that still exists, or None if all are missing."""
+    imgs = _existing_source_images(record)
+    return imgs[0] if imgs else None
+
+
 def load_character(char_id: str) -> dict:
     p = _char_path(char_id)
     if not p.exists():
@@ -133,7 +144,7 @@ def regenerate_persona(char_id: str) -> dict:
             record["import_source"], lang, user_hint=user_hint)
     else:
         uris = [api_client.file_to_data_uri(p)
-                for p in record.get("source_images", [])]
+                for p in _existing_source_images(record)]
         messages = prompts.build_persona_messages(uris, lang, user_hint=user_hint)
     record["persona"] = api_client.chat_json(messages, temperature=0.85)
     record.pop("cover_spec", None)
@@ -553,7 +564,7 @@ def delete_character(char_id: str) -> bool:
 def build_identity(char_id: str) -> dict:
     record = load_character(char_id)
     uris = [api_client.file_to_data_uri(p)
-            for p in record.get("source_images", [])]
+            for p in _existing_source_images(record)]
     messages = prompts.build_identity_messages(record["persona"], uris)
     identity = api_client.chat_json(messages, temperature=0.5)
     record["identity"] = identity
@@ -632,8 +643,10 @@ def generate_cover(
     )
 
     image_urls = None
-    if use_reference and record.get("source_images"):
-        image_urls = [api_client.file_to_data_uri(record["source_images"][0])]
+    if use_reference:
+        src = _first_source_image(record)
+        if src:
+            image_urls = [api_client.file_to_data_uri(src)]
 
     save_path = config.IMAGE_DIR / f"{char_id}_cover_{style_id}.png"
     result = api_client.generate_image(
@@ -673,8 +686,10 @@ def _render_post_image(record: dict, post: dict, style: dict) -> dict:
     )
     save_path = config.IMAGE_DIR / f"{char_id}_{post['post_id']}.png"
     image_urls = None
-    if prompts.is_photographic_style(style["prompt"]) and record.get("source_images"):
-        image_urls = [api_client.file_to_data_uri(record["source_images"][0])]
+    if prompts.is_photographic_style(style["prompt"]):
+        src = _first_source_image(record)
+        if src:
+            image_urls = [api_client.file_to_data_uri(src)]
     res = api_client.generate_image(
         prompt,
         size=config.IMAGE_SIZE_POST,
@@ -871,20 +886,27 @@ def generate_landing(
         current_html=current_html,
     )
 
-    # multimodal: show the cover so the model can match colors / mood
+    # multimodal: show the cover + a few existing post images so the model can
+    # match colors / mood. 落地页只参考【生成的封面图】和【已有帖子图】，
+    # 都缺失就纯文字生成，绝不回退到上传源图。
     content: list[dict] = [{"type": "text", "text": user_text}]
-    ref = record.get("cover", {}).get(
+    ref_paths: list[str] = []
+    cover_lp = record.get("cover", {}).get(
         "local_path") if record.get("cover") else None
-    if ref and Path(ref).exists():
+    if cover_lp and Path(cover_lp).exists():
+        ref_paths.append(cover_lp)
+    # 取最近一批 IG 帖子里已生成的图，最多再补几张作为风格参考
+    ig = load_latest_ig(char_id) or {}
+    for post in (ig.get("posts", []) if isinstance(ig, dict) else []):
+        if len(ref_paths) >= 5:
+            break
+        lp = (post.get("image") or {}).get("local_path")
+        if lp and Path(lp).exists():
+            ref_paths.append(lp)
+    for p in ref_paths:
         content.append(
             {"type": "image_url",
-             "image_url": {"url": api_client.file_to_data_uri(ref)}}
-        )
-    elif record.get("source_images"):
-        content.append(
-            {"type": "image_url",
-             "image_url": {"url": api_client.file_to_data_uri(
-                 record["source_images"][0])}}
+             "image_url": {"url": api_client.file_to_data_uri(p)}}
         )
 
     messages = [
@@ -947,8 +969,9 @@ def _ref_image_uri_for_selfie(record: dict) -> str | None:
         return api_client.file_to_data_uri(cover["local_path"])
     if cover.get("url"):
         return cover["url"]
-    if record.get("source_images"):
-        return api_client.file_to_data_uri(record["source_images"][0])
+    src = _first_source_image(record)
+    if src:
+        return api_client.file_to_data_uri(src)
     return None
 
 
