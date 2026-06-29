@@ -119,21 +119,147 @@ def create_personas_from_images(image_paths: list[str], langs: list[str],
 
 
 def regenerate_persona(char_id: str) -> dict:
-    """只重新生成人设 schema：复用同一张源图、同语言、同补充要求，原地覆盖 persona。
+    """只重新生成人设 schema：复用同一来源（源图 或 导入的原始 JSON）、同语言、同补充要求，
+    原地覆盖 persona。
 
     不改图、不动 identity / cover / 帖子。用于批量重刷人设。
     """
     record = load_character(char_id)
-    uris = [api_client.file_to_data_uri(p)
-            for p in record.get("source_images", [])]
-    messages = prompts.build_persona_messages(
-        uris, record.get("lang", config.LANGUAGES[0]),
-        user_hint=record.get("user_hint", ""),
-    )
+    lang = record.get("lang", config.LANGUAGES[0])
+    user_hint = record.get("user_hint", "")
+    # 从原始 JSON 导入的角色：用同一份 import_source 重新扩写，保持忠实保留。
+    if record.get("import_source") is not None:
+        messages = prompts.build_persona_from_json_messages(
+            record["import_source"], lang, user_hint=user_hint)
+    else:
+        uris = [api_client.file_to_data_uri(p)
+                for p in record.get("source_images", [])]
+        messages = prompts.build_persona_messages(uris, lang, user_hint=user_hint)
     record["persona"] = api_client.chat_json(messages, temperature=0.85)
     record.pop("cover_spec", None)
     save_character(record)
     return record
+
+
+# --------------------------------------------------------------------------
+# Step 1 (alt): existing character JSON -> persona  (one record PER language)
+# --------------------------------------------------------------------------
+def _download_image(url: str) -> str | None:
+    """Download a remote image into UPLOAD_DIR. Returns local path or None."""
+    if not url or not isinstance(url, str) or not url.lower().startswith("http"):
+        return None
+    try:
+        resp = requests.get(url, timeout=120)
+        if not resp.ok or not resp.content:
+            return None
+    except requests.RequestException:
+        return None
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    ext = ".png"
+    for k, v in {"jpeg": ".jpg", "jpg": ".jpg", "png": ".png",
+                 "webp": ".webp", "gif": ".gif"}.items():
+        if k in ctype:
+            ext = v
+            break
+    dest = config.UPLOAD_DIR / f"import_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}{ext}"
+    try:
+        dest.write_bytes(resp.content)
+    except OSError:
+        return None
+    return str(dest)
+
+
+def _extract_image_url(source_obj: dict) -> str | None:
+    """Best-effort: find an image URL in an arbitrary source object."""
+    if not isinstance(source_obj, dict):
+        return None
+    for key in ("image_url", "imageUrl", "image", "avatar", "cover", "cover_url",
+                "photo", "picture", "img", "thumbnail"):
+        val = source_obj.get(key)
+        if isinstance(val, str) and val.lower().startswith("http"):
+            return val
+        if isinstance(val, list) and val and isinstance(val[0], str) \
+                and val[0].lower().startswith("http"):
+            return val[0]
+    return None
+
+
+def create_persona_from_json_one_lang(source_obj: dict, lang: str,
+                                      user_hint: str = "",
+                                      group_id: str | None = None,
+                                      source_image: str | None = None) -> dict:
+    """Create a single-language character from an existing source JSON object.
+
+    The original object is stored under `import_source` so the persona can be
+    re-expanded later. `source_image` (a local path, already downloaded) is
+    shared across all language variants of the same source object.
+    """
+    messages = prompts.build_persona_from_json_messages(
+        source_obj, lang, user_hint=user_hint)
+    persona = api_client.chat_json(messages, temperature=0.85)
+
+    char_id = _new_id("char")
+    record = {
+        "char_id": char_id,
+        "lang": lang,
+        "group_id": group_id or char_id,
+        "created": int(time.time()),
+        "source_images": [source_image] if source_image else [],
+        "user_hint": user_hint,
+        "import_source": source_obj,
+        "persona": persona,
+        "identity": None,
+        "cover": None,
+        "style_id": None,
+    }
+    save_character(record)
+    return record
+
+
+def create_personas_from_json_obj(source_obj: dict, langs: list[str],
+                                  user_hint: str = "",
+                                  download_image: bool = True) -> list[dict]:
+    """For one source object, create an independent native character per language.
+
+    All records from the same source share a `group_id` and (if available) the
+    same downloaded source image.
+    """
+    langs = [l for l in langs if l in config.LANGUAGES] or [config.LANGUAGES[0]]
+    group_id = _new_id("grp")
+    source_image = None
+    if download_image:
+        source_image = _download_image(_extract_image_url(source_obj) or "")
+
+    def _one(lang: str) -> dict:
+        return create_persona_from_json_one_lang(
+            source_obj, lang, user_hint=user_hint, group_id=group_id,
+            source_image=source_image)
+
+    records = []
+    with ThreadPoolExecutor(max_workers=min(len(langs), config.MAX_WORKERS)) as ex:
+        futures = {ex.submit(_one, l): l for l in langs}
+        for fut in as_completed(futures):
+            records.append(fut.result())
+    order = {l: i for i, l in enumerate(langs)}
+    records.sort(key=lambda r: order.get(r["lang"], 99))
+    return records
+
+
+def extract_source_objects(payload) -> list[dict]:
+    """Normalize an uploaded JSON payload into a flat list of character objects.
+
+    Accepts: a single object, a top-level array, or an object wrapping the list
+    under a common key ("data", "characters", "items", "list", "results").
+    """
+    if isinstance(payload, list):
+        return [o for o in payload if isinstance(o, dict)]
+    if isinstance(payload, dict):
+        for key in ("data", "characters", "items", "list", "results"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                return [o for o in val if isinstance(o, dict)]
+        return [payload]
+    return []
 
 
 def regenerate_opening(char_id: str, user_hint: str = "") -> dict:
@@ -214,10 +340,9 @@ def _image_bytes(image: dict | None) -> bytes | None:
     return None
 
 
-# Export-time brand substitution: replace the Korean national messenger
-# (KakaoTalk) and its derived terms with our own brand. Applied ONLY to the
-# exported text, never to the stored source data. Longer terms come first so
-# that e.g. "단톡방" is handled before the bare "톡".
+# Export-time brand substitution: replace real messenger/app brand names with
+# our own brand. Applied ONLY to the exported text, never to the stored source
+# data. Longer terms come first so that e.g. "단톡방" is handled before "톡".
 _BRAND_REPLACEMENTS = [
     ("KakaoTalk", "Popop"),
     ("Kakaotalk", "Popop"),
@@ -227,6 +352,16 @@ _BRAND_REPLACEMENTS = [
     ("단톡방", "Popop 단체방"),
     ("단톡", "Popop 단체"),
     ("카톡", "Popop"),
+    # other real messengers/apps -> Popop
+    ("WhatsApp", "Popop"),
+    ("Whatsapp", "Popop"),
+    ("WeChat", "Popop"),
+    ("微信", "Popop"),
+    ("Telegram", "Popop"),
+    ("텔레그램", "Popop"),
+    ("라인", "Popop"),
+    ("连我", "Popop"),
+    ("LINE", "Popop"),
 ]
 
 

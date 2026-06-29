@@ -45,7 +45,6 @@ _FIELD_LABELS = {
     "species": "species",
     "gender": "gender",
     "personality": "personality",
-    "value": "value",
     "hometown": "hometown",
     "residence": "residence",
     "social_status": "social_status",
