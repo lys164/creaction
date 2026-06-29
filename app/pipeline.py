@@ -351,34 +351,8 @@ def _image_bytes(image: dict | None) -> bytes | None:
     return None
 
 
-# Export-time brand substitution: replace real messenger/app brand names with
-# our own brand. Applied ONLY to the exported text, never to the stored source
-# data. Longer terms come first so that e.g. "단톡방" is handled before "톡".
-_BRAND_REPLACEMENTS = [
-    ("KakaoTalk", "Popop"),
-    ("Kakaotalk", "Popop"),
-    ("kakaotalk", "Popop"),
-    ("카카오톡", "Popop"),
-    ("보이스톡", "Popop 음성통화"),
-    ("단톡방", "Popop 단체방"),
-    ("단톡", "Popop 단체"),
-    ("카톡", "Popop"),
-    # other real messengers/apps -> Popop
-    ("WhatsApp", "Popop"),
-    ("Whatsapp", "Popop"),
-    ("WeChat", "Popop"),
-    ("微信", "Popop"),
-    ("Telegram", "Popop"),
-    ("텔레그램", "Popop"),
-    ("라인", "Popop"),
-    ("连我", "Popop"),
-    ("LINE", "Popop"),
-]
-
-
 def _apply_brand_replacements(text: str) -> str:
-    for old, new in _BRAND_REPLACEMENTS:
-        text = text.replace(old, new)
+    """Keep generated/exported brand names unchanged."""
     return text
 
 
