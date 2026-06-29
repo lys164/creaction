@@ -912,7 +912,7 @@ def generate_landing(
     ig = load_latest_ig(char_id) or {}
     post_imgs: list[dict] = []  # {local_path, url, caption}
     for post in (ig.get("posts", []) if isinstance(ig, dict) else []):
-        if len(post_imgs) >= 6:
+        if len(post_imgs) >= 3:
             break
         lp = (post.get("image") or {}).get("local_path")
         if lp and Path(lp).exists():
