@@ -398,6 +398,35 @@ def _inline_landing_cover(html: str, cover_url: str | None,
     return html
 
 
+def _inline_landing_posts(html: str, post_urls: list[str] | None) -> str:
+    """Inline each post image (referenced by its /img/<name> URL) as a data URI
+    and fill empty oc-post-N slots, so the exported page is self-contained."""
+    if not post_urls:
+        return html
+    for idx, url in enumerate(post_urls, start=1):
+        if not url:
+            continue
+        name = Path(url).name
+        p = config.IMAGE_DIR / name
+        if not p.exists():
+            continue
+        try:
+            b = p.read_bytes()
+        except OSError:
+            continue
+        data_uri = "data:image/png;base64," + base64.b64encode(b).decode()
+        # 1) replace any live /img/ reference the injector already baked in
+        html = html.replace(url, data_uri)
+        # 2) fill still-empty oc-post-N slots directly
+        html = landing.inject_post_images(html, _slot_fill(idx, data_uri))
+    return html
+
+
+def _slot_fill(idx: int, data_uri: str) -> list[str]:
+    """Build a sparse post_urls list that only sets slot `idx` (1-based)."""
+    return [""] * (idx - 1) + [data_uri]
+
+
 def _fill_empty_cover_divs(html: str, data_uri: str) -> str:
     """Inject background-image into empty <div class=oc-cover/oc-img-1> slots."""
     def _repl(m: "re.Match") -> str:
@@ -479,6 +508,8 @@ def _export_one_character(zf: zipfile.ZipFile, char_id: str, used_folders: set) 
     if landing_html:
         landing_html = _inline_landing_cover(
             landing_html, landing_page.get("cover_url"), cover_bytes)
+        landing_html = _inline_landing_posts(
+            landing_html, landing_page.get("post_urls"))
         landing_html = _apply_brand_replacements(landing_html)
         zf.writestr(f"{folder}/landing.html", landing_html)
     else:
@@ -876,6 +907,22 @@ def generate_landing(
     persona = record.get("persona", {})
     cover_url = _cover_url_for_landing(record)
 
+    # 收集最近一批 IG 帖子里【已生成且文件存在】的图，连同其文案，
+    # 既作为多模态设计参考，也作为页面里真实展示的相册素材（oc-post-N 槽位）。
+    ig = load_latest_ig(char_id) or {}
+    post_imgs: list[dict] = []  # {local_path, url, caption}
+    for post in (ig.get("posts", []) if isinstance(ig, dict) else []):
+        if len(post_imgs) >= 6:
+            break
+        lp = (post.get("image") or {}).get("local_path")
+        if lp and Path(lp).exists():
+            post_imgs.append({
+                "local_path": lp,
+                "url": f"/img/{Path(lp).name}",
+                "caption": _localized_text(
+                    post.get("content"), record.get("lang", config.LANGUAGES[0])),
+            })
+
     system_prompt = landing.build_system_prompt(style_text)
     user_text = landing.build_user_message(
         persona,
@@ -884,25 +931,19 @@ def generate_landing(
         request=request,
         style_text=style_text,
         current_html=current_html,
+        post_images=post_imgs,
     )
 
-    # multimodal: show the cover + a few existing post images so the model can
-    # match colors / mood. 落地页只参考【生成的封面图】和【已有帖子图】，
-    # 都缺失就纯文字生成，绝不回退到上传源图。
+    # multimodal: show the cover + the post images so the model can match
+    # colors / mood and lay out a real photo album. 落地页只参考【生成的封面图】
+    # 和【已有帖子图】，都缺失就纯文字生成，绝不回退到上传源图。
     content: list[dict] = [{"type": "text", "text": user_text}]
     ref_paths: list[str] = []
     cover_lp = record.get("cover", {}).get(
         "local_path") if record.get("cover") else None
     if cover_lp and Path(cover_lp).exists():
         ref_paths.append(cover_lp)
-    # 取最近一批 IG 帖子里已生成的图，最多再补几张作为风格参考
-    ig = load_latest_ig(char_id) or {}
-    for post in (ig.get("posts", []) if isinstance(ig, dict) else []):
-        if len(ref_paths) >= 5:
-            break
-        lp = (post.get("image") or {}).get("local_path")
-        if lp and Path(lp).exists():
-            ref_paths.append(lp)
+    ref_paths.extend(pi["local_path"] for pi in post_imgs)
     for p in ref_paths:
         content.append(
             {"type": "image_url",
@@ -915,7 +956,9 @@ def generate_landing(
     ]
     raw = api_client.chat(messages, temperature=0.85, max_tokens=32000)
     html = landing.clean_html(raw)
+    post_urls = [pi["url"] for pi in post_imgs]
     saved_html = landing.inject_cover(html, cover_url)
+    saved_html = landing.inject_post_images(saved_html, post_urls)
 
     page_id = _new_id("page")
     page = {
@@ -926,9 +969,10 @@ def generate_landing(
         "style_text": style_text,
         "request": request,
         "cover_url": cover_url,
+        "post_urls": post_urls,
         # raw (slots empty) — preview injects client-side
         "html": html,
-        "html_filled": saved_html,  # cover URL baked in for standalone use
+        "html_filled": saved_html,  # cover + post URLs baked in for standalone use
     }
     # 单角色只保留最新一份，重新生成直接覆盖
     (_landing_dir(char_id) / "landing_latest.json").write_text(
@@ -951,6 +995,9 @@ def load_latest_landing(char_id: str) -> dict | None:
     cover_url = page.get("cover_url")
     if raw and cover_url:
         page["html_filled"] = landing.inject_cover(raw, cover_url)
+    if raw and page.get("post_urls"):
+        base = page.get("html_filled") or raw
+        page["html_filled"] = landing.inject_post_images(base, page["post_urls"])
     return page
 
 

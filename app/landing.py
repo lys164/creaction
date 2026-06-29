@@ -205,7 +205,8 @@ def _opening_text(persona: dict) -> str:
 def build_user_message(persona: dict, lang: str, has_cover: bool,
                        request: str = "", style_text: str | None = None,
                        current_html: str | None = None,
-                       moments: list[dict] | None = None) -> str:
+                       moments: list[dict] | None = None,
+                       post_images: list[dict] | None = None) -> str:
     """Assemble the structured user turn (character info + directive + request)."""
     name = _stringify(persona.get("name")) or "(未命名角色)"
     profile = _stringify(persona.get("profile"))
@@ -226,10 +227,26 @@ def build_user_message(persona: dict, lang: str, has_cover: bool,
     if has_cover:
         info += (
             "cover: 角色有封面图（渲染器会自动注入到 class=\"oc-cover\" 的元素中，"
-            "你只需留好槽位，src 留空）"
+            "你只需留好槽位，src 留空）\n"
         )
     else:
-        info += "cover: 无封面图（请用 CSS 渐变/纹理生成抽象视觉占位）"
+        info += "cover: 无封面图（请用 CSS 渐变/纹理生成抽象视觉占位）\n"
+    if post_images:
+        n = len(post_images)
+        lines = [
+            f"\n# TA 的 {n} 张真实帖子照片（已作为图片发给你，可见）：这些是 TA 社交动态里"
+            f"真实拍的照片，**强烈建议**做成相册 / 九宫格 / 动态流 / 拼贴等模块真实展示出来，"
+            f"让页面更有「TA 的生活」实感。",
+            "槽位规则：第 i 张帖子图请放进 class=\"oc-post-i\" 的元素（i 从 1 开始），"
+            "用法同封面——`<img class=\"oc-post-1\" src=\"\" alt=\"...\">` 留空 src，"
+            "或 `<div class=\"oc-post-1\" style=\"background-size:cover;background-position:center;"
+            "width:...;height:...\"></div>`，渲染器会自动注入真实图片。容器务必设明确宽高。",
+            "各帖子图对应的动态内容（供你判断如何编排，不必原样写进页面）：",
+        ]
+        for i, pi in enumerate(post_images, start=1):
+            cap = (pi.get("caption") or "").strip().replace("\n", " ")
+            lines.append(f"  oc-post-{i}: {cap[:60]}" if cap else f"  oc-post-{i}: （无文字）")
+        info += "\n".join(lines) + "\n"
     parts.append(info)
 
     moment_text = moments_to_profile_text(moments)
@@ -333,4 +350,47 @@ def inject_cover(html: str, cover_url: str | None) -> str:
         _div_bg,
         html,
     )
+    return html
+
+
+def inject_post_images(html: str, post_urls: list[str] | None) -> str:
+    """Fill oc-post-N slots (1-based) with each post image URL.
+
+    Mirrors inject_cover: handles both <img class="oc-post-N"> (fill src) and
+    <div class="oc-post-N"> shown via CSS background-image. URLs may be public
+    /img/ paths (live preview) or data URIs (standalone export).
+    """
+    if not post_urls:
+        return html
+
+    for idx, url in enumerate(post_urls, start=1):
+        if not url:
+            continue
+        cls = f"oc-post-{idx}"
+
+        def _img_src(m):
+            tag = m.group(0)
+            if re.search(r'\bsrc\s*=\s*["\'][^"\']+["\']', tag):
+                return tag
+            return tag[:-1] + f' src="{url}">'
+
+        html = re.sub(
+            rf'<img\b[^>]*\bclass=["\'][^"\']*{cls}(?![\w-])[^"\']*["\'][^>]*>',
+            _img_src, html,
+        )
+
+        def _div_bg(m):
+            tag = m.group(0)
+            if "background-image" in tag.lower():
+                return tag
+            style = f"background-image:url('{url}');"
+            sm = re.search(r'style\s*=\s*"([^"]*)"', tag)
+            if sm:
+                return tag[:sm.start(1)] + sm.group(1) + ";" + style + tag[sm.end(1):]
+            return tag[:-1] + f' style="{style}">'
+
+        html = re.sub(
+            rf'<div\b[^>]*\bclass=["\'][^"\']*{cls}(?![\w-])[^"\']*["\'][^>]*>',
+            _div_bg, html,
+        )
     return html
