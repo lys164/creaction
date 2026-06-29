@@ -15,55 +15,92 @@ LANG_NAMES = config.LANGUAGE_NAMES
 # 性格写作铁律：让 personality 各字段第三人称、简短具体、互不重复、连成因果链。
 PERSONALITY_RULES = """
 # 🎭 personality 写作铁律（无论输出哪种语言都适用）
-personality 这一组字段是同一个人的不同侧面，必须当成【一条显式因果链】来写，互相咬合、自洽立体。
+personality 这一组字段是同一个人的不同侧面，要当成【一条显式因果链】来写，互相咬合、自洽立体。
 
-⚠️ 动笔前先做一个判断：**这个角色到底有没有清晰的人生转折点 + 内在矛盾结构？**
-- 如果有（如被背叛/创伤/双重生活/隐藏野心这类有戏剧张力的角色）→ 写完整因果链（见下）。
-- 如果没有（性格平实、松弛、阳光的日常型角色，本就没有什么决定性创伤）→ **只写 summary 一个字段**，decisive_event 及之后全部留空或省略。这是完全合法且常见的输出，**绝不要为了填满字段而硬编一个并不存在的戏剧性转折**——硬凑的转折比留空更糟。
+⚠️ 动笔前先想清楚：**这个人的性格是从哪里长出来的？** 每个人的性格都有源头，但源头【可正可负，不一定是创伤】：
+- 正面源头：被无条件爱着、有个让 TA 笃定的榜样、长期沉浸在某件热爱里、某段安稳关系给了底气……→ 长出开放、慷慨、松弛、笃定这类底色。
+- 负面源头：被背叛、被忽视、重大失败或缺失……→ 长出防御、疏离、讨好、掌控这类底色。
+- 平实日常型：性格平和松弛，本就没有戏剧性转折。
 
-确实要写因果链时，请严格按这条链推导，后一环必须由前一环长出来：
+据此分两种写法：
+- 有清晰源头（正面或负面都算）→ 写完整因果链（见下）。
+- 性格平实、没有明显转折 → **只写 summary 一个字段**，decisive_event 及之后留空或省略。这是合法且常见的输出，**绝不要为了填满字段而硬编一个创伤或戏剧性转折**——硬凑比留空更糟，也不要默认往创伤上靠。
 
-  decisive_event（一个能拍成画面的具体场景，不是概括）
-    → response（这件事之后形成的表面应对方式 = 他以为的自己 / 表面性格）
-    → cost（这套应对带来的反噬 = 核心矛盾）
-    → desire_outer（他嘴上声称要的，通常是 response 的自我合理化）
-    ↔ desire_inner（他真正缺的，与 desire_outer 相反相成，是 decisive_event 真正夺走的那块）
+确实要写因果链时，按这条链推导，后一环必须由前一环长出来（链条对正/负源头都成立）：
+
+  decisive_event（塑造 TA 性格的关键经历/关系/场景，能拍成画面、不是概括；可正可负）
+    → response（由此长出的稳定性格底色 / 行为方式 = TA 现在示人的样子）
+    → cost（这套底色的另一面 / 盲区 / 代价——任何性格都有看不到的一面：正面源头也有，如无条件信任→易被占便宜、笃定→听不进劝）
+    → desire_outer（他嘴上声称要的）
+    ↔ desire_inner（他真正要的 / 真正缺的，与 desire_outer 相反相成）
 
 铁律：
 1) personality 全部字段用【第三人称】描述这个角色（他/她/它），绝对禁止第一人称「我」。
 2) 每个字段只说一件事：一句短话，具体、可感、像能指着说的事实；
    禁止抽象套话、形容词堆砌、文学性铺陈、无意义的废镜头。
 3) 字段之间禁止重复：同一件事、同一个特质只能出现在一个字段里，别处不再复述。
-4) summary 只点出「表面 vs 内里」的反差，简短，不要把下面其它字段的内容再讲一遍。
-5) decisive_event、cost 要写出具体后果，不要停在情绪。
-6) desire_outer 与 desire_inner 必须形成明显反差（声称要的 ↔ 真正缺的），不能是同一个意思的两种说法。
-7) 【可选输出】只有 summary 是必填。如果角色本身没有清晰的人生转折点、没有明显的内在矛盾结构（性格平实、松弛的日常型角色），就只写 summary，把 decisive_event 及之后的字段留空字符串或省略——不要为了填满字段而硬编一个戏剧性转折。一旦决定写，就必须从 decisive_event 开始连成完整因果链，不能只填中间几个。"""
+4) summary 只点出这个人最鲜明的底色与张力（可以是反差，也可以是某种笃定/热爱/松弛），简短，不要把下面其它字段的内容再讲一遍。
+5) decisive_event、cost 要写出具体后果或影响，不要停在情绪；decisive_event 可正可负，别默认往创伤写。
+6) desire_outer 与 desire_inner 必须形成明显反差（声称要的 ↔ 真正要的），不能是同一个意思的两种说法。
+7) 【可选输出】只有 summary 是必填。如果角色性格平实、没有明显的人生转折点（松弛的日常型角色），就只写 summary，把 decisive_event 及之后的字段留空字符串或省略——不要为了填满字段而硬编一个戏剧性转折或创伤。一旦决定写，就必须从 decisive_event 开始连成完整因果链，不能只填中间几个。"""
 
 PERSONALITY_RULES_KO = """
 # 🎭 personality 작성 원칙
-personality 하위 필드는 한 사람의 서로 다른 단면이므로 반드시 하나의 선명한 인과 사슬로 이어져야 한다.
+personality 하위 필드는 한 사람의 서로 다른 단면이므로 하나의 선명한 인과 사슬로 이어지게 쓴다.
 
-⚠️ 쓰기 전에 먼저 판단하라: **이 캐릭터에게 뚜렷한 인생 전환점 + 내적 모순 구조가 있는가?**
-- 있으면(배신/트라우마/이중생활/숨은 야심 같은 드라마성 캐릭터) → 완전한 인과 사슬을 쓴다(아래 참고).
-- 없으면(담백하고 느슨한, 밝은 일상형 캐릭터로 애초에 결정적 상처가 없음) → **summary 한 필드만 쓰고** decisive_event 이하는 전부 비워두거나 생략한다. 이는 완전히 정상이고 흔한 출력이며, **칸을 채우려고 없는 드라마를 억지로 지어내지 말 것** — 억지 전환점은 빈칸보다 나쁘다.
+⚠️ 쓰기 전에 먼저 생각하라: **이 사람의 성격은 어디서 자라났는가?** 모든 사람의 성격에는 뿌리가 있지만, 그 뿌리는 【긍정일 수도 부정일 수도 있고, 꼭 트라우마는 아니다】:
+- 긍정적 뿌리: 무조건적인 사랑을 받음, 확신을 준 롤모델, 오래 빠져든 무언가, 안정된 관계가 준 든든함 → 개방적·너그러움·느긋함·확신 같은 바탕색.
+- 부정적 뿌리: 배신, 방치, 큰 실패나 결핍 → 방어·거리두기·눈치보기·통제 같은 바탕색.
+- 담백한 일상형: 성격이 평온하고 느슨해 애초에 드라마틱한 전환점이 없음.
 
-인과 사슬을 쓰기로 했다면, 뒤 필드는 앞 필드에서 자연스럽게 생겨나야 한다:
+이에 따라 두 가지로 쓴다:
+- 뚜렷한 뿌리가 있으면(긍정이든 부정이든) → 완전한 인과 사슬을 쓴다(아래).
+- 성격이 담백하고 뚜렷한 전환점이 없으면 → **summary 한 필드만 쓰고** decisive_event 이하는 비우거나 생략. 정상이고 흔한 출력이며, **칸을 채우려고 트라우마나 드라마를 억지로 지어내지 말 것** — 억지는 빈칸보다 나쁘고, 기본값으로 트라우마에 기대지 말 것.
 
-  decisive_event(카메라로 찍을 수 있는 구체적 장면, 추상 요약 금지)
-    → response(그 일 이후 생긴 대응 방식 = 겉성격 / 본인이 믿는 자기 모습)
-    → cost(그 대응 방식이 만든 역풍 = 핵심 모순)
-    → desire_outer(겉으로 원한다고 말하는 것, 보통 response의 자기합리화)
-    ↔ desire_inner(진짜 결핍, decisive_event가 진짜로 앗아간 것이면서 desire_outer와 대비되는 것)
+인과 사슬을 쓰기로 했다면, 뒤 필드는 앞 필드에서 자연스럽게 생겨난다(이 사슬은 긍정/부정 뿌리 모두에 성립):
+
+  decisive_event(성격을 빚은 핵심 경험/관계/장면, 카메라로 찍을 수 있고 추상 요약 금지, 긍정도 부정도 가능)
+    → response(거기서 자라난 안정된 성격 바탕색 / 행동 방식 = 지금 보여주는 모습)
+    → cost(그 바탕색의 이면 / 사각지대 / 대가 — 어떤 성격에도 안 보이는 면은 있다: 긍정적 뿌리에도 있다, 예: 무조건 믿음→이용당하기 쉬움, 확신→조언을 안 들음)
+    → desire_outer(겉으로 원한다고 말하는 것)
+    ↔ desire_inner(진짜 원하는 것 / 진짜 결핍, desire_outer와 대비)
 
 원칙:
 1) personality의 모든 필드는 캐릭터를 3인칭으로 설명한다. 1인칭 "나/저" 금지.
 2) 각 필드는 한 가지 사실만 짧고 구체적으로 쓴다. 손에 잡히는 사실처럼 써라.
    추상적 성격어 나열, 과한 문학체, 번역투 금지.
 3) 필드 간 반복 금지. 같은 사건이나 같은 특질을 여러 칸에서 되풀이하지 않는다.
-4) summary는 겉모습과 속내의 대비만 짧게 짚고, 아래 필드 내용을 다시 요약하지 않는다.
-5) decisive_event와 cost는 감정에서 멈추지 말고 실제 결과까지 쓴다.
+4) summary는 이 사람의 가장 선명한 바탕색과 긴장(반전일 수도, 확신·열정·느긋함일 수도)을 짧게 짚고, 아래 필드 내용을 다시 요약하지 않는다.
+5) decisive_event와 cost는 감정에서 멈추지 말고 실제 결과나 영향까지 쓴다. decisive_event는 긍정/부정 모두 가능하며 기본값으로 트라우마에 기대지 않는다.
 6) desire_outer와 desire_inner는 확실히 대비되어야 한다.
-7) 【선택 출력】필수는 summary 하나뿐이다. 캐릭터에게 뚜렷한 인생 전환점이나 내적 모순 구조가 없으면(담백하고 일상적인 캐릭터) summary만 쓰고 decisive_event 이하 필드는 빈 문자열로 두거나 생략한다 — 칸을 채우려고 억지로 드라마를 지어내지 말 것. 쓰기로 했다면 decisive_event부터 완전한 인과 사슬로 이어야 하고, 중간 몇 개만 채우면 안 된다."""
+7) 【선택 출력】필수는 summary 하나뿐이다. 성격이 담백하고 뚜렷한 전환점이 없으면(느슨한 일상형 캐릭터) summary만 쓰고 decisive_event 이하 필드는 빈 문자열로 두거나 생략한다 — 칸을 채우려고 드라마나 트라우마를 억지로 지어내지 말 것. 쓰기로 했다면 decisive_event부터 완전한 인과 사슬로 이어야 하고, 중간 몇 개만 채우면 안 된다."""
+
+
+# 通用输出要求（除 profile/tags/anonymous_identities 外的字段都适用）。
+# 抽成共享常量，供图片链路与 JSON 导入链路、zh/ko 各分支统一引用，避免多处重复、改漏。
+OUTPUT_QUALITY_RULES = """- 【具体·平实——非常重要】除 profile、tags、anonymous_identities 外，所有字段禁止抽象、概念化的语言。
+  不要用比喻、标签、心理抽象词去糊弄（如“绝对静止的旁观者”“把世界当低像素游戏”“病态的渴求”），
+  要落到能感知的具体事实、行为、细节；要用比喻就拆成大白话，写清 TA 实际会做什么。每句读完脑子里要能浮现画面。
+  例）“把物理世界当成一场与自己无关的低像素游戏，变成绝对静止的旁观者”（✗）
+   →  “觉得别人的事都跟自己没关系，不插手、习惯远远地当个冷漠旁观者”（✓）
+- 【简单直接——非常重要】能用短话说清就别啰嗦：大白话、短句，把事实/细节直接讲出来，
+  不绕弯、不堆套话、不为显得高级而加修饰。先说清楚，再尽量短。禁止形容词堆砌、翻译腔、书面腔。
+- situational_reactions 是【选填字段】：只给反应明显异于常人的角色写（兽人/非人类/特殊心理状态）；
+  普通人只是性格差异导致表现不同，就省略该键或留空。要写时写身体动作、不写情绪名词。
+- 【品牌统一】任何字段需要提到真实品牌（通讯软件/APP如 LINE/KakaoTalk/微信/WhatsApp/IG、咖啡店、服饰、化妆品等）时，一律用虚构品牌“Popop”，不写真实品牌名。
+- 越具体、越不可推导越好，避免空洞套话与翻译腔。"""
+
+OUTPUT_QUALITY_RULES_KO = """- 【구체·평이 — 매우 중요】profile, tags, anonymous_identities를 제외한 모든 필드는 추상적·개념적 표현 금지.
+  비유·라벨·심리 추상어로 때우지 말고(예: “절대 정지된 관찰자”, “저화질 게임처럼”, “병적인 갈망”),
+  손에 잡히는 구체적 사실·행동·디테일로 쓴다. 비유를 쓰려면 평범한 말로 풀어 실제로 뭘 하는지 적는다. 한 문장을 읽으면 장면이 그려져야 한다.
+  예) “물리 세계를 자기와 무관한 저화질 게임처럼 보는 절대 정지 관찰자” (X)
+   →  “남 일은 다 자기랑 상관없다고 여기고, 끼어들지 않고 멀찍이 지켜보는 데 익숙하다” (O)
+- 【간결·직설 — 매우 중요】짧게 말할 수 있으면 장황하게 쓰지 말 것: 쉬운 말, 짧은 문장으로 사실·디테일을 바로 전한다.
+  돌려 말하지 말고, 상투어 나열·멋 부린 수식 금지. 먼저 분명히, 그다음 최대한 짧게. 형용사 나열·번역투·문어체 금지.
+- situational_reactions는 【선택 필드】: 수인·비인간·특수 심리처럼 반응이 일반인과 뚜렷이 다를 때만 쓰고,
+  평범한 성격 차이면 생략하거나 빈 값으로 둔다. 쓸 땐 감정 명사 대신 몸의 움직임·행동으로.
+- 【브랜드 통일】어떤 필드든 실존 브랜드(메신저·앱: LINE/라인/카카오톡/위챗/왓츠앱/인스타 DM 등, 카페·의류·화장품 포함)를 언급할 땐 전부 가상 브랜드 "Popop"으로 쓰고 실존 브랜드명을 쓰지 않는다.
+- 구체적이고 쉽게 추론되지 않는 디테일을 우선한다. 빈말 금지."""
 
 
 def _lang_clause() -> str:
@@ -126,6 +163,7 @@ def _opening_rules(lang: str) -> str:
   · 【진짜 채팅 같은 질감】: 짧은 문장 연발, 반복 추궁, 반 토막 말, 주어 생략, 말끝 흐림, 초성, 가끔 감탄사. 긴 문장·문어체 명문·설명문 금지. 말풍선 그 자체로만, 지문·행동 묘사·괄호 연기 금지. 밈·유행어는 한 스푼만, 시크하거나 내향적인 캐릭터는 거의 안 쓴다.
   · 【설명 늘어놓기 금지】: 사용자가 알 수 없는 고유 정보를 메시지에 우겨 넣지 않는다. 관계나 전사가 필요하면 note가 담당한다.
   · 사용자 지칭은 {{user}} 또는 2인칭 "너", 임의 이름이나 "유저 {{user}}" 식 겹쳐쓰기 금지.
+  · 【브랜드 통일】실존 브랜드명을 쓰지 말 것 — 특히 메신저·앱(LINE/라인/카카오톡/카톡/왓츠앱/위챗/인스타 DM/텔레그램 등)을 포함해 카페·옷·화장품 등 어떤 브랜드든 전부 가상 브랜드 "Popop"으로 쓴다. note도 마찬가지("LINE 메시지" → "Popop 메시지").
   · 【현지 타자 습관】: 한국인이 폰으로 치듯이 — {im_style}
   · 【마지막은 사용자에게 공 넘기기】: 답하고 싶어지는 한 방으로 끝낸다(근황 묻기 / 밈 던지기 / 위로·칭찬 구하기 / 떠보기 / 양자택일 / 어리광 / 말 끊고 궁금하게 / 가벼운 도발 / 조언 구하기 / 불쌍한 척…). 꼭 물음표가 아니어도, 반 토막 말이나 짧은 감탄이 반응을 부르면 된다."""
     return f"""opening 是角色【主动发出】的第一段手机聊天，由 note（关系背景说明）+ messages（角色发来的聊天气泡）组成。
@@ -150,6 +188,7 @@ def _opening_rules(lang: str) -> str:
   · 【只围绕"此刻这一件事"】：几条消息是同一个当下时刻、同一件事的连发，像一个人盯着手机就这件事说下去；不要每条蹦一个互不相干的话题。
   · 【真实聊天感】：短句连发、可重复追问、半句话、省略主语、带语气词；不要长句、书面金句、解说式长段。就是聊天气泡本身，禁止旁白、动作描写、括号表演。
   · 【不要报菜名】：不在消息里塞用户无从知晓的专有信息当包袱；要交代关系/前情那是 note 的活。
+  · 【品牌统一】不要写真实品牌名——尤其是通讯软件/APP（LINE/连我/KakaoTalk/微信/WhatsApp/IG 私信/Telegram 等），以及咖啡店/衣服/化妆品等任何品牌，一律用虚构品牌"Popop"。note 同样适用（"发了一条 LINE 消息"→"发了一条 Popop 消息"）。
   · 【本地打字习惯】像 {lname} 母语者真实在手机上打字：{im_style}
   · 【结尾把球递给用户】最后落点让用户忍不住想回一句，按角色性格挑最自然的方式（追问 / 抛梗 / 求安慰 / 讨态度 / 选择题 / 撒娇 / 吊胃口 / 小赌气 / 求主意 / 装可怜……）；不必是问句，半句话或一个短词能勾起回应即可。"""
 
@@ -160,7 +199,7 @@ def _opening_rules(lang: str) -> str:
 
 # Fields that must be localized into all 4 languages (object {zh,ja,ko,en}).
 PERSONA_LOCALIZED_FIELDS = [
-    "name", "profile", "appearance", "value", "hometown", "residence",
+    "name", "profile", "appearance", "hometown", "residence",
     "social_status", "speech_style", "relationship_with_user",
     "love_style", "situational_reactions",
     "hidden_side", "likes", "fears", "backstory",
@@ -209,10 +248,10 @@ def _persona_schema_doc(lang: str = "zh", voice_block: str = "", tag_presets: st
   "visibility": "공개 범위 / 필수 단일값: public 또는 private. 이 캐릭터가 피드·검색·매칭에서 발견될지 정하는 운영 필드이며, 기본은 public",
   "voice": "음색 / 채팅 전 떠올릴 첫 청각 인상. 성별, 나이대, 성격의 온도, 말투와 어울리는 모델 ID 하나만 선택. 선택 가능한 모델: {{VOICE_CHOICES}}",
   "personality": {
-    "summary": "성격 요약 / 200자 이하. 겉모습과 내면의 대비가 보이게. ⚠️필수는 이것 하나뿐",
-    "decisive_event": "(선택) 가치관을 바꾼 구체적인 어느 날의 장면. 카메라로 찍을 수 있는 사건이어야 하며 추상 요약 금지. 인생에 뚜렷한 전환점이 없는 캐릭터면 빈 문자열로 두거나 키를 생략",
-    "response": "(선택) 그 사건 이후 생긴 대응 방식(겉성격 / 본인이 믿는 자기 모습). decisive_event가 없으면 비움",
-    "cost": "(선택) 그 대응 방식의 대가와 역풍(핵심 모순). decisive_event가 없으면 비움",
+    "summary": "성격 요약 / 200자 이하. 이 사람의 가장 선명한 바탕색과 긴장(반전·확신·열정·느긋함 등)이 보이게. ⚠️필수는 이것 하나뿐",
+    "decisive_event": "(선택) 성격을 빚은 핵심 경험/관계/어느 날의 장면. 카메라로 찍을 수 있어야 하고 추상 요약 금지. 긍정(무조건적 사랑·롤모델·열정)도 부정(배신·결핍)도 가능하며 기본값으로 트라우마에 기대지 말 것. 뚜렷한 전환점이 없으면 빈 문자열로 두거나 키 생략",
+    "response": "(선택) 그 경험에서 자라난 안정된 성격 바탕색 / 행동 방식(지금 보여주는 모습). decisive_event가 없으면 비움",
+    "cost": "(선택) 그 바탕색의 이면 / 사각지대 / 대가. 긍정적 뿌리에도 이면은 있다(무조건 믿음→이용당함 등). decisive_event가 없으면 비움",
     "desire_outer": "(선택) 겉으로 원한다고 말하는 것",
     "desire_inner": "(선택) 진짜로 부족한 것 / 진짜 원하는 것",
     "desire_bottom_line": "(선택) 기꺼이 내줄 수 있는 것 / 절대 내줄 수 없는 것",
@@ -228,7 +267,6 @@ def _persona_schema_doc(lang: str = "zh", voice_block: str = "", tag_presets: st
     ]
   },
   "appearance": "외모·스타일 / 200자 이하. 사용자가 머릿속에 바로 그릴 수 있는 시각적 기억점. 얼굴·체형·분위기·시그니처 착장뿐 아니라 감정이 흔들릴 때 드러나는 몸의 변화까지 잡는다",
-  "value": "가치관 / 캐릭터가 선택을 내릴 때 반복해서 따르는 내면 기준. 말보다 행동으로 드러날 원칙과 절대 양보하지 않는 선이 보이게 쓴다",
   "hometown": "출신지 / 한 줄로 짧게. 어느 지역 출신인지 정도만 적어 말투·기질의 뿌리가 되게 한다. 가족사·성장 서사·성격 변화까지 풀어 쓰지 말 것 — 그건 backstory가 담당한다",
   "residence": "거주지 / 현재 삶의 리듬과 외로움, 소비 수준, 만날 수 있는 장면을 만드는 공간. 한국 독자가 바로 그림이 그려지는 동네와 주거 형태로 쓴다",
   "social_status": "직업·계층 / 캐릭터가 사회에서 어떤 위치로 소비되고 버티는지 보여주는 축. 매일 실제로 하는 일, 그 일이 주는 의미, 수입·주거·소비 감각까지 연결해 쓴다",
@@ -236,7 +274,7 @@ def _persona_schema_doc(lang: str = "zh", voice_block: str = "", tag_presets: st
   "relationship_with_user": "{user}와의 관계 / {user}가 왜 이 캐릭터와 대화할 수 있는지 만드는 접점. 알게 된 계기, 현재 거리감, 서로에게 허용된 행동 범위를 구체적으로 쓴다. 사용자를 지칭해야 하면 반드시 {user}라는 자리표시자를 그대로 쓴다",
   "relationship_mode": "사회적 모드 / 상대에 따라 달라지는 얼굴을 보여주는 관계 지도. 낯선 사람, 친구, 가족, 일 관계, {user} 앞에서 각각 어떤 방어와 진심이 드러나는지 나눠 쓴다. 사용자를 지칭해야 하면 반드시 {user}를 쓴다",
   "love_style": "사랑 표현 방식 / 가까워질수록 {user}에게 어떤 방식으로 마음을 증명하고 흔들리는지 보여주는 친밀감 규칙. 챙김, 애착, 질투, 갈등 처리, 취약점, 속도, 접촉 경계, 말투 변화를 연결한다. 사용자를 지칭해야 하면 반드시 {user}를 쓴다",
-  "situational_reactions": "상황별 반응 / 감정 명사 대신 행동으로 쓰기. 각 상황에서 ①수동 반응 ②먼저 하는 행동이 보이게",
+  "situational_reactions": "상황별 반응 / (선택) 수인·비인간·특수 심리처럼 일반인과 뚜렷이 다른 반응 패턴이 있을 때만 쓴다. 평범한 성격 차이 수준이면 생략하거나 빈 값. 쓸 땐 감정 명사 대신 행동으로: 각 상황에서 ①수동 반응 ②먼저 하는 행동",
   "hidden_side": "반전 매력 / 평소 억누르거나 숨기는 자아 + 드러나는 계기 + 드러날 때 상태 변화. 사용자가 해금하고 싶어지는 후크",
   "life_details": ["생활 습관 / 정적인 입자감이 있는 디테일. 친한 사람만 아는 습관, 입버릇, 절대 안 하는 일, 시그니처 동작, 자기 전·취했을 때·혼자 있을 때 모습"],
   "likes": ["좋아하는 것 / 캐릭터가 무방비해지거나 오래 말할 수 있는 취향. 한국 일상 감각에 맞는 구체적 대상과 상황으로 쓴다"],
@@ -276,10 +314,10 @@ def _persona_schema_doc(lang: str = "zh", voice_block: str = "", tag_presets: st
   "visibility": "角色可见性 / 必填单选：public 或 private。它决定角色是否进入 Feed、搜索和匹配等发现入口；默认 public",
   "voice": "音色 / 用户在聊天前形成的第一听觉想象。根据性别、年龄感、性格温度和语言习惯，只选择一个匹配的模型ID。可选模型：{{VOICE_CHOICES}}",
   "personality": {
-    "summary": "角色性格 / 创作端原始输入，≤200字纯文本概述。⚠️只有这一个是必填",
-    "decisive_event": "(选填) 具体某天某场景、改变价值观的事，必须是能拍成画面的镜头，不是概括。如果角色没有明确的人生转折点，就留空字符串或省略该键",
-    "response": "(选填) 这件事之后形成的应对方式（=表面性格 / 也是他以为的自己）。没有 decisive_event 就留空",
-    "cost": "(选填) 这套方式的代价/反噬（=核心矛盾）。没有 decisive_event 就留空",
+    "summary": "角色性格 / 创作端原始输入，≤200字纯文本概述。点出这个人最鲜明的底色与张力（反差/笃定/热爱/松弛皆可）。⚠️只有这一个是必填",
+    "decisive_event": "(选填) 塑造 TA 性格的关键经历/关系/某天某场景，必须能拍成画面、不是概括。可正可负（无条件被爱·榜样·热爱 ↔ 被背叛·缺失），别默认往创伤写。如果性格平实、没有明确转折点，就留空字符串或省略该键",
+    "response": "(选填) 由这段经历长出的稳定性格底色 / 行为方式（= TA 现在示人的样子）。没有 decisive_event 就留空",
+    "cost": "(选填) 这套底色的另一面 / 盲区 / 代价。正面源头也有（无条件信任→易被占便宜）。没有 decisive_event 就留空",
     "desire_outer": "(选填) 他声称要的",
     "desire_inner": "(选填) 他真正缺/真正要的",
     "desire_bottom_line": "(选填) 愿付什么 / 绝不付什么",
@@ -290,7 +328,6 @@ def _persona_schema_doc(lang: str = "zh", voice_block: str = "", tag_presets: st
     "messages": [{"type": "text 或 voice（多数为 text，voice 偶尔）", "data": {"content": "单条开场白，≤200字，2~5条。基于已确定的性格、关系和语言习惯，让角色主动发出自然连续的聊天气泡；voice 时把想要的情绪/语气/音量/语速用【和正文同语种的自然语言】简短写在方括号 [ ] 里。需要称呼/指代用户时，用字面量 {user} 或'你'，不要编用户姓名"}}]
   },
   "appearance": "外貌穿搭 / 选填，≤200字。它是用户在脑中想起角色时的视觉记忆点。抓长相、体型、气质、招牌穿着，也写出情绪被牵动时身体会怎么变",
-  "value": "价值观 / 角色做选择时反复遵循的内在准则。要写出他用行动维护什么、绝不让步什么，而不只是抽象品德词",
   "hometown": "出身地 / 角色语言习惯、生活感、家庭氛围和阶层感的根。要具体到能支撑方言、成长经验和地域气质",
   "residence": "居住地 / 角色当前生活节奏、孤独感、消费水平和可发生场景的空间。要写到用户能想象他每天在哪里醒来、去哪里生活",
   "social_status": "职业/阶层 / 角色在社会里如何被使用、被评价、也如何自我支撑。写清每天实际做什么、这件事对他意味着什么，以及收入、住处、消费带来的阶层感",
@@ -298,7 +335,7 @@ def _persona_schema_doc(lang: str = "zh", voice_block: str = "", tag_presets: st
   "relationship_with_user": "和 {user} 的关系 / 它解释 {user} 为什么能和这个角色聊天。写清相识契机、当前距离感、双方被允许的互动边界和相处模式。凡是需要指代用户，一律输出字面量 {user}，不要写具体姓名，也不要只写‘用户/你’",
   "relationship_mode": "社交模式 / 这是角色面对不同对象时切换面具的关系地图。分别写陌生人、朋友、家人、工作关系、{user} 面前的防备与真心，反衬 {user} 为什么能看见例外的一面。凡是需要指代用户，一律输出 {user}",
   "love_style": "表达爱的方式 / 这是亲密关系里的行动规则。写他如何向 {user} 证明在乎、如何依恋和吃醋、冲突时怎么处理、哪里脆弱、靠近速度、肢体边界和恋爱中语言变化。凡是需要指代用户，一律输出 {user}",
-  "situational_reactions": "各情绪/情境下的行动线触发器与具体身体动作（写动作不写情绪名词）：①被动反应 ②主动行为",
+  "situational_reactions": "各情境下的行动线（选填）：仅当角色反应模式明显异于常人时才写（兽人/非人类/特殊心理状态等）；普通人只是性格差异就省略或留空。要写时写具体身体动作不写情绪名词：①被动反应 ②主动行为",
   "hidden_side": "反差萌 / 平时压制或藏起来的那部分自我 + 触发暴露的情境 + 暴露时状态变化。是留给用户『解锁』的钩子",
   "life_details": ["生活习惯 / 静态颗粒细节，越不可推导越好：熟人才知的小习惯、口头禅、绝对不做的事、招牌动作、睡前/喝醉后/独处时状态"],
   "likes": ["爱好 / 角色会放松、露出破绽或愿意多聊的具体偏好。写成有生活质感的对象、场景或习惯"],
@@ -354,7 +391,7 @@ def build_persona_messages(image_data_uris: list[str], lang: str,
 - 영어식/중국어식 번역 문장, 과한 문어체, 설명문 말투를 피한다.
 
 # 텍스트 필드
-name, profile, appearance, value, hometown, residence, social_status, speech_style,
+name, profile, appearance, hometown, residence, social_status, speech_style,
 relationship_with_user, relationship_mode, love_style, situational_reactions,
 hidden_side, premise; personality 내부의 summary, decisive_event,
 response, cost, desire_outer, desire_inner, desire_bottom_line, healing.
@@ -385,8 +422,7 @@ response, cost, desire_outer, desire_inner, desire_bottom_line, healing.
 # 분량과 품질
 - name은 10자 이하. profile은 100자 이하이면서 말을 걸고 싶게.
 - schema 안의 설명 문구는 지시문이다. 실제 JSON 값에 설명 문구를 복사하지 말 것.
-- situational_reactions는 감정 명사 대신 몸의 움직임과 행동으로 쓴다.
-- 구체적이고, 쉽게 추론되지 않는 디테일을 우선한다. 뻔한 미남/차가운 사람/상처가 있다 같은 빈말 금지.
+{OUTPUT_QUALITY_RULES_KO}
 {PERSONALITY_RULES_KO}
 
 # 출력
@@ -419,7 +455,7 @@ JSON 객체 하나만 출력한다. 설명, 마크다운 코드블록 금지.
   与某个用户无关，不要写成对"你"的执念或恋爱场景。
 
 # 文本字段（全部用 {lname} 单值字符串，不要做成多语言对象）
-name, profile, appearance, value, hometown, residence, social_status, speech_style,
+name, profile, appearance, hometown, residence, social_status, speech_style,
 relationship_with_user, love_style, situational_reactions,
 hidden_side, premise；以及 personality 内的 summary, decisive_event,
 response, cost, desire_outer, desire_inner, desire_bottom_line, healing。
@@ -463,8 +499,7 @@ response, cost, desire_outer, desire_inner, desire_bottom_line, healing。
 
 # 字数与质量
 - name ≤10字；profile ≤100字且要勾人；其余字段遵循 schema 描述
-- situational_reactions 写身体动作，不写情绪名词
-- 越具体、越不可推导越好，避免空洞套话与翻译腔
+{OUTPUT_QUALITY_RULES}
 {PERSONALITY_RULES}
 
 # 输出
@@ -474,6 +509,21 @@ response, cost, desire_outer, desire_inner, desire_bottom_line, healing。
     if user_hint.strip():
         rules += f"\n# 创作者补充要求\n{user_hint.strip()}\n"
 
+    if not image_data_uris:
+        if lang == "ko":
+            rules += (
+                "\n# ⚠️ 이미지 없음 — 텍스트 기반 생성\n"
+                "이번에는 참조 이미지가 없다. 위의 '창작 보충 요구'(있다면)와 schema를 근거로 "
+                "캐릭터를 구상해 완성한다. '이미지 속 인물'을 본 것처럼 쓰지 말고, appearance 같은 "
+                "외모 필드는 보충 요구와 캐릭터 설정에 맞게 자연스럽게 지어낸다.\n"
+            )
+        else:
+            rules += (
+                "\n# ⚠️ 没有图片 — 纯文字生成\n"
+                "本次没有参考图片。请依据上面的『创作补充要求』(若有) 和 schema 自行构想并补全这个角色。"
+                "不要假装『看到了图里的人物』；appearance 等外貌字段按补充要求与角色设定自然设定即可。\n"
+            )
+
     user_content: list[dict] = [{"type": "text", "text": rules}]
     for uri in image_data_uris:
         user_content.append({"type": "image_url", "image_url": {"url": uri}})
@@ -481,6 +531,157 @@ response, cost, desire_outer, desire_inner, desire_bottom_line, healing。
     return [
         {"role": "system", "content": sys},
         {"role": "user", "content": user_content},
+    ]
+
+
+# ==========================================================================
+# 1a. PERSONA FROM EXISTING JSON  (arbitrary source schema -> POPOP persona)
+# ==========================================================================
+
+# 把任意来源 JSON 映射进 POPOP schema 的通用准则：忠实保留、不预设倾向、不加戏。
+_JSON_FIDELITY_RULES_ZH = """
+# ⚠️ 改写立场（最重要，先读）
+你拿到的是【这个角色已有的原始资料 JSON】（来自别处，字段名/结构可能任意）。
+原则是【先忠实原文，再基于原文推理、补充、扩展】，把它整理进 POPOP 人设 schema：
+- 【第一位：忠实原文】原始资料里这个角色【独有的、具体的】东西：姓名、外貌细节、身份职业、
+  人物关系、地点、口头禅、开场情景、设定钩子、原文写明的事件与状态——都要保留进对应字段，
+  尽量不丢，也不要改写成别的意思。原文写了什么基调就保留什么基调。
+- 【可以推理与扩展】在不违背原文的前提下，鼓励基于原文已有信息【合理推理、补充、延展】，
+  把 schema 填得自洽丰满：原文暗示但没明说的，可顺着原文逻辑推出来；schema 里原文没覆盖的字段，
+  依据原文气质自然补全。扩展是为了让角色更立体，不是另起炉灶。和原文无关、也推不出来的，不要硬编；拿不准就留空或从简。
+- personality 的因果链同样遵循既有铁律：原文若没有明显转折点，就只写 summary，
+  decisive_event 及之后留空，绝不为了填满而硬编。
+"""
+
+_JSON_FIDELITY_RULES_KO = """
+# ⚠️ 변환 입장(가장 중요, 먼저 읽기)
+너가 받은 것은 【이 캐릭터의 기존 원본 자료 JSON】이다(다른 곳에서 온 것이라 필드명·구조가 제각각일 수 있다).
+원칙은 【먼저 원문에 충실하고, 그다음 원문에 근거해 추론·보완·확장】해서 POPOP 페르소나 schema로 정리하는 것이다:
+- 【1순위: 원문 충실】원본에 있는 이 캐릭터만의 【구체적인】 것: 이름, 외모 디테일, 신분·직업,
+  인물 관계, 장소, 말버릇, 오프닝 상황, 설정 후크, 원문에 적힌 사건·상태 — 해당 필드에 그대로 살린다.
+  최대한 누락하지 말고, 다른 의미로 바꾸지 말 것. 원문의 톤을 그대로 유지한다.
+- 【추론·확장 권장】원문에 어긋나지 않는 선에서, 원문 정보에 근거한 【합리적 추론·보완·확장】을 권장한다.
+  원문이 암시하지만 명시하지 않은 건 원문 논리대로 끌어내고, 원문이 안 다룬 필드는 원문 분위기에 맞게 채워
+  schema를 자기모순 없이 풍성하게 만든다. 확장은 캐릭터를 입체적으로 만들기 위함이지 새로 짓는 게 아니다.
+  원문과 무관하고 추론도 안 되는 건 지어내지 말고, 단서가 없으면 비우거나 간결히.
+- personality 인과 사슬도 기존 원칙을 따른다: 원문에 뚜렷한 전환점이 없으면 summary만 쓰고
+  decisive_event 이하는 비운다. 칸을 채우려 억지로 지어내지 말 것.
+"""
+
+
+def build_persona_from_json_messages(source_obj: dict, lang: str,
+                                     user_hint: str = "") -> list[dict]:
+    """Expand an EXISTING character JSON (arbitrary source schema) into the POPOP
+    persona schema, authored natively in `lang`.
+
+    The source object is treated as factual material about one character. Its
+    concrete, character-specific content is mapped into the schema and preserved;
+    no genre is presumed and no drama/trauma is added beyond what the source implies.
+    """
+    directive = config.lang_directive(lang)
+    lname = config.lang_name(lang)
+    presets = " / ".join(
+        PERSONA_TAG_PRESETS_KO if lang == "ko" else PERSONA_TAG_PRESETS)
+    voice_block = voices.prompt_block(lang)
+    source_str = json.dumps(source_obj, ensure_ascii=False, indent=2)
+
+    if lang == "ko":
+        sys = (
+            "당신은 AI 캐릭터 채팅 서비스의 최상급 캐릭터 설정 디렉터다. "
+            "이미 존재하는 캐릭터의 원본 자료(JSON)를 받아, 그 캐릭터를 POPOP 완성형 페르소나 "
+            "schema로 충실히 옮겨 담고 빈 곳만 자기모순 없이 보완한다. "
+            "목표는 새 캐릭터를 만드는 게 아니라 '이 캐릭터를 그대로 살려내는' 것이다. "
+            "사용자와의 관계가 명시된 필드에서만 사용자를 언급하고, 지칭이 필요하면 자리표시자 {user}를 출력한다."
+            f"\n\n【출력 언어】한국어 버전. {directive}\n"
+            "모든 자유 텍스트 값은 한국어 원어민이 쓴 것처럼. 번역투·설명문 냄새 금지."
+        )
+        rules = f"""아래 【원본 캐릭터 자료(JSON)】를 바탕으로 POPOP 【완성형 캐릭터 JSON】을 작성한다. 모든 텍스트는 자연스러운 한국어.
+{_JSON_FIDELITY_RULES_KO}
+
+# 원본 캐릭터 자료(JSON, 필드명/구조는 임의일 수 있음)
+{source_str}
+
+# 매핑 가이드(원문 → POPOP 필드)
+- 이름·호칭 → name. 외모/이미지 묘사 → appearance.
+- 한 줄 소개/설명류 → profile(장기적·안정적인 모습으로, 순간 장면은 opening으로).
+- 세계관·전사·배경 서술 → backstory(시간선) + premise(특수 설정이 있을 때만).
+- 첫 등장 장면/인사말(greeting, first_scene 등) → opening(note + messages)로 자연스럽게 옮긴다.
+- 등장하는 다른 인물 → family / social_network.
+- 말투 단서 → speech_style(실제 대사 예문은 넣지 말고 말하는 방식만).
+
+# 시점 원칙
+- 모든 필드는 기본 3인칭 객관 묘사. 사용자 언급 가능 필드는 relationship_with_user, relationship_mode, love_style, opening뿐이고 지칭은 {{user}}.
+- likes/fears/wishlist는 캐릭터 본인의 취향/싫음/소원. 사용자에 대한 집착으로 바꾸지 않는다.
+
+# 구조/고정값
+- species: 인간/엘프/수인/동물/기타. gender: 남성/여성/기타. visibility: 고정 "public".
+- tags: 최대 3개. 원문에서 드러나는 가장 강한 축을 한국어로. 프리셋 참고: {presets}
+- voice: 아래 음색 라이브러리에서 성별/분위기에 맞는 모델 ID 하나만.
+{voice_block}
+- premise: 특수 설정이 있을 때만, 없으면 "".
+- {_opening_rules(lang)}
+
+# 분량과 품질
+{OUTPUT_QUALITY_RULES_KO}
+
+{PERSONALITY_RULES_KO}
+
+# 출력
+JSON 객체 하나만. 설명·마크다운 금지.
+최상위 구조와 필드별 요구:
+{_persona_schema_doc(lang, voice_block, presets)}
+"""
+    else:
+        sys = (
+            "你是顶级的角色设定（人设）创作总监，服务于一款 AI 角色聊天产品。"
+            "你会拿到一个【已存在角色的原始资料 JSON】，任务是把这个角色【忠实地搬进】POPOP "
+            "完整人设 schema，并只在原文未覆盖处做自洽补全。"
+            "目标不是发明新角色，而是把『这个角色本身』原样立起来。"
+            "只有明确涉及用户关系的字段才写到用户，需要指代用户时输出占位符 {user}。"
+            f"\n\n【输出语言】本角色为 {lname} 版本。{directive}\n"
+            "所有自由文本字段用该语言地道创作（像母语创作者亲笔写的，不是翻译腔）。"
+        )
+        rules = f"""根据下面这份【原始角色资料(JSON)】扩写出 POPOP【完整人设 JSON】。所有文本字段用 {lname} 地道撰写。
+{_JSON_FIDELITY_RULES_ZH}
+
+# 原始角色资料（JSON，字段名/结构可能任意）
+{source_str}
+
+# 映射指引（原文 → POPOP 字段）
+- 名字/称呼 → name；外貌/形象描述 → appearance。
+- 一句话简介/描述类 → profile（写长期稳定的样子，瞬时场景留给 opening）。
+- 世界观/前情/背景叙述 → backstory（时间线）+ premise（仅当有特殊设定）。
+- 首次登场场景/招呼语（greeting、first_scene 等）→ 自然转写进 opening（note + messages）。
+- 原文里出现的其他人物 → family / social_network。
+- 说话习惯线索 → speech_style（不要写台词例句，只刻画怎么说）。
+
+# 视角铁律
+- 所有字段默认第三人称客观描述角色本身。仅 relationship_with_user、relationship_mode、love_style、opening 可涉及用户，指代用户一律输出 {{user}}。
+- likes/fears/wishlist 写【角色本人】的喜好/厌恶/想做的事，不要写成对“你”的执念。
+
+# 结构/枚举字段
+- species：人类/精灵/兽人/动物/其他；gender：男/女/其他；visibility 固定 "public"。
+- tags：最多 3 个，按原文最突出的轴用 {lname} 地道写。预设参考（中文）：{presets}
+- voice：从下面【{lname} 音色库】挑一个与性别匹配的，voice 只填模型ID：
+{voice_block}
+- premise：仅当原文含特殊设定才写，否则留空 ""。
+- {_opening_rules(lang)}
+
+# 字数与质量
+{OUTPUT_QUALITY_RULES}
+
+{PERSONALITY_RULES}
+
+# 输出
+只输出一个 JSON 对象，不要任何解释或 markdown 代码块标记。
+顶层结构字段：{_persona_schema_doc(lang, voice_block, presets)}
+"""
+    if user_hint.strip():
+        rules += f"\n# 创作者补充要求\n{user_hint.strip()}\n"
+
+    return [
+        {"role": "system", "content": sys},
+        {"role": "user", "content": rules},
     ]
 
 

@@ -152,45 +152,46 @@ def get_character(char_id: str):
 # ---------- step 1: upload -> persona ----------
 @app.post("/api/personas")
 def create_personas(
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(default=[]),
     user_hint: str = Form(""),
     one_per_image: bool = Form(True),
     langs: str = Form("zh,ja,ko,en"),
     with_cover: bool = Form(False),
     cover_style_id: str = Form(""),
 ):
-    """Upload images. For each image group, create ONE independent native
-    character per selected language (separate per-language pipelines).
+    """Upload images (optional) → one native character per selected language.
 
-    - one_per_image: each image is its own character group.
+    - With images: each image (one_per_image) or the whole set is a character group.
+    - Without images: requires user_hint; generates a text-only character group.
     - langs: comma-separated subset of zh,ja,ko,en.
     """
     lang_list = [s.strip() for s in langs.split(",") if s.strip()]
     saved = []
     for f in files:
+        if not (f.filename or getattr(f, "size", None)):
+            continue  # skip empty multipart placeholder
         ext = Path(f.filename or "img.png").suffix or ".png"
         dest = config.UPLOAD_DIR / f"{int(time.time()*1000)}_{len(saved)}{ext}"
         with dest.open("wb") as out:
             shutil.copyfileobj(f.file, out)
         saved.append(str(dest))
 
-    groups = saved if one_per_image else [saved]
+    # 纯文字模式：没有图片时必须有补充要求，否则无依据可生成。
+    if not saved and not user_hint.strip():
+        raise HTTPException(400, "请上传图片，或在『创作补充要求』里填写文字用于生成人设")
+
+    if not saved:
+        groups = [[]]  # one text-only group
+    else:
+        groups = [[p] for p in saved] if one_per_image else [saved]
     task_id = tasks.create_task("personas", total=len(groups))
 
     def _job(tid: str):
         results = []
-        if one_per_image:
-            for path in saved:
-                results.extend(
-                    pipeline.create_personas_from_images(
-                        [path], lang_list, user_hint=user_hint
-                    )
-                )
-                tasks.bump(tid)
-        else:
+        for group in groups:
             results.extend(
                 pipeline.create_personas_from_images(
-                    saved, lang_list, user_hint=user_hint
+                    group, lang_list, user_hint=user_hint
                 )
             )
             tasks.bump(tid)
@@ -216,6 +217,105 @@ def create_personas(
         return {
             "count": len(results),
             "characters": results,
+            "cover_errors": cover_errors,
+        }
+
+    tasks.run(task_id, _job)
+    return {"task_id": task_id}
+
+
+@app.post("/api/personas/import_json")
+def import_personas_from_json(
+    files: list[UploadFile] = File(...),
+    user_hint: str = Form(""),
+    langs: str = Form("zh,ja,ko,en"),
+    download_image: bool = Form(True),
+    with_cover: bool = Form(False),
+    cover_style_id: str = Form(""),
+    limit: int = Form(0),
+):
+    """Import existing character JSON files. Each source object becomes one
+    character group; one native record is created per selected language.
+
+    Accepts a single object, a top-level array, or an object wrapping the list
+    under data/characters/items/list/results.
+    """
+    import json as _json
+    import re as _re
+
+    def _loads_lenient(text: str):
+        """Parse JSON tolerant of // and /* */ comments and trailing commas,
+        which appear in hand-edited / crawled exports."""
+        try:
+            return _json.loads(text)
+        except _json.JSONDecodeError:
+            pass
+        # strip /* */ block comments
+        text = _re.sub(r"/\*.*?\*/", "", text, flags=_re.DOTALL)
+        # strip // line comments (not inside strings)
+        text = _re.sub(r'("(?:\\.|[^"\\])*")|//[^\n]*',
+                       lambda m: m.group(1) or "", text)
+        # remove trailing commas before } or ]
+        text = _re.sub(r",(\s*[}\]])", r"\1", text)
+        return _json.loads(text)
+
+    lang_list = [s.strip() for s in langs.split(",") if s.strip()]
+    sources: list[dict] = []
+    for f in files:
+        try:
+            payload = _loads_lenient(f.file.read().decode("utf-8"))
+        except (UnicodeDecodeError, _json.JSONDecodeError) as e:
+            raise HTTPException(
+                400, f"{f.filename or 'file'} 不是合法 JSON：{e}") from e
+        sources.extend(pipeline.extract_source_objects(payload))
+
+    if not sources:
+        raise HTTPException(400, "未从上传的 JSON 中解析出任何角色对象")
+    if limit and limit > 0:
+        sources = sources[:limit]
+
+    task_id = tasks.create_task("import_json", total=len(sources))
+
+    def _job(tid: str):
+        results = []
+        for obj in sources:
+            try:
+                results.extend(
+                    pipeline.create_personas_from_json_obj(
+                        obj, lang_list, user_hint=user_hint,
+                        download_image=download_image,
+                    )
+                )
+            except Exception as e:  # noqa: BLE001 keep batch resilient
+                results.append({"error": str(e)})
+            tasks.bump(tid)
+
+        ok = [r for r in results if r.get("char_id")]
+        errors = {str(i): r["error"]
+                  for i, r in enumerate(results) if r.get("error")}
+
+        cover_errors = {}
+        if with_cover and cover_style_id:
+            def _cover(rec: dict):
+                cid = rec.get("char_id")
+                try:
+                    pipeline.generate_cover(
+                        cid, cover_style_id, use_reference=False,
+                        mode="fill_missing",
+                    )
+                    return cid, None
+                except Exception as e:  # noqa: BLE001
+                    return cid, str(e)
+
+            with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+                for cid, err in ex.map(_cover, ok):
+                    if err:
+                        cover_errors[cid] = err
+
+        return {
+            "count": len(ok),
+            "characters": ok,
+            "errors": errors,
             "cover_errors": cover_errors,
         }
 

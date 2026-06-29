@@ -113,8 +113,8 @@ function localized(obj, lang = "zh") {
 
 // Render persona fields that may be string / string[] / object[].
 const SUBFIELD_LABELS = {
-  summary: "概述", decisive_event: "决定性事件",
-  response: "应对方式", cost: "代价/反噬", desire_outer: "声称要的",
+  summary: "概述", decisive_event: "关键经历",
+  response: "性格底色", cost: "另一面/盲区", desire_outer: "声称要的",
   desire_inner: "真正要的", desire_bottom_line: "底线", healing: "治愈条件",
   note: "注释", messages: "开场白",
 };
@@ -174,6 +174,7 @@ $$(".step").forEach((s) =>
 
 // ========== UPLOAD VIEW ==========
 let pendingFiles = [];
+let pendingJson = [];
 const dropzone = $("#dropzone");
 const fileInput = $("#fileInput");
 
@@ -189,6 +190,29 @@ dropzone.addEventListener("drop", (e) => {
   addFiles(e.dataTransfer.files);
 });
 fileInput.addEventListener("change", () => addFiles(fileInput.files));
+
+// 直接粘贴图片（Ctrl/Cmd+V）：把剪贴板里的图片当作上传文件，不落本地磁盘。
+// 仅在「上传」视图激活时响应，且避免干扰在输入框里粘贴文字。
+function handlePasteImages(e) {
+  const uploadActive = document.getElementById("view-upload")?.classList.contains("active");
+  if (!uploadActive) return;
+  const tag = (e.target && e.target.tagName) || "";
+  const isTextInput = /^(INPUT|TEXTAREA)$/.test(tag) || (e.target && e.target.isContentEditable);
+  const items = (e.clipboardData || window.clipboardData)?.items || [];
+  const files = [];
+  for (const it of items) {
+    if (it.kind === "file" && it.type.startsWith("image/")) {
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (!files.length) return;        // 没有图片就放行（比如在输入框粘贴文字）
+  if (isTextInput && !files.length) return;
+  e.preventDefault();
+  addFiles(files);
+  toast(`已粘贴 ${files.length} 张图片`, "ok");
+}
+document.addEventListener("paste", handlePasteImages);
 
 // language multi-select on creation
 let CREATE_LANGS = ["zh", "ja", "ko", "en"];
@@ -229,7 +253,11 @@ function refreshStyleSelects() {
 }
 
 function addFiles(fl) {
-  for (const f of fl) if (f.type.startsWith("image/")) pendingFiles.push(f);
+  for (const f of fl) {
+    const isJson = f.type === "application/json" || /\.json$/i.test(f.name || "");
+    if (isJson) pendingJson.push(f);
+    else if (f.type.startsWith("image/")) pendingFiles.push(f);
+  }
   renderThumbs();
 }
 function renderThumbs() {
@@ -240,27 +268,68 @@ function renderThumbs() {
     img.src = URL.createObjectURL(f);
     box.appendChild(img);
   });
+  pendingJson.forEach((f) => {
+    const chip = document.createElement("span");
+    chip.className = "json-chip";
+    chip.textContent = "📄 " + (f.name || "characters.json");
+    box.appendChild(chip);
+  });
+  // JSON 导入时显示"下载源图"开关
+  const row = $("#dlImageRow");
+  if (row) row.style.display = pendingJson.length ? "" : "none";
 }
 
 $("#btnPersona").addEventListener("click", async () => {
-  if (!pendingFiles.length) return toast("请先选择图片", "err");
   const langs = $$("#langPick input:checked").map((i) => i.value);
   if (!langs.length) return toast("请至少选择一种语言", "err");
+  const hintText = $("#userHint").value.trim();
+  if (!pendingFiles.length && !pendingJson.length && !hintText)
+    return toast("请上传图片 / 角色 JSON，或在补充要求里填写文字", "err");
+
   const btn = $("#btnPersona");
   btn.disabled = true;
   const st = $("#uploadStatus");
   const withCover = $("#withCoverOnCreate").checked;
-  st.innerHTML = `<span class="spinner"></span> 正在上传，并为 ${langs.length} 种语言各自生成本土化人设${
-    withCover ? " + 封面图" : ""
-  }…（封面图会额外耗时）`;
-  const fd = new FormData();
-  pendingFiles.forEach((f) => fd.append("files", f));
-  fd.append("user_hint", $("#userHint").value);
-  fd.append("one_per_image", $("#onePerImage").checked);
-  fd.append("langs", langs.join(","));
-  fd.append("with_cover", withCover);
-  fd.append("cover_style_id", withCover ? $("#createCoverStyle").value : "");
+
   try {
+    // JSON 导入分支：把已有角色 JSON 扩写成 POPOP 人设
+    if (pendingJson.length) {
+      st.innerHTML = `<span class="spinner"></span> 正在解析 JSON，并为 ${langs.length} 种语言各自扩写人设${
+        withCover ? " + 封面图" : ""
+      }…（条数多时较慢）`;
+      const fd = new FormData();
+      pendingJson.forEach((f) => fd.append("files", f));
+      fd.append("user_hint", $("#userHint").value);
+      fd.append("langs", langs.join(","));
+      fd.append("download_image", $("#downloadImage").checked);
+      fd.append("with_cover", withCover);
+      fd.append("cover_style_id", withCover ? $("#createCoverStyle").value : "");
+      const r = await runTask("/api/personas/import_json", { method: "POST", body: fd }, (done, total) => {
+        st.innerHTML = `<span class="spinner"></span> 导入中… ${done}/${total} 个角色`;
+      });
+      const errN = Object.keys(r.cover_errors || {}).length;
+      const failN = Object.keys(r.errors || {}).length;
+      st.innerHTML = `已导入 ${r.count} 个角色（按语言拆分）${
+        failN ? `，扩写失败 ${failN} 个` : ""
+      }${withCover ? `，封面失败 ${errN} 个` : ""}。前往「② 角色」查看。`;
+      toast(`导入成功${failN || errN ? "（部分失败）" : ""}`, failN || errN ? "err" : "ok");
+      pendingJson = [];
+      renderThumbs();
+      return;
+    }
+
+    // 图片分支（也兼容纯文字：无图时按补充要求生成）
+    const textOnly = !pendingFiles.length;
+    st.innerHTML = `<span class="spinner"></span> ${textOnly ? "正在按文字" : "正在上传，并"}为 ${langs.length} 种语言各自生成本土化人设${
+      withCover ? " + 封面图" : ""
+    }…（封面图会额外耗时）`;
+    const fd = new FormData();
+    pendingFiles.forEach((f) => fd.append("files", f));
+    fd.append("user_hint", $("#userHint").value);
+    fd.append("one_per_image", $("#onePerImage").checked);
+    fd.append("langs", langs.join(","));
+    fd.append("with_cover", withCover);
+    fd.append("cover_style_id", withCover ? $("#createCoverStyle").value : "");
     const r = await runTask("/api/personas", { method: "POST", body: fd }, (done, total) => {
       st.innerHTML = `<span class="spinner"></span> 生成中… ${done}/${total} 组`;
     });
@@ -510,7 +579,7 @@ async function showCharDetail(charId) {
     ["anonymous_identities", "匿名身份"],
     ["personality", "性格"],
     ["opening", "开场白"],
-    ["appearance", "外貌穿搭"], ["value", "价值观"],
+    ["appearance", "外貌穿搭"],
     ["hometown", "出身地"], ["residence", "居住地"],
     ["social_status", "职业/阶级"], ["speech_style", "语言习惯"],
     ["relationship_with_user", "和用户的关系"], ["relationship_mode", "社交模式"],

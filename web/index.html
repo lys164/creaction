@@ -25,13 +25,13 @@
     <h2>批量上传图片 → 扩写人设</h2>
     <div class="card">
       <div id="dropzone" class="dropzone">
-        <input type="file" id="fileInput" accept="image/*" multiple hidden />
-        <p>点击或拖拽图片到此处（支持多选）</p>
+        <input type="file" id="fileInput" accept="image/*,application/json,.json" multiple hidden />
+        <p>点击、拖拽或 Ctrl/⌘+V 粘贴图片，也可拖入角色 JSON（都选填；支持多选。JSON 会按所选语言扩写人设）</p>
         <div id="thumbs" class="thumbs"></div>
       </div>
       <label class="field">
-        <span>创作补充要求（选填）</span>
-        <textarea id="userHint" rows="2" placeholder="例如：希望偏成熟御姐风、设定为财阀千金…"></textarea>
+        <span>创作补充要求 / 文字人设（选填；不传图片时，可只凭这里的文字生成人设，也可直接粘贴一段角色文字/JSON）</span>
+        <textarea id="userHint" rows="2" placeholder="例如：希望偏成熟御姐风、设定为财阀千金…；或直接粘贴一段角色描述/JSON"></textarea>
       </label>
       <div class="field">
         <span>语言（多选，每个语言各生成一个独立的本土化角色）</span>
@@ -40,6 +40,10 @@
       <label class="check">
         <input type="checkbox" id="onePerImage" checked />
         每张图片各生成一个角色（取消则所有图描述同一角色）
+      </label>
+      <label class="check" id="dlImageRow" style="display:none">
+        <input type="checkbox" id="downloadImage" checked />
+        JSON 导入：下载原始 image_url 当源图（用于外貌/封面一致；取消则纯文字推断）
       </label>
       <div class="field">
         <span>封面图（选填，可在人设生成后直接批量产出）</span>
