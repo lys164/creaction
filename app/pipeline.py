@@ -572,12 +572,20 @@ def delete_character(char_id: str) -> bool:
 # Step 2: persona -> identity (appearance DNA)
 # --------------------------------------------------------------------------
 def build_identity(char_id: str) -> dict:
+    """Build stable appearance DNA from the persona and one main visual anchor.
+
+    Persona generation can use multiple images, but identity should not average
+    across multiple faces or photo styles. Use the first available source image
+    as the character's main visual reference.
+    """
     record = load_character(char_id)
-    uris = [api_client.file_to_data_uri(p)
-            for p in _existing_source_images(record)]
+    identity_ref = _first_source_image(record)
+    uris = [api_client.file_to_data_uri(identity_ref)] if identity_ref else []
     messages = prompts.build_identity_messages(record["persona"], uris)
     identity = api_client.chat_json(messages, temperature=0.5)
     record["identity"] = identity
+    if identity_ref:
+        record["identity_reference_image"] = identity_ref
     save_character(record)
     return record
 
@@ -662,8 +670,8 @@ def generate_cover(
     )
 
     image_urls = None
-    src = _first_source_image(record)
-    if use_reference or src:
+    if use_reference:
+        src = _first_source_image(record)
         if src:
             image_urls = [api_client.file_to_data_uri(src)]
 
