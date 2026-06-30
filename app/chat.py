@@ -474,7 +474,12 @@ def send_message(char_id: str, message: str, context: dict | None = None,
         {"role": "system", "content": build_prompt(record, session.get("context", {}))},
         *_history_messages(session),
     ]
-    raw = api_client.chat(llm_messages, temperature=0.9, max_tokens=12000)
+    raw = api_client.chat(
+        llm_messages,
+        model=config.CHAT_MODEL,
+        temperature=0.9,
+        max_tokens=12000,
+    )
     try:
         parsed = api_client.parse_json_text(raw)
         items = _normalize_items(parsed)

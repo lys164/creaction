@@ -97,7 +97,7 @@ popop_pipeline/
 ## 配置
 
 密钥与模型在 `app/config.py`，也可用环境变量覆盖：
-`POPOP_API_KEY` / `POPOP_LLM_MODEL` / `POPOP_IMAGE_MODEL` / `POPOP_MAX_WORKERS`。
+`POPOP_API_KEY` / `POPOP_LLM_MODEL` / `POPOP_CHAT_MODEL` / `POPOP_IMAGE_MODEL` / `POPOP_MAX_WORKERS`。
 
 ## 说明
 

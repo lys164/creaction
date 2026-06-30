@@ -49,6 +49,7 @@ API_PROVIDERS = _load_provider_pool("POPOP_API_PROVIDERS", _DEFAULT_API_PROVIDER
 LLM_API_PROVIDERS = _load_provider_pool("POPOP_LLM_API_PROVIDERS", API_PROVIDERS)
 IMAGE_API_PROVIDERS = _load_provider_pool("POPOP_IMAGE_API_PROVIDERS", API_PROVIDERS)
 LLM_MODEL = os.environ.get("POPOP_LLM_MODEL", "gemini-3.1-pro-preview")
+CHAT_MODEL = os.environ.get("POPOP_CHAT_MODEL", "gemini-3.5-flash")
 IMAGE_MODEL = os.environ.get("POPOP_IMAGE_MODEL", "gpt-image-2")
 
 # Image generation defaults
