@@ -586,19 +586,28 @@ def build_identity(char_id: str) -> dict:
 # Step 3: cover image (identity + cover variable/scene + chosen style)
 # --------------------------------------------------------------------------
 def build_cover_spec(char_id: str) -> dict:
-    """Generate the cover-specific variable + scene block."""
+    """Generate the cover-specific variable + scene block.
+
+    Persona generation can use multiple source images, but cover planning uses a
+    single visual anchor so the cover pose/camera/filter does not average across
+    multiple faces or photo styles.
+    """
     record = load_character(char_id)
     if not record.get("identity"):
         build_identity(char_id)
         record = load_character(char_id)
 
+    cover_ref = _first_source_image(record)
+    cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
     messages = prompts.build_cover_spec_messages(
-        record["persona"], record["identity"])
+        record["persona"], record["identity"], cover_ref_uri)
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
         "variable": spec.get("variable", {}),
         "scene": spec.get("scene", {}),
     }
+    if cover_ref:
+        record["cover_spec"]["reference_image"] = cover_ref
     save_character(record)
     return record
 
@@ -653,8 +662,8 @@ def generate_cover(
     )
 
     image_urls = None
-    if use_reference:
-        src = _first_source_image(record)
+    src = _first_source_image(record)
+    if use_reference or src:
         if src:
             image_urls = [api_client.file_to_data_uri(src)]
 

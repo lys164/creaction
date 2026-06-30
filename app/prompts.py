@@ -806,11 +806,14 @@ APPEARANCE_SCHEMA = {
         "interaction": "장소·빛·가구·소품·동물·다른 인물과의 자연스러운 관계. 작은 거리감·시선·몸의 방향처럼 장면을 설명하는 정도로 쓰고, 없으면 '없음'",
         "time_of_day": "새벽|아침|정오|오후|골든아워|저녁|밤|심야 중 하나",
         "camera": {
-            "shot_size": "익스트림 클로즈업|얼굴 클로즈업|상반신|허리 위|전신|와이드 중 하나",
-            "angle": "하이앵글|약간 하이앵글|아이레벨|약간 로우앵글|로우앵글|더치앵글 중 하나",
-            "lens_distance": "렌즈감·거리",
-            "depth_focus": "심도·초점",
-            "composition": "구도·크롭·여백·인물 위치",
+            "capture_mode": "촬영 방식 — 전면 셀카/후면 광각 셀카/거울 셀카/타이머로 멀리서/셀카봉/페이스타임·라이브포토 캡처/친구·동행·행인이 찍어준 candid 컷/여행 인증샷 중 장면에 맞게 구체적으로 선택",
+            "filter": "필터·톤과 실제 폰사진 같은 노출·노이즈·색감 — 무보정 직출, 폰 자동보정, 과노출 플래시, 저채도 뮤트, 코닥 포트라, 후지 클래식 크롬, 일회용 카메라 플래시, CCD 디카, iPhone 6·초기 폰 직출, 2015~2017 인스타 빈티지, Y2K flash, Clarendon, Juno, Gingham, Lark, Valencia, Moon, Aden 등에서 캐릭터와 장면에 맞게 선택",
+            "shot_size": "샷 사이즈와 몸이 어디까지 보이는지 — 얼굴 클로즈업/상반신/허리 위/전신 OOTD/인물이 작고 배경이 큰 와이드 컷 등",
+            "angle": "카메라 앵글·시점, 폰/촬영자의 높이와 방향 — 높은 각도 셀카/아이레벨/낮은 위치에서 다리·신발 강조/차창·카페·거리 시점 등",
+            "lens_distance": "렌즈·거리감 — 가까운 광각감으로 손·다리·가방이 약간 커짐/자연스러운 친구 거리/멀리서 찍은 여행감/가벼운 압축감",
+            "depth_focus": "심도·초점·흔들림·살짝 빗나간 생활감",
+            "framing": "프레이밍·구도·크롭·여백·인물 위치·전경에 가려지는 정도 — 가장자리 크롭/머리끝·신발 살짝 잘림/대형 여백/전경 소품이 얼굴·몸 일부 가림/인물 점유율 30~70% 등",
+            "composition": "구도·크롭·여백·인물 위치를 한 문장으로 요약",
             "selfie_or_taken": "셀카|타인 촬영|삼인칭 관찰 중 하나",
         },
     },
@@ -857,7 +860,8 @@ def build_identity_messages(persona: dict, image_data_uris: list[str] | None = N
     ]
 
 
-def build_cover_spec_messages(persona: dict, identity: dict) -> list[dict]:
+def build_cover_spec_messages(persona: dict, identity: dict,
+                              image_data_uri: str | None = None) -> list[dict]:
     """Create the variable + scene block used for the character cover image."""
     persona_str = json.dumps(persona, ensure_ascii=False)
     identity_str = json.dumps(identity, ensure_ascii=False)
@@ -868,7 +872,8 @@ def build_cover_spec_messages(persona: dict, identity: dict) -> list[dict]:
     sys = (
         "You are a character cover art director. You design the one-shot cover "
         "composition for an AI character profile: expression, styling, outfit, "
-        "setting, activity, and camera. The stable face/body identity must stay unchanged."
+        "setting, activity, phone-camera feel, filter, framing, and lens behavior. "
+        "The stable face/body identity must stay unchanged."
     )
     txt = f"""아래 캐릭터 페르소나와 고정 외모 identity 를 바탕으로,
 프로필/커버 이미지용 `variable` + `scene` 블록만 작성해줘.
@@ -876,11 +881,15 @@ def build_cover_spec_messages(persona: dict, identity: dict) -> list[dict]:
 규칙:
 - 모든 값은 한국어로 구체적으로 기술.
 - identity 에 있는 고정 외모 특징은 바꾸지 말 것.
+- 참조 이미지가 함께 제공되면, 그 한 장을 커버의 시각적 기준으로 우선한다. 여러 원본이 있더라도 커버 schema 는 이 한 장의 얼굴·분위기·사진감을 기준으로 잡는다.
 - variable 은 이 커버에서만 쓰는 표정, 시선, 메이크업, 당일 헤어스타일, 의상, 액세서리, 포즈다.
 - scene 은 이 커버 한 장의 장소, 활동, 소품, 시간대, 카메라다.
 - 커버 이미지는 첫인상용이므로 캐릭터의 매력과 관계 훅이 한눈에 보여야 한다.
-- 카메라는 캐릭터 성격과 장면의 감정이 드러나도록 각도, 크롭, 여백, 시선, 손동작,
-  소품과의 거리, 전신/반신/클로즈업 선택을 구체적으로 설계한다.
+- 너무 스튜디오 화보처럼 만들지 말고, 실제 SNS 프로필/앨범 커버에 있을 법한 촬영 소유권을 설계한다.
+- scene.camera 안에는 반드시 capture_mode, filter, shot_size, angle, lens_distance, depth_focus, framing, composition, selfie_or_taken 을 채운다.
+- capture_mode 는 전면 셀카/후면 광각 셀카/거울 셀카/타이머/친구·동행·행인 他拍/여행 인증샷 중 캐릭터와 장면에 맞게 고른다.
+- filter 는 무보정 직출/과노출 플래시/필름/CCD/iPhone 6·초기 폰/Y2K flash/Clarendon/Juno/Valencia 등에서 장면에 맞게 고른다.
+- shot_size, angle, lens_distance, framing 은 얼굴 클로즈업·반신·전신 OOTD·인물 작고 배경 큰 컷, 높은 셀카·낮은 시점·차창/카페/거리 시점, 가까운 광각·친구 거리·여행 원경, 가장자리 크롭·대형 여백·전경遮挡·인물 점유율까지 구체화한다.
 - scene.camera.selfie_or_taken 은 장면에 맞게 하나만 고른다.
 - 설명/마크다운 없이 JSON 객체만 출력하고, 최상위 키는 variable, scene 두 개만 사용한다.
 
@@ -896,9 +905,18 @@ variable 스키마:
 scene 스키마:
 {scene_schema}"""
 
+    content: str | list[dict]
+    if image_data_uri:
+        content = [
+            {"type": "text", "text": txt},
+            {"type": "image_url", "image_url": {"url": image_data_uri}},
+        ]
+    else:
+        content = txt
+
     return [
         {"role": "system", "content": sys},
-        {"role": "user", "content": txt},
+        {"role": "user", "content": content},
     ]
 
 
@@ -1001,10 +1019,14 @@ def cover_image_prompt(identity: dict, style_prompt: str,
     mood = f" Mood: {persona_mood}." if persona_mood else ""
     return (
         f"{body}\n\n[ART STYLE] {style_prompt}\n\n"
-        "A beautiful, eye-catching character cover portrait that matches the persona."
-        f"{mood} Keep IDENTITY features strictly consistent. Flattering lighting, "
-        "strong composition. Apply the VARIABLE and SCENE as the specific cover shot; "
-        "do not ignore outfit, pose, location, activity, props, or camera.\n\n"
+        "A beautiful, eye-catching character profile cover image that matches the persona."
+        f"{mood} Keep IDENTITY features strictly consistent. Apply the VARIABLE and SCENE "
+        "as the specific cover shot. Treat scene.camera.capture_mode, filter, shot_size, "
+        "angle, lens_distance, depth_focus, framing, composition, and selfie_or_taken as "
+        "binding camera directions. Do not ignore outfit, pose, location, activity, props, "
+        "phone-camera texture, crop, foreground occlusion, lens distance, or filter tone. "
+        "The image should feel like a believable social profile/album cover photo, not a "
+        "generic studio portrait unless the camera schema explicitly asks for that.\n\n"
         f"{NO_TEXT_GUARD}"
     )
 
