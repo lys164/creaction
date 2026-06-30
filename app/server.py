@@ -7,9 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import config, landing, pipeline, prompts, styles, tasks
+from . import chat, config, landing, pipeline, prompts, styles, tasks
 
 app = FastAPI(title="POPOP Pipeline")
 
@@ -103,6 +103,13 @@ class BatchCoverReq(BaseModel):
     style_id: str
     use_reference: bool = False
     mode: str = "fill_missing"
+
+
+class ChatReq(BaseModel):
+    char_id: str
+    message: str
+    session_id: str | None = None
+    context: dict = Field(default_factory=dict)
 
 
 # ---------- meta ----------
@@ -595,6 +602,22 @@ def make_batch_landing(req: BatchLandingReq):
 @app.get("/api/landing/{char_id}")
 def get_latest_landing(char_id: str):
     return pipeline.load_latest_landing(char_id) or {}
+
+
+# ---------- character chat ----------
+@app.get("/api/chat/{char_id}/latest")
+def get_latest_chat(char_id: str):
+    return chat.latest(char_id)
+
+
+@app.post("/api/chat")
+def send_chat(req: ChatReq):
+    return chat.send_message(
+        req.char_id,
+        req.message,
+        context=req.context,
+        session_id=req.session_id,
+    )
 
 
 # ---------- styles management ----------

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>POPOP 角色生产链路</title>
-<link rel="stylesheet" href="/style.css?v=11" />
+<link rel="stylesheet" href="/style.css?v=12" />
 </head>
 <body>
 <header class="topbar">
@@ -14,6 +14,7 @@
     <a class="step" data-view="characters">② 角色 / 人设 / 封面</a>
     <a class="step" data-view="igposts">③ 生成 INS 帖子（9条）</a>
     <a class="step" data-view="landing">④ 生成落地页</a>
+    <a class="step" data-view="chat">聊天</a>
     <a class="step" data-view="posts">帖子类型生产</a>
     <a class="step" data-view="styles">画风库</a>
   </nav>
@@ -170,6 +171,54 @@
     </div>
   </section>
 
+  <!-- VIEW: CHAT -->
+  <section id="view-chat" class="view">
+    <h2>角色聊天</h2>
+    <p class="muted">选择平台上的角色，把人设拼入韩语聊天 prompt 后进行 KakaoTalk 风格实时对话。模型会按 JSON 数组返回，前端会渲染成聊天气泡。</p>
+    <div class="chat-layout">
+      <aside class="chat-sidebar card">
+        <label class="field chat-search-field">
+          <span>选择角色</span>
+          <input id="chatSearch" type="text" placeholder="搜索角色名 / ID" />
+        </label>
+        <div id="chatLangFilter" class="lang-filter"></div>
+        <div id="chatCharGrid" class="chat-char-list"></div>
+      </aside>
+      <section class="chat-main card">
+        <div id="chatEmpty" class="chat-empty">先从左侧选择一个角色。</div>
+        <div id="chatPanel" class="chat-panel hidden">
+          <div class="chat-head">
+            <div class="chat-avatar" id="chatAvatar">?</div>
+            <div>
+              <div id="chatTitle" class="chat-title">未选择角色</div>
+              <div id="chatSub" class="chat-sub muted"></div>
+            </div>
+            <button id="btnChatNew" class="ghost">新对话</button>
+          </div>
+          <details class="chat-context">
+            <summary>对话上下文（选填，会拼进 prompt 的「相对方信息 / 今天」）</summary>
+            <div class="chat-context-grid">
+              <label class="field"><span>当前关系 relationship</span><input id="chatRelationship" type="text" placeholder="例如：刚通过匿名匹配认识 / 暧昧中 / 前任" /></label>
+              <label class="field"><span>用户设定 user_persona</span><input id="chatUserPersona" type="text" placeholder="例如：首尔留学中的设计师，晚睡" /></label>
+              <label class="field"><span>对用户印象 user_impression</span><input id="chatUserImpression" type="text" placeholder="例如：回复慢但很会接梗" /></label>
+              <label class="field"><span>一起经历 plot_summary</span><input id="chatPlotSummary" type="text" placeholder="例如：昨天聊过咖啡和猫" /></label>
+              <label class="field"><span>用户位置 location</span><input id="chatLocation" type="text" placeholder="例如：서울 / 上海" /></label>
+              <label class="field"><span>天气 weather</span><input id="chatWeather" type="text" placeholder="例如：小雨，19°C" /></label>
+              <label class="field wide"><span>今天总结 day_summary</span><input id="chatDaySummary" type="text" placeholder="例如：今天工作有点累，晚上刚回到家" /></label>
+              <label class="field wide"><span>今日日程 day_schedule</span><textarea id="chatDaySchedule" rows="2" placeholder="例如：09:00–12:00 | 작업실 | 검은 후드 | 피곤함 | 회의, 계속 메시지를 확인함"></textarea></label>
+            </div>
+          </details>
+          <div id="chatStatus" class="status"></div>
+          <div id="chatMessages" class="chat-messages"></div>
+          <form id="chatForm" class="chat-input-row">
+            <textarea id="chatInput" rows="2" placeholder="输入你要发给角色的话。Enter 发送，Shift+Enter 换行。"></textarea>
+            <button id="btnChatSend" class="primary" type="submit">发送</button>
+          </form>
+        </div>
+      </section>
+    </div>
+  </section>
+
   <!-- VIEW: POSTS -->
   <section id="view-posts" class="view">
     <h2>批量生产帖子</h2>
@@ -211,6 +260,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script src="/app.js?v=17"></script>
+<script src="/app.js?v=18"></script>
 </body>
 </html>

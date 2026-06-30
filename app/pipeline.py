@@ -544,6 +544,11 @@ def delete_character(char_id: str) -> bool:
         shutil.rmtree(landing_dir, ignore_errors=True)
         deleted_any = True
 
+    chat_dir = config.CHAT_DIR / char_id
+    if chat_dir.exists():
+        shutil.rmtree(chat_dir, ignore_errors=True)
+        deleted_any = True
+
     # Upload files can be shared by multiple language variants. Delete only when
     # no remaining persona still points at the same uploaded source image.
     if record:

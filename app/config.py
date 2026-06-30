@@ -71,9 +71,10 @@ PERSONA_DIR = DATA_DIR / "personas"
 POST_DIR = DATA_DIR / "posts"
 IMAGE_DIR = DATA_DIR / "images"
 LANDING_DIR = DATA_DIR / "landing"
+CHAT_DIR = DATA_DIR / "chat"
 WEB_DIR = ROOT / "web"
 
-for _d in (UPLOAD_DIR, PERSONA_DIR, POST_DIR, IMAGE_DIR, LANDING_DIR):
+for _d in (UPLOAD_DIR, PERSONA_DIR, POST_DIR, IMAGE_DIR, LANDING_DIR, CHAT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ---- Languages ----

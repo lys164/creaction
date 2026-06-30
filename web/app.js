@@ -52,7 +52,7 @@ async function runTask(path, opts, onProgress) {
 }
 
 // 角色语种筛选：各视图独立保存当前选中语种（""=全部）。
-const LANG_FILTER = { char: "", ig: "", post: "", ld: "" };
+const LANG_FILTER = { char: "", ig: "", post: "", ld: "", chat: "" };
 const LANG_ORDER = ["zh", "ja", "ko", "en"];
 
 // 渲染语种筛选条。containerId 对应 HTML 里的 .lang-filter，chars 为完整角色列表，
@@ -168,6 +168,7 @@ $$(".step").forEach((s) =>
     if (v === "posts") initPostsView();
     if (v === "igposts") initIgView();
     if (v === "landing") initLandingView();
+    if (v === "chat") initChatView();
     if (v === "styles") loadStylesEditor();
   })
 );
@@ -1076,6 +1077,268 @@ async function deleteIgPost(btn) {
     if (/not found|没有/i.test(e.message)) loadLatestIg(IG_ACTIVE_CHAR);
   }
 }
+
+// ========== CHAT VIEW ==========
+let CHAT_CHARS = [];
+let CHAT_ACTIVE_CHAR = null;
+let CHAT_ACTIVE_REC = null;
+let CHAT_SESSION_ID = null;
+let CHAT_MESSAGES = [];
+
+async function initChatView() {
+  CHAT_CHARS = await api("/api/characters");
+  renderLangFilter("chatLangFilter", "chat", CHAT_CHARS, renderChatCharGrid);
+  renderChatCharGrid();
+  const shown = filterChatChars();
+  if (!CHAT_ACTIVE_CHAR && shown.length) {
+    await selectChatChar(shown[0].char_id);
+  } else if (CHAT_ACTIVE_CHAR) {
+    await selectChatChar(CHAT_ACTIVE_CHAR, { keepSession: true });
+  }
+}
+
+function filterChatChars() {
+  const q = ($("#chatSearch")?.value || "").trim().toLowerCase();
+  return filterByLang(CHAT_CHARS, "chat").filter((c) => {
+    if (!q) return true;
+    return `${c.name || ""} ${c.char_id || ""}`.toLowerCase().includes(q);
+  });
+}
+
+function renderChatCharGrid() {
+  const box = $("#chatCharGrid");
+  if (!box) return;
+  box.innerHTML = "";
+  const list = filterChatChars();
+  if (!list.length) {
+    box.innerHTML = '<p class="muted">没有符合当前条件的角色。</p>';
+    return;
+  }
+  list.forEach((c) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "chat-char-item";
+    item.dataset.charId = c.char_id;
+    const cover = c.cover_url
+      ? `<img src="${imgUrl(null, c.cover_url)}" />`
+      : `<span>${escapeHtml((c.name || "?").slice(0, 1))}</span>`;
+    const langTag = c.lang_name
+      ? `<span class="lang-badge ${c.lang}">${c.lang_name}</span>`
+      : "";
+    item.innerHTML = `<div class="chat-char-avatar">${cover}</div>
+      <div class="chat-char-meta"><div class="chat-char-name">${langTag}${escapeHtml(c.name || "(未命名)")}</div>
+      <div class="chat-char-id">${escapeHtml(c.char_id || "")}</div></div>`;
+    item.addEventListener("click", () => selectChatChar(c.char_id));
+    box.appendChild(item);
+  });
+  markActiveChatChar();
+}
+
+function markActiveChatChar() {
+  $$("#chatCharGrid .chat-char-item").forEach((x) =>
+    x.classList.toggle("active", x.dataset.charId === CHAT_ACTIVE_CHAR)
+  );
+}
+
+async function selectChatChar(charId, opts = {}) {
+  if (!charId) return;
+  CHAT_ACTIVE_CHAR = charId;
+  markActiveChatChar();
+  $("#chatEmpty").classList.add("hidden");
+  $("#chatPanel").classList.remove("hidden");
+  $("#chatMessages").innerHTML = "";
+  $("#chatStatus").innerHTML = `<span class="spinner"></span> 正在载入角色…`;
+  try {
+    const [rec, latest] = await Promise.all([
+      api("/api/character/" + charId),
+      api("/api/chat/" + charId + "/latest"),
+    ]);
+    CHAT_ACTIVE_REC = rec;
+    const p = rec.persona || {};
+    const summary = p.profile || (p.personality && p.personality.summary) || "";
+    $("#chatTitle").innerHTML = `${rec.lang ? `<span class="lang-badge ${rec.lang}">${LANG_NAMES_FULL[rec.lang] || rec.lang}</span>` : ""}${escapeHtml(localized(p.name) || rec.char_id)}`;
+    $("#chatSub").textContent = summary ? localized(summary) : rec.char_id;
+    renderChatAvatar(rec);
+
+    const session = latest.session;
+    if (opts.forceNew) {
+      CHAT_SESSION_ID = null;
+      CHAT_MESSAGES = (latest.opening || []).length
+        ? [{ role: "assistant", items: latest.opening, is_opening: true, created: Math.floor(Date.now() / 1000) }]
+        : [];
+    } else if (opts.keepSession && CHAT_SESSION_ID) {
+      // 保持当前会话状态，仅刷新角色头部。
+    } else if (session && session.messages && session.messages.length) {
+      CHAT_SESSION_ID = session.session_id;
+      CHAT_MESSAGES = session.messages;
+    } else {
+      CHAT_SESSION_ID = null;
+      CHAT_MESSAGES = (latest.opening || []).length
+        ? [{ role: "assistant", items: latest.opening, is_opening: true, created: Math.floor(Date.now() / 1000) }]
+        : [];
+    }
+    renderChatMessages();
+    $("#chatStatus").innerHTML = CHAT_SESSION_ID ? "已载入最近一次对话。" : "已载入角色开场白，可直接开始聊天。";
+  } catch (e) {
+    $("#chatStatus").innerHTML = "载入失败：" + e.message;
+    toast("聊天角色载入失败", "err");
+  }
+}
+
+function renderChatAvatar(rec) {
+  const av = $("#chatAvatar");
+  const name = localized((rec.persona || {}).name) || rec.char_id || "?";
+  const cover = rec.cover && (rec.cover.local_path || rec.cover.url)
+    ? imgUrl(rec.cover.local_path, rec.cover.url)
+    : null;
+  if (cover) {
+    av.innerHTML = `<img src="${cover}" />`;
+  } else {
+    av.textContent = name.slice(0, 1);
+  }
+}
+
+function chatContextPayload() {
+  return {
+    relationship: $("#chatRelationship").value.trim(),
+    user_persona: $("#chatUserPersona").value.trim(),
+    user_impression: $("#chatUserImpression").value.trim(),
+    plot_summary: $("#chatPlotSummary").value.trim(),
+    location: $("#chatLocation").value.trim(),
+    weather: $("#chatWeather").value.trim(),
+    day_summary: $("#chatDaySummary").value.trim(),
+    day_schedule: $("#chatDaySchedule").value.trim(),
+  };
+}
+
+function renderChatMessages() {
+  const box = $("#chatMessages");
+  box.innerHTML = "";
+  if (!CHAT_MESSAGES.length) {
+    box.innerHTML = '<div class="chat-placeholder">暂无消息，发一句开始。</div>';
+    return;
+  }
+  CHAT_MESSAGES.forEach((m) => {
+    if (m.role === "user") {
+      box.appendChild(renderUserBubble(m.content || ""));
+      return;
+    }
+    const items = Array.isArray(m.items) ? m.items : [];
+    if (m.is_opening) {
+      const note = document.createElement("div");
+      note.className = "chat-note";
+      note.textContent = "角色开场白";
+      box.appendChild(note);
+    }
+    items.forEach((it) => box.appendChild(renderAssistantItem(it)));
+  });
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderUserBubble(content) {
+  const row = document.createElement("div");
+  row.className = "chat-row user";
+  row.innerHTML = `<div class="chat-bubble user-bubble">${escapeHtml(content)}</div>`;
+  return row;
+}
+
+function renderAssistantItem(item) {
+  const type = item && item.type ? item.type : "text";
+  const data = (item && item.data) || {};
+  const row = document.createElement("div");
+  row.className = "chat-row assistant";
+  if (type === "voice") {
+    row.innerHTML = `<div class="chat-bubble assistant-bubble voice-bubble"><span class="chat-type-label">VOICE</span>${escapeHtml(data.content || "")}${data.emotion ? `<div class="chat-extra">${escapeHtml(data.emotion)}</div>` : ""}</div>`;
+    return row;
+  }
+  if (type === "sticker") {
+    row.innerHTML = `<div class="chat-bubble assistant-bubble sticker-bubble"><span class="chat-type-label">STICKER</span><div>${escapeHtml(data.scene || "sticker")}</div><div class="chat-extra">${escapeHtml(data.emotion || "")}</div></div>`;
+    return row;
+  }
+  if (type === "image") {
+    row.innerHTML = `<div class="chat-bubble assistant-bubble image-bubble"><span class="chat-type-label">IMAGE · ${escapeHtml(data.category || "photo")}</span><div>${escapeHtml(data.description || "")}</div></div>`;
+    return row;
+  }
+  if (type === "html_file") {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-bubble assistant-bubble html-bubble";
+    wrap.innerHTML = `<span class="chat-type-label">HTML</span><div class="html-title">${escapeHtml(data.file_name || "공유")}</div><div>${escapeHtml(data.description || "HTML 콘텐츠")}</div><button class="ghost chat-open-html" type="button">预览 HTML</button>`;
+    wrap.querySelector(".chat-open-html").addEventListener("click", () => {
+      const w = window.open("", "_blank");
+      w.document.open();
+      w.document.write(data.html || "");
+      w.document.close();
+    });
+    row.appendChild(wrap);
+    return row;
+  }
+  if (type === "state_update") {
+    row.className = "chat-row state";
+    row.innerHTML = `<div class="chat-state">${escapeHtml(data.status || data.emotion || "状态已更新")}</div>`;
+    return row;
+  }
+  row.innerHTML = `<div class="chat-bubble assistant-bubble">${escapeHtml(data.content || "")}</div>`;
+  return row;
+}
+
+async function sendChatMessage() {
+  if (!CHAT_ACTIVE_CHAR) return toast("请先选择角色", "err");
+  const input = $("#chatInput");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  CHAT_MESSAGES.push({ role: "user", content: text, created: Math.floor(Date.now() / 1000) });
+  renderChatMessages();
+  const btn = $("#btnChatSend");
+  btn.disabled = true;
+  $("#chatStatus").innerHTML = `<span class="spinner"></span> 角色正在输入…`;
+  try {
+    const r = await api("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        char_id: CHAT_ACTIVE_CHAR,
+        message: text,
+        session_id: CHAT_SESSION_ID,
+        context: chatContextPayload(),
+      }),
+    });
+    CHAT_SESSION_ID = r.session.session_id;
+    CHAT_MESSAGES = r.session.messages || [];
+    renderChatMessages();
+    $("#chatStatus").innerHTML = "";
+  } catch (e) {
+    CHAT_MESSAGES.push({
+      role: "assistant",
+      items: [{ type: "text", data: { content: "发送失败：" + e.message } }],
+      created: Math.floor(Date.now() / 1000),
+    });
+    renderChatMessages();
+    $("#chatStatus").innerHTML = "失败：" + e.message;
+    toast("聊天失败", "err");
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+}
+
+$("#chatSearch")?.addEventListener("input", renderChatCharGrid);
+$("#btnChatNew")?.addEventListener("click", async () => {
+  CHAT_SESSION_ID = null;
+  CHAT_MESSAGES = [];
+  if (CHAT_ACTIVE_CHAR) await selectChatChar(CHAT_ACTIVE_CHAR, { forceNew: true });
+  toast("已开始新对话", "ok");
+});
+$("#chatForm")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  sendChatMessage();
+});
+$("#chatInput")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
 
 // ========== STYLES EDITOR ==========
 async function loadStylesEditor() {

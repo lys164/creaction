@@ -116,6 +116,10 @@ def chat_json(
     return _parse_json(text)
 
 
+def parse_json_text(text: str) -> Any:
+    return _parse_json(text)
+
+
 def _parse_json(text: str) -> Any:
     t = text.strip()
     if t.startswith("```"):
