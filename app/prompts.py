@@ -861,8 +861,7 @@ def build_identity_messages(persona: dict, image_data_uris: list[str] | None = N
     ]
 
 
-def build_cover_spec_messages(persona: dict, identity: dict,
-                              image_data_uri: str | None = None) -> list[dict]:
+def build_cover_spec_messages(persona: dict, identity: dict) -> list[dict]:
     """Create the variable + scene block used for the character cover image."""
     persona_str = json.dumps(persona, ensure_ascii=False)
     identity_str = json.dumps(identity, ensure_ascii=False)
@@ -882,7 +881,6 @@ def build_cover_spec_messages(persona: dict, identity: dict,
 규칙:
 - 모든 값은 한국어로 구체적으로 기술.
 - identity 에 있는 고정 외모 특징은 바꾸지 말 것.
-- 참조 이미지가 함께 제공되면, 그 한 장을 커버의 시각적 기준으로 우선한다. 여러 원본이 있더라도 커버 schema 는 이 한 장의 얼굴·분위기·사진감을 기준으로 잡는다.
 - variable 은 이 커버에서만 쓰는 표정, 시선, 메이크업, 당일 헤어스타일, 의상, 액세서리, 포즈다.
 - scene 은 이 커버 한 장의 장소, 활동, 소품, 시간대, 카메라다.
 - 커버 이미지는 첫인상용이므로 캐릭터의 매력과 관계 훅이 한눈에 보여야 한다.
@@ -906,18 +904,9 @@ variable 스키마:
 scene 스키마:
 {scene_schema}"""
 
-    content: str | list[dict]
-    if image_data_uri:
-        content = [
-            {"type": "text", "text": txt},
-            {"type": "image_url", "image_url": {"url": image_data_uri}},
-        ]
-    else:
-        content = txt
-
     return [
         {"role": "system", "content": sys},
-        {"role": "user", "content": content},
+        {"role": "user", "content": txt},
     ]
 
 
@@ -1026,8 +1015,9 @@ def cover_image_prompt(identity: dict, style_prompt: str,
         "angle, lens_distance, depth_focus, framing, composition, and selfie_or_taken as "
         "binding camera directions. Do not ignore outfit, pose, location, activity, props, "
         "phone-camera texture, crop, foreground occlusion, lens distance, or filter tone. "
-        "The image should feel like a believable social profile/album cover photo, not a "
-        "generic studio portrait unless the camera schema explicitly asks for that.\n\n"
+        "Use the identity as the person and the camera schema as the shoot direction. "
+        "The image should feel like a believable social profile/album cover photo, not "
+        "a generic studio portrait unless the camera schema explicitly asks for that.\n\n"
         f"{NO_TEXT_GUARD}"
     )
 
@@ -1493,7 +1483,6 @@ def _avoid_kinds_hint(avoid_kinds, lang: str) -> str:
         "\n- 【同组角色已经用得多的形式】本次 feed 尽量避开以下 photo_kind，改用别的形式做出变化"
         f"（非强制，只为避免形式扎堆）：{joined}"
     )
-
 
 
 def _sample_topics_across_buckets(lang: str = "zh", n_buckets: int = 12, per_bucket: int = 3) -> str:

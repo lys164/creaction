@@ -18,27 +18,232 @@ from . import config
 _PROMPTS_FILE = Path(__file__).resolve().parent / "data" / "landing_prompts.json"
 _PROMPTS = json.loads(_PROMPTS_FILE.read_text(encoding="utf-8"))
 
-SP_TEMPLATE: str = _PROMPTS["SP_TEMPLATE"]
-STYLE_MAP: dict = _PROMPTS["STYLE_MAP"]
-DEFAULT_DESIGN_DIRECTIVE: str = _PROMPTS["DEFAULT_DESIGN_DIRECTIVE"]
-FALLBACK: str = _PROMPTS["FALLBACK"]
+_PROMPT_PACKS: dict[str, dict] = _PROMPTS.get("PROMPT_PACKS") or {
+    "zh-CN": {
+        "SP_TEMPLATE": _PROMPTS.get("SP_TEMPLATE", ""),
+        "STYLE_MAP": _PROMPTS.get("STYLE_MAP", {}),
+        "DEFAULT_DESIGN_DIRECTIVE": _PROMPTS.get("DEFAULT_DESIGN_DIRECTIVE", ""),
+        "FALLBACK": _PROMPTS.get("FALLBACK", ""),
+    }
+}
+
+_LANG_TO_PROMPT_LANG = {
+    "zh": "zh-CN",
+    "zh-CN": "zh-CN",
+    "zh-TW": "zh-TW",
+    "ja": "ja",
+    "ko": "ko",
+    "en": "en",
+}
+_DEFAULT_LOCALE_BY_LANG = {
+    "zh": "CN",
+    "zh-CN": "CN",
+    "zh-TW": "TW",
+    "ja": "JP",
+    "ko": "KR",
+    "en": "US",
+}
+_LOCALE_FIELDS = (
+    "im", "social", "id_docs", "photo", "fonts",
+    "idol", "money", "aesthetic", "manners",
+)
+
+SP_TEMPLATE: str = _PROMPT_PACKS["zh-CN"].get("SP_TEMPLATE", "")
+STYLE_MAP: dict = _PROMPT_PACKS["zh-CN"].get("STYLE_MAP", {})
+DEFAULT_DESIGN_DIRECTIVE: str = _PROMPT_PACKS["zh-CN"].get(
+    "DEFAULT_DESIGN_DIRECTIVE", ""
+)
+FALLBACK: str = _PROMPT_PACKS["zh-CN"].get("FALLBACK", "")
 
 
-def landing_styles() -> list[str]:
-    """Preset landing-page style names (free text also accepted)."""
-    return list(STYLE_MAP.keys())
+def _prompt_lang(lang: str | None) -> str:
+    code = _LANG_TO_PROMPT_LANG.get(lang or "") or "zh-CN"
+    return code if code in _PROMPT_PACKS else "zh-CN"
 
 
-def build_system_prompt(style_text: str | None) -> str:
-    """Inject the chosen style (preset description or free text) into the template."""
+def _prompt_pack(lang: str | None) -> dict:
+    return _PROMPT_PACKS.get(_prompt_lang(lang)) or _PROMPT_PACKS["zh-CN"]
+
+
+def _locale_code(lang: str | None, locale: str | None = None) -> str:
+    locale_map = _PROMPTS.get("LOCALE_MAP") or {}
+    code = (locale or "").strip().upper()
+    if code in locale_map:
+        return code
+    return _DEFAULT_LOCALE_BY_LANG.get(lang or "", "CN")
+
+
+def landing_styles(lang: str | None = None) -> list[str]:
+    """Preset landing-page style names (free text also accepted).
+
+    The UI uses the zh-CN keys as stable cross-language preset IDs. When a
+    character is generated in another language, the same preset index is mapped
+    to that language's prompt pack.
+    """
+    if not lang:
+        return list(STYLE_MAP.keys())
+    return list((_prompt_pack(lang).get("STYLE_MAP") or STYLE_MAP).keys())
+
+
+def _style_content(style_text: str | None, pack: dict) -> str:
     style = (style_text or "").strip()
-    style_content = STYLE_MAP.get(style) or style or FALLBACK
-    return SP_TEMPLATE.replace("{{style}}", style_content)
+    style_map = pack.get("STYLE_MAP") or {}
+    if style in style_map:
+        return style_map[style]
+
+    # Preserve existing front-end chips: zh-CN preset names are treated as
+    # stable IDs and mapped by position into the active language pack.
+    default_keys = list(STYLE_MAP.keys())
+    if style in STYLE_MAP:
+        idx = default_keys.index(style)
+        current_values = list(style_map.values())
+        if idx < len(current_values):
+            return current_values[idx]
+        return STYLE_MAP[style]
+
+    # Also support localized style names from older pages or direct API calls.
+    for other_pack in _PROMPT_PACKS.values():
+        other_map = other_pack.get("STYLE_MAP") or {}
+        other_keys = list(other_map.keys())
+        if style in other_map:
+            idx = other_keys.index(style)
+            current_values = list(style_map.values())
+            if idx < len(current_values):
+                return current_values[idx]
+            return other_map[style]
+
+    return style or pack.get("FALLBACK") or FALLBACK
+
+
+def _locale_directive(lang: str | None, locale: str | None = None) -> str:
+    locale_map = _PROMPTS.get("LOCALE_MAP") or {}
+    locale_dirs = _PROMPTS.get("LOCALE_DIR_I18N") or {}
+    if not locale_map or not locale_dirs:
+        return ""
+
+    prompt_lang = _prompt_lang(lang)
+    loc = locale_map.get(_locale_code(lang, locale)) or locale_map.get("CN")
+    directive = locale_dirs.get(prompt_lang) or locale_dirs.get("zh-CN")
+    if not loc or not directive:
+        return ""
+
+    sep = directive.get("sep", ": ")
+    out = [
+        "---",
+        "",
+        directive.get("title", "## Cultural localization"),
+        "",
+        directive.get("intro", ""),
+        "",
+        f"**{directive.get('targetLabel', 'Target region')}{sep}"
+        f"{loc.get('label') or loc.get('name') or ''}**",
+    ]
+    bullets = directive.get("bullets") or []
+    values = [loc.get(field, "") for field in _LOCALE_FIELDS]
+    for idx, label in enumerate(bullets):
+        if idx < len(values) and values[idx]:
+            out.append(f"- {label}{sep}{values[idx]}")
+    if directive.get("eg"):
+        out.extend(["", directive["eg"]])
+    return "\n\n" + "\n".join(out)
+
+
+def build_system_prompt(
+    style_text: str | None,
+    lang: str | None = "zh",
+    locale: str | None = None,
+) -> str:
+    """Inject style + language/locale prompt pack into the system prompt."""
+    pack = _prompt_pack(lang)
+    template = pack.get("SP_TEMPLATE") or SP_TEMPLATE
+    return template.replace("{{style}}", _style_content(style_text, pack)) + _locale_directive(
+        lang, locale
+    )
+
+
+def _default_design_directive(lang: str | None) -> str:
+    return _prompt_pack(lang).get("DEFAULT_DESIGN_DIRECTIVE") or DEFAULT_DESIGN_DIRECTIVE
 
 
 # --------------------------------------------------------------------------
 # Persona record -> flat "profile" text the system prompt expects
 # --------------------------------------------------------------------------
+_MSG_I18N = {
+    "zh": {
+        "unnamed": "(未命名角色)",
+        "char_info": "# 角色的信息：",
+        "opening_title": "# TA 的开场白与关系钩子（用作页面「勾你来聊天」的素材，提炼成 TA 向你自我呈现/邀请的语气，不要原样照搬整段）：",
+        "opening_note": "开场情境 note",
+        "opening_msgs": "TA 主动对你说的第一句话们",
+        "cover_yes": 'cover: 角色有封面图（渲染器会自动注入到 class="oc-cover" 的元素中，你只需留好槽位，src 留空）',
+        "cover_no": "cover: 无封面图（请用 CSS 渐变/纹理生成抽象视觉占位）",
+        "page_lang": "# 页面文案语言：请用 {name} 撰写页面上所有可见文案。{directive}",
+        "style_prefix": "风格：",
+        "current_html": "\n\n----\n当前 HTML（在此基础上修改）：\n",
+        "current_html_long": "\n\n----\n当前页面已生成（代码较长不重复附上）。请在现有结构基础上修改，保持整体风格一致。",
+        "request": "# 用户要求：",
+        "default_request": "请根据角色信息生成主页",
+        "output_lang": "\n\n⚠️ 页面上所有可见文字（标题、正文、标签、装饰文案等）一律使用简体中文。",
+        "design_keywords": r"交互|互动|滑动|布局|美观|组件|模块|元件",
+    },
+    "ja": {
+        "unnamed": "(名前未設定)",
+        "char_info": "# キャラクター情報：",
+        "opening_title": "# 最初のセリフと関係性のフック（ページで『話してみたい』と思わせる素材。全文をそのまま写さず、自己提示／招待の口調に要約）：",
+        "opening_note": "導入シチュエーション note",
+        "opening_msgs": "キャラクターから最初に送られる言葉",
+        "cover_yes": 'cover: カバー画像あり（レンダラーが class="oc-cover" の要素に自動注入するので、src は空のままスロットだけ用意する）',
+        "cover_no": "cover: カバー画像なし（CSS グラデーション／テクスチャで抽象的なビジュアルを作る）",
+        "page_lang": "# ページ文言の言語：ページ上の可視テキストはすべて {name} で書くこと。{directive}",
+        "style_prefix": "スタイル：",
+        "current_html": "\n\n----\n現在の HTML（これをベースに修正）：\n",
+        "current_html_long": "\n\n----\nページは生成済み（コードが長いため再添付しません）。既存の構造をベースに修正し、全体のスタイルを一貫させてください。",
+        "request": "# ユーザーの要望：",
+        "default_request": "キャラクター情報をもとにホームページを生成してください",
+        "output_lang": "\n\n⚠️ ページ上のすべての可視テキスト（見出し・本文・ラベル・装飾コピーなど）は必ず日本語で書いてください。",
+        "design_keywords": r"インタラクション|操作|スライド|レイアウト|デザイン|コンポーネント|モジュール",
+    },
+    "ko": {
+        "unnamed": "(이름 없는 캐릭터)",
+        "char_info": "# 캐릭터 정보:",
+        "opening_title": "# 첫 대사와 관계 훅(페이지에서 ‘말 걸고 싶게’ 만드는 소재. 원문을 그대로 복붙하지 말고, 캐릭터가 자신을 드러내거나 초대하는 말투로 추출):",
+        "opening_note": "오프닝 상황 note",
+        "opening_msgs": "캐릭터가 먼저 보내는 첫마디들",
+        "cover_yes": 'cover: 커버 이미지 있음(렌더러가 class="oc-cover" 요소에 자동 주입하므로, src는 비워 둔 슬롯만 준비)',
+        "cover_no": "cover: 커버 이미지 없음(CSS 그라데이션/텍스처로 추상 비주얼 플레이스홀더 생성)",
+        "page_lang": "# 페이지 문구 언어: 페이지의 모든 가시 텍스트는 {name}로 작성하세요. {directive}",
+        "style_prefix": "스타일: ",
+        "current_html": "\n\n----\n현재 HTML(이를 기반으로 수정):\n",
+        "current_html_long": "\n\n----\n현재 페이지가 이미 생성됨(코드가 길어 반복 첨부 안 함). 기존 구조를 기반으로 수정하고 전체 스타일을 일관되게 유지하세요.",
+        "request": "# 사용자 요청:",
+        "default_request": "캐릭터 정보를 바탕으로 메인 페이지를 생성해 주세요",
+        "output_lang": "\n\n⚠️ 페이지의 모든 가시 텍스트(제목, 본문, 라벨, 장식 문구 등)는 전부 한국어로 작성하세요.",
+        "design_keywords": r"인터랙션|상호작용|슬라이드|레이아웃|디자인|컴포넌트|모듈",
+    },
+    "en": {
+        "unnamed": "(Unnamed character)",
+        "char_info": "# Character info:",
+        "opening_title": "# Opening line and relationship hook (use as material to make the page invite a chat; distill the voice, do not copy the whole passage verbatim):",
+        "opening_note": "opening situation note",
+        "opening_msgs": "first lines the character sends first",
+        "cover_yes": 'cover: the character has a cover image (the renderer injects it into class="oc-cover" automatically; just leave an empty slot/src)',
+        "cover_no": "cover: no cover image (use a CSS gradient/texture for an abstract visual placeholder)",
+        "page_lang": "# Page copy language: write every visible text on the page in {name}. {directive}",
+        "style_prefix": "Style: ",
+        "current_html": "\n\n----\nCurrent HTML (modify on top of this):\n",
+        "current_html_long": "\n\n----\nThe page has already been generated (code is long, not re-attached). Please modify on top of the existing structure and keep the overall style consistent.",
+        "request": "# User request:",
+        "default_request": "Please generate a homepage based on the character info",
+        "output_lang": "\n\n⚠️ All visible text on the page (titles, body, labels, decorative copy, etc.) must be written in English.",
+        "design_keywords": r"interactive|interaction|slide|layout|aesthetic|component|module",
+    },
+}
+
+
+def _msg(lang: str | None) -> dict:
+    return _MSG_I18N.get(lang or "") or _MSG_I18N["zh"]
+
+
 _FIELD_LABELS = {
     "profile": "profile",
     "tags": "tags",
@@ -175,16 +380,16 @@ def moments_to_profile_text(moments: list[dict] | None) -> str:
     return "\n\n".join(rows)
 
 
-def _opening_text(persona: dict) -> str:
-    """Render the persona's opening (note + first messages) as a chat hook so the
-    landing page can speak in the character's own voice and invite a conversation."""
+def _opening_text(persona: dict, lang: str | None = "zh") -> str:
+    """Render opening (note + first messages) as a localized chat hook."""
     op = persona.get("opening")
     if not isinstance(op, dict):
         return ""
+    labels = _msg(lang)
     lines = []
     note = _stringify(op.get("note"))
     if note:
-        lines.append(f"开场情境 note: {note}")
+        lines.append(f"{labels['opening_note']}: {note}")
     msgs = op.get("messages")
     if isinstance(msgs, list):
         texts = []
@@ -198,61 +403,30 @@ def _opening_text(persona: dict) -> str:
             elif isinstance(m, str) and m.strip():
                 texts.append(m.strip())
         if texts:
-            lines.append("TA 主动对你说的第一句话们: " + " / ".join(texts[:6]))
+            lines.append(f"{labels['opening_msgs']}: " + " / ".join(texts[:6]))
     return "\n".join(lines)
 
 
 def build_user_message(persona: dict, lang: str, has_cover: bool,
                        request: str = "", style_text: str | None = None,
                        current_html: str | None = None,
-                       moments: list[dict] | None = None,
-                       post_images: list[dict] | None = None) -> str:
+                       moments: list[dict] | None = None) -> str:
     """Assemble the structured user turn (character info + directive + request)."""
-    name = _stringify(persona.get("name")) or "(未命名角色)"
+    labels = _msg(lang)
+    name = _stringify(persona.get("name")) or labels["unnamed"]
     profile = _stringify(persona.get("profile"))
     detail = persona_to_profile_text(persona)
 
     parts = []
-    info = "# 角色的信息：\n" + name + "\n"
+    info = labels["char_info"] + "\n" + name + "\n"
     if profile:
         info += "profile: " + profile + "\n"
     if detail:
         info += detail + "\n"
-    opening = _opening_text(persona)
+    opening = _opening_text(persona, lang)
     if opening:
-        info += (
-            "\n# TA 的开场白与关系钩子（用作页面「勾你来聊天」的素材，"
-            "提炼成 TA 向你自我呈现/邀请的语气，不要原样照搬整段）：\n" + opening + "\n"
-        )
-    if has_cover:
-        info += (
-            "cover: 角色有封面图（渲染器会自动注入到 class=\"oc-cover\" 的元素中，"
-            "你只需留好槽位，src 留空）\n"
-        )
-    else:
-        info += "cover: 无封面图（请用 CSS 渐变/纹理生成抽象视觉占位）\n"
-    if post_images:
-        n = len(post_images)
-        lines = [
-            f"\n# TA 的 {n} 张真实生活照片（已作为图片发给你，可见）——补充素材，请自行取舍：",
-            "定位：页面主体是「人物介绍」（名称/身份/特质/与观者的关系/钩子按 §二 呈现）；"
-            "这些生活照是丰富氛围、增加生活实感的补充料。两者主次要分明——人物信息是主角，"
-            "照片是让 TA 更鲜活的注脚，别让照片把人物介绍挤掉或盖住。",
-            "可读性优先（硬性）：照片不得遮挡、压住人物信息的文字（名称/身份/特质/关系/钩子）。"
-            "拼贴、叠压、错位等手法都欢迎，但叠的是彼此的边角与留白，不能压在正文文字上；"
-            "文字层 z-index 必须高于照片。怎么编排（相册/拼贴/动态流/穿插点缀/留白大图皆可）、"
-            "用几张、占多大，你按风格和整体平衡自由决定，只要主次清楚、信息不被遮挡即可。",
-            "槽位规则：选用的第 i 张图放进 class=\"oc-post-i\" 的元素（i 从 1 开始，对应下方编号），"
-            "用法同封面——`<img class=\"oc-post-1\" src=\"\" alt=\"...\">` 留空 src，"
-            "或 `<div class=\"oc-post-1\" style=\"background-size:cover;background-position:center;"
-            "width:...;height:...\"></div>`，渲染器会自动注入真实图片。容器务必设明确宽高。"
-            "不必全放，没用到的编号不留空槽位即可。",
-            "各图对应的动态文字（仅供你判断取舍与编排，不必写进页面）：",
-        ]
-        for i, pi in enumerate(post_images, start=1):
-            cap = (pi.get("caption") or "").strip().replace("\n", " ")
-            lines.append(f"  oc-post-{i}: {cap[:60]}" if cap else f"  oc-post-{i}: （无文字）")
-        info += "\n".join(lines) + "\n"
+        info += "\n" + labels["opening_title"] + "\n" + opening + "\n"
+    info += (labels["cover_yes"] if has_cover else labels["cover_no"]) + "\n"
     parts.append(info)
 
     moment_text = moments_to_profile_text(moments)
@@ -268,34 +442,31 @@ def build_user_message(persona: dict, lang: str, has_cover: bool,
             "空字段不要渲染，不要写 null/none/空对象。"
         )
 
-    # locale hint so on-page copy reads native to the character's language
-    parts.append(
-        f"# 页面文案语言：请用 {config.lang_name(lang)} 撰写页面上所有可见文案。"
-        f"{config.lang_directive(lang)}"
-    )
+    parts.append(labels["page_lang"].format(
+        name=config.lang_name(lang), directive=config.lang_directive(lang)
+    ))
 
     command = (request or "").strip()
     if style_text:
-        command = (command + "\n" if command else "") + "风格：" + style_text
+        command = (
+            command + "\n" if command else ""
+        ) + labels["style_prefix"] + style_text
     if current_html and current_html.strip():
         html = current_html.strip()
         if len(html) < 6000:
-            command += "\n\n----\n当前 HTML（在此基础上修改）：\n" + html
+            command += labels["current_html"] + html
         else:
-            command += (
-                "\n\n----\n当前页面已生成（代码较长不重复附上）。"
-                "请在现有结构基础上修改，保持整体风格一致。"
-            )
+            command += labels["current_html_long"]
 
-    # first-pass auto design directive (only when user didn't already steer)
-    if not current_html:
-        if not re.search(r"交互|互动|滑动|布局|美观|组件", command):
-            command = (
-                DEFAULT_DESIGN_DIRECTIVE + "\n\n" + command
-                if command else DEFAULT_DESIGN_DIRECTIVE
-            )
+    if not current_html and not re.search(labels["design_keywords"], command, flags=re.I):
+        default_directive = _default_design_directive(lang)
+        command = (
+            default_directive + "\n\n" + command
+            if command else default_directive
+        )
 
-    parts.append("# 用户要求：" + (command or "请根据角色信息生成主页"))
+    command += labels["output_lang"]
+    parts.append(labels["request"] + (command or labels["default_request"]))
     return "\n\n".join(parts)
 
 

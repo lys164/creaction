@@ -19,6 +19,8 @@ import requests
 
 from . import api_client, config, landing, prompts, styles
 
+COVER_SPEC_VERSION = 2
+
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
@@ -596,26 +598,23 @@ def build_identity(char_id: str) -> dict:
 def build_cover_spec(char_id: str) -> dict:
     """Generate the cover-specific variable + scene block.
 
-    Persona generation can use multiple source images, but cover planning uses a
-    single visual anchor so the cover pose/camera/filter does not average across
-    multiple faces or photo styles.
+    Persona generation can use multiple source images, and identity can use one
+    main visual anchor. Cover planning stays text-only so the shooting/filter
+    schema comes from the character rather than copying the uploaded photo.
     """
     record = load_character(char_id)
     if not record.get("identity"):
         build_identity(char_id)
         record = load_character(char_id)
 
-    cover_ref = _first_source_image(record)
-    cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
     messages = prompts.build_cover_spec_messages(
-        record["persona"], record["identity"], cover_ref_uri)
+        record["persona"], record["identity"])
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
         "variable": spec.get("variable", {}),
         "scene": spec.get("scene", {}),
+        "version": COVER_SPEC_VERSION,
     }
-    if cover_ref:
-        record["cover_spec"]["reference_image"] = cover_ref
     save_character(record)
     return record
 
@@ -650,7 +649,10 @@ def generate_cover(
         build_identity(char_id)
         record = load_character(char_id)
 
-    if mode == "fill_missing" and not record.get("cover_spec"):
+    cover_spec = record.get("cover_spec") or {}
+    if mode == "fill_missing" and (
+        not cover_spec or cover_spec.get("version") != COVER_SPEC_VERSION
+    ):
         build_cover_spec(char_id)
         record = load_character(char_id)
 
@@ -903,47 +905,26 @@ def generate_landing(
     persona = record.get("persona", {})
     cover_url = _cover_url_for_landing(record)
 
-    # 收集最近一批 IG 帖子里【已生成且文件存在】的图，连同其文案，
-    # 既作为多模态设计参考，也作为页面里真实展示的相册素材（oc-post-N 槽位）。
-    ig = load_latest_ig(char_id) or {}
-    post_imgs: list[dict] = []  # {local_path, url, caption}
-    for post in (ig.get("posts", []) if isinstance(ig, dict) else []):
-        if len(post_imgs) >= 3:
-            break
-        lp = (post.get("image") or {}).get("local_path")
-        if lp and Path(lp).exists():
-            post_imgs.append({
-                "local_path": lp,
-                "url": f"/img/{Path(lp).name}",
-                "caption": _localized_text(
-                    post.get("content"), record.get("lang", config.LANGUAGES[0])),
-            })
-
-    system_prompt = landing.build_system_prompt(style_text)
+    lang = record.get("lang", config.LANGUAGES[0])
+    system_prompt = landing.build_system_prompt(style_text, lang=lang)
     user_text = landing.build_user_message(
         persona,
-        record.get("lang", config.LANGUAGES[0]),
+        lang,
         has_cover=bool(cover_url),
         request=request,
         style_text=style_text,
         current_html=current_html,
-        post_images=post_imgs,
     )
 
-    # multimodal: show the cover + the post images so the model can match
-    # colors / mood and lay out a real photo album. 落地页只参考【生成的封面图】
-    # 和【已有帖子图】，都缺失就纯文字生成，绝不回退到上传源图。
+    # Multimodal reference: only show the generated cover image. Landing page
+    # generation no longer uses recent post images as visual/material inputs.
     content: list[dict] = [{"type": "text", "text": user_text}]
-    ref_paths: list[str] = []
     cover_lp = record.get("cover", {}).get(
         "local_path") if record.get("cover") else None
     if cover_lp and Path(cover_lp).exists():
-        ref_paths.append(cover_lp)
-    ref_paths.extend(pi["local_path"] for pi in post_imgs)
-    for p in ref_paths:
         content.append(
             {"type": "image_url",
-             "image_url": {"url": api_client.file_to_data_uri(p)}}
+             "image_url": {"url": api_client.file_to_data_uri(cover_lp)}}
         )
 
     messages = [
@@ -952,9 +933,7 @@ def generate_landing(
     ]
     raw = api_client.chat(messages, temperature=0.85, max_tokens=32000)
     html = landing.clean_html(raw)
-    post_urls = [pi["url"] for pi in post_imgs]
     saved_html = landing.inject_cover(html, cover_url)
-    saved_html = landing.inject_post_images(saved_html, post_urls)
 
     page_id = _new_id("page")
     page = {
@@ -965,10 +944,9 @@ def generate_landing(
         "style_text": style_text,
         "request": request,
         "cover_url": cover_url,
-        "post_urls": post_urls,
         # raw (slots empty) — preview injects client-side
         "html": html,
-        "html_filled": saved_html,  # cover + post URLs baked in for standalone use
+        "html_filled": saved_html,  # cover URL baked in for standalone use
     }
     # 单角色只保留最新一份，重新生成直接覆盖
     (_landing_dir(char_id) / "landing_latest.json").write_text(
@@ -991,9 +969,6 @@ def load_latest_landing(char_id: str) -> dict | None:
     cover_url = page.get("cover_url")
     if raw and cover_url:
         page["html_filled"] = landing.inject_cover(raw, cover_url)
-    if raw and page.get("post_urls"):
-        base = page.get("html_filled") or raw
-        page["html_filled"] = landing.inject_post_images(base, page["post_urls"])
     return page
 
 

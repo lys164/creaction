@@ -93,9 +93,13 @@ function filterByLang(chars, key) {
 }
 
 function imgUrl(local_path, url) {
+  const bust = `_t=${Date.now()}`;
   if (local_path) {
     const name = local_path.split("/").pop();
-    return "/img/" + name;
+    return "/img/" + name + "?" + bust;
+  }
+  if (url && url.startsWith("/img/")) {
+    return url + (url.includes("?") ? "&" : "?") + bust;
   }
   return url;
 }

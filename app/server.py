@@ -633,7 +633,10 @@ def serve_image(name: str):
     p = config.IMAGE_DIR / name
     if not p.exists():
         raise HTTPException(404, "image not found")
-    return FileResponse(str(p))
+    return FileResponse(
+        str(p),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.get("/upload/{name}")
