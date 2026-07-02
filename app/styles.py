@@ -9,7 +9,7 @@ To add/replace styles later, just edit STYLES (or load from data/styles.json).
 import json
 from pathlib import Path
 
-from . import config
+from . import config, storage
 
 _STYLES_FILE = config.DATA_DIR / "styles.json"
 
@@ -91,7 +91,10 @@ DEFAULT_STYLES = [
 
 
 def load_styles() -> list[dict]:
-    if _STYLES_FILE.exists():
+    obj = storage.load_json("styles", "styles", _STYLES_FILE)
+    if isinstance(obj, dict) and isinstance(obj.get("styles"), list):
+        return obj["styles"]
+    if _STYLES_FILE.exists():  # 兼容旧格式：文件是裸数组
         try:
             return json.loads(_STYLES_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -100,9 +103,8 @@ def load_styles() -> list[dict]:
 
 
 def save_styles(styles: list[dict]) -> None:
-    _STYLES_FILE.write_text(
-        json.dumps(styles, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    # 存储中台的 data 须是 JSON 对象，包一层 {styles: [...]}；本地文件同格式
+    storage.save_json("styles", "styles", {"styles": styles}, _STYLES_FILE)
 
 
 def get_style(style_id: str) -> dict | None:

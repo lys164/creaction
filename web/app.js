@@ -163,6 +163,7 @@ function fmtField(v) {
 // ---------- view switching ----------
 $$(".step").forEach((s) =>
   s.addEventListener("click", (e) => {
+    if (!s.dataset.view) return; // 外链(如 POPOP ↗)不拦截，走浏览器默认行为
     e.preventDefault();
     const v = s.dataset.view;
     $$(".step").forEach((x) => x.classList.toggle("active", x === s));
@@ -265,12 +266,20 @@ function addFiles(fl) {
   }
   renderThumbs();
 }
+// 每个待传文件复用同一个 blob URL（WeakMap 缓存），不再每次重渲染都新建；
+// 文件从 pendingFiles 移除后（上传成功/清空）对应 URL 会被 revoke，避免 Blob 内存泄漏。
+const THUMB_URL_CACHE = new WeakMap();
 function renderThumbs() {
   const box = $("#thumbs");
   box.innerHTML = "";
   pendingFiles.forEach((f) => {
+    let url = THUMB_URL_CACHE.get(f);
+    if (!url) {
+      url = URL.createObjectURL(f);
+      THUMB_URL_CACHE.set(f, url);
+    }
     const img = document.createElement("img");
-    img.src = URL.createObjectURL(f);
+    img.src = url;
     box.appendChild(img);
   });
   pendingJson.forEach((f) => {
@@ -282,6 +291,16 @@ function renderThumbs() {
   // JSON 导入时显示"下载源图"开关
   const row = $("#dlImageRow");
   if (row) row.style.display = pendingJson.length ? "" : "none";
+}
+// 清空 pendingFiles 前调用：revoke 所有已分配的 blob URL，防止内存泄漏。
+function revokeThumbUrls(files) {
+  files.forEach((f) => {
+    const url = THUMB_URL_CACHE.get(f);
+    if (url) {
+      URL.revokeObjectURL(url);
+      THUMB_URL_CACHE.delete(f);
+    }
+  });
 }
 
 $("#btnPersona").addEventListener("click", async () => {
@@ -339,10 +358,14 @@ $("#btnPersona").addEventListener("click", async () => {
       st.innerHTML = `<span class="spinner"></span> 生成中… ${done}/${total} 组`;
     });
     const errN = Object.keys(r.cover_errors || {}).length;
+    const gErrN = (r.group_errors || []).length;
     st.innerHTML = `已生成 ${r.count} 个角色（按语言拆分）${
       withCover ? `，封面失败 ${errN} 个` : ""
-    }。前往「② 角色」查看。`;
-    toast(`人设生成成功${errN ? `，${errN} 个封面失败` : ""}`, errN ? "err" : "ok");
+    }${gErrN ? `，${gErrN} 组生成失败(详见控制台)` : ""}。前往「② 角色」查看。`;
+    if (gErrN) console.warn("[personas] 组失败:", r.group_errors);
+    toast(`人设生成${gErrN ? "部分" : ""}成功${errN ? `，${errN} 个封面失败` : ""}${gErrN ? `，${gErrN} 组失败` : ""}`,
+          (errN || gErrN) ? "err" : "ok");
+    revokeThumbUrls(pendingFiles);
     pendingFiles = [];
     renderThumbs();
   } catch (e) {
@@ -391,15 +414,24 @@ function renderCharList() {
     const exportTag = c.exported
       ? `<span class="export-badge done">已导出</span>`
       : `<span class="export-badge todo">未导出</span>`;
+    const arcaTag = c.arca_synced
+      ? `<span class="export-badge done" title="该角色已同步到 arca-i18n">☁️ 已同步</span>`
+      : "";
+    const arcaDelBtn = c.arca_synced
+      ? `<button class="card-arca-del" title="从POPOP删除此角色（软删，本地数据不受影响）">☁️🗑</button>`
+      : "";
     card.innerHTML = `<label class="char-pick" title="多选"><input type="checkbox" class="csel" value="${c.char_id}" /></label>
-      ${cover}<div class="meta"><div class="name">${langTag}${
-      c.name || "(未命名)"
-    }</div><div class="tag">${c.has_identity ? "已生成外貌DNA" : "未生成外貌"}${exportTag}</div></div>`;
+      ${arcaDelBtn}${cover}<div class="meta"><div class="name">${langTag}${
+      esc(c.name) || "(未命名)"
+    }</div><div class="tag">${c.has_identity ? "已生成外貌DNA" : "未生成外貌"}${exportTag}${arcaTag}</div></div>`;
     card.addEventListener("click", (e) => {
       if (e.target.closest(".char-pick")) return; // 勾选不打开详情
+      if (e.target.closest(".card-arca-del")) return; // 删除按钮不打开详情
       showCharDetail(c.char_id);
     });
     card.querySelector(".csel").addEventListener("change", updateSelCount);
+    const delBtn = card.querySelector(".card-arca-del");
+    if (delBtn) delBtn.addEventListener("click", () => arcaDeleteOne(c, delBtn));
     box.appendChild(card);
   });
   updateSelCount();
@@ -465,7 +497,10 @@ $("#btnBatchDelete").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ char_ids: ids }),
     });
-    toast(`已删除 ${r.deleted.length} 个`, "ok");
+    const delErrN = Object.keys(r.errors || {}).length;
+    toast(`已删除 ${r.deleted.length} 个${delErrN ? `，${delErrN} 个失败(云端删除失败可重试)` : ""}`,
+          delErrN ? "err" : "ok");
+    if (delErrN) console.warn("[delete] 失败:", r.errors);
     $("#charDetail").classList.add("hidden");
     loadCharacters();
   } catch (e) {
@@ -513,6 +548,130 @@ $("#btnBatchExport").addEventListener("click", async () => {
   }
 });
 
+async function runArcaSync(btn, ids, { syncPosts = false, force = false } = {}) {
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "同步中…";
+  toast(`正在同步 ${ids.length} 个角色到 arca…`);
+  try {
+    const rows = await runTask("/api/arca/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ char_ids: ids, sync_posts: syncPosts, force }),
+    }, (done, total) => {
+      btn.textContent = `同步中… ${done}/${total}`;
+    });
+    // rows: [{char_id, arca_character_id, posts, landing_url, skipped, updated, errors}]
+    const list = Array.isArray(rows) ? rows : [];
+    const ok = list.filter((r) => r.arca_character_id && !(r.errors || []).length);
+    const skipped = list.filter((r) => r.skipped);
+    const updated = list.filter((r) => r.updated);
+    const failed = list.filter((r) => (r.errors || []).length);
+    const nPosts = list.reduce((s, r) => s + (r.posts || []).length, 0);
+    let msg = `同步完成：${ok.length} 成功`;
+    if (updated.length) msg += `（${updated.length} 为原地更新）`;
+    if (syncPosts) msg += `，共 ${nPosts} 条帖子`;
+    if (skipped.length) msg += `，${skipped.length} 无变化(跳过)`;
+    if (failed.length) msg += `，${failed.length} 有错误`;
+    toast(msg, failed.length ? "err" : "ok");
+    if (failed.length) {
+      // 逐角色错误打印到控制台，便于排查（含未配置 base_url/uid 等）
+      failed.forEach((r) => console.warn(`[arca-sync] ${r.char_id}:`, (r.errors || []).join("; ")));
+    }
+    loadCharacters(); // 刷新「☁️ 已同步」标签
+  } catch (e) {
+    toast("同步失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+$("#btnArcaSync").addEventListener("click", () => {
+  const ids = selectedCharIds();
+  if (!ids.length) return toast("请先勾选角色", "err");
+  const dlg = $("#arcaSyncDialog");
+  $("#arcaSyncDialogCount").textContent = `已勾选 ${ids.length} 个角色`;
+  $("#arcaOptForce").checked = false;
+  $("#arcaOptPosts").checked = false;
+  dlg.returnValue = "";
+  dlg.showModal();
+  dlg.addEventListener("close", () => {
+    if (dlg.returnValue !== "ok") return;
+    runArcaSync($("#btnArcaSync"), ids, {
+      force: $("#arcaOptForce").checked,
+      syncPosts: $("#arcaOptPosts").checked,
+    });
+  }, { once: true });
+});
+
+$("#btnStorageMigrate").addEventListener("click", async () => {
+  if (!confirm("把本地全部存量数据迁移到 arca 云端存储？\nJSON 记录→存储中台，图片→OSS。幂等可重跑，不影响本地数据。")) return;
+  const btn = $("#btnStorageMigrate");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "迁移中…";
+  try {
+    const stats = await runTask("/api/arca/storage/migrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }, (done) => {
+      btn.textContent = `迁移中… ${done}`;
+    });
+    const s = stats || {};
+    const parts = ["personas", "post_batches", "ig_batches", "landings", "chats", "styles", "images", "uploads"]
+      .filter((k) => s[k]).map((k) => `${k}:${s[k]}`);
+    const nErr = (s.errors || []).length;
+    toast(`迁移完成 ${parts.join(" ")}${nErr ? `，${nErr} 条失败(见控制台)` : ""}`, nErr ? "err" : "ok");
+    if (nErr) console.warn("[storage-migrate]", s.errors);
+  } catch (e) {
+    toast("迁移失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+});
+
+async function arcaDeleteOne(c, btn) {
+  // 角色卡右上角「☁️🗑」：删除该角色在 POPOP 上的对应角色（软删），本地数据不动
+  if (!confirm(`⚠️ 从 POPOP 删除「${c.name || c.char_id}」？\n仅删 POPOP 侧（软删），本地角色数据不受影响，之后可重新导出。`)) return;
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const rows = await runTask("/api/arca/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ char_ids: [c.char_id] }),
+    });
+    const r = (Array.isArray(rows) && rows[0]) || {};
+    if ((r.errors || []).length) {
+      toast(`删除失败：${r.errors.join("; ")}`, "err");
+    } else {
+      toast(r.deleted ? `已从 POPOP 删除「${c.name || c.char_id}」` : "该角色未同步过，无需删除", "ok");
+    }
+    try {
+      await loadCharacters(); // 刷新「已同步」标签与卡片按钮（会重建整张卡片，含本按钮）
+    } catch (e2) {
+      toast("列表刷新失败，请手动刷新页面：" + e2.message, "err");
+    }
+  } catch (e) {
+    toast("删除失败：" + e.message, "err");
+  } finally {
+    // loadCharacters 成功时会重建卡片（此按钮元素被替换，此处操作是安全的无效操作）；
+    // 失败/异常时旧按钮仍在 DOM 上，必须在这里恢复，否则永久卡在禁用的「…」状态。
+    btn.disabled = false;
+    btn.textContent = "☁️🗑";
+  }
+}
+
+$("#btnArcaSyncPosts").addEventListener("click", () => {
+  const ids = selectedIgCharIds();
+  if (!ids.length) return toast("请先勾选角色", "err");
+  if (!confirm(`把 ${ids.length} 个角色的最近一批 INS 帖子同步到 arca-i18n？未同步过的角色会先创建角色。已同步过的帖子会跳过。`)) return;
+  runArcaSync($("#btnArcaSyncPosts"), ids, { syncPosts: true });
+});
+
 $("#btnBatchPersona").addEventListener("click", async () => {
   const ids = selectedCharIds();
   if (!ids.length) return toast("请先勾选角色", "err");
@@ -522,11 +681,11 @@ $("#btnBatchPersona").addEventListener("click", async () => {
   const old = btn.textContent;
   btn.textContent = "重生中…";
   try {
-    const r = await api("/api/characters/regenerate_persona", {
+    const r = await runTask("/api/characters/regenerate_persona", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ char_ids: ids }),
-    });
+    }, (done, total) => { btn.textContent = `重生中… ${done}/${total}`; });
     const errN = Object.keys(r.errors || {}).length;
     toast(`已重生 ${r.regenerated.length} 个${errN ? `，${errN} 个失败` : ""}`, errN ? "err" : "ok");
     loadCharacters();
@@ -547,11 +706,11 @@ $("#btnBatchOpening").addEventListener("click", async () => {
   const old = btn.textContent;
   btn.textContent = "重写中…";
   try {
-    const r = await api("/api/characters/regenerate_opening", {
+    const r = await runTask("/api/characters/regenerate_opening", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ char_ids: ids }),
-    });
+    }, (done, total) => { btn.textContent = `重写中… ${done}/${total}`; });
     const errN = Object.keys(r.errors || {}).length;
     toast(`已重写 ${r.regenerated.length} 个开场白${errN ? `，${errN} 个失败` : ""}`, errN ? "err" : "ok");
     loadCharacters();
@@ -629,7 +788,7 @@ async function showCharDetail(charId) {
         <div id="openingStatus" class="status"></div>
       </div>
       <div class="persona-fields">
-        <h3 style="margin-top:0">${rec.lang ? `<span class="lang-badge ${rec.lang}">${LANG_NAMES_FULL[rec.lang] || rec.lang}</span>` : ""}${localized(p.name)} <span class="muted">${charId}</span></h3>
+        <h3 style="margin-top:0">${rec.lang ? `<span class="lang-badge ${rec.lang}">${LANG_NAMES_FULL[rec.lang] || rec.lang}</span>` : ""}${esc(localized(p.name))} <span class="muted">${esc(charId)}</span></h3>
         ${fieldHtml}
         <details><summary class="muted">查看完整人设 JSON</summary>
           <pre class="kv">${escapeHtml(JSON.stringify(p, null, 2))}</pre></details>
@@ -694,6 +853,13 @@ function escapeHtml(s) {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
 
+// 通用 HTML 转义工具：拼 innerHTML 时包裹任意可能来自 LLM/用户的文本。
+// 兼容 null/undefined/非字符串输入，避免调用方各自判空。
+function esc(s) {
+  if (s == null) return "";
+  return escapeHtml(String(s));
+}
+
 // ========== POSTS VIEW ==========
 let POST_TYPES = [];
 let CURRENT_POST_BATCH = null;
@@ -725,7 +891,7 @@ async function initPostsView() {
 function renderPostCharOptions() {
   const list = filterByLang(POST_CHARS, "post");
   $("#postChar").innerHTML = list
-    .map((c) => `<option value="${c.char_id}">${c.lang_name ? "[" + c.lang_name + "] " : ""}${c.name || c.char_id}</option>`)
+    .map((c) => `<option value="${c.char_id}">${c.lang_name ? "[" + esc(c.lang_name) + "] " : ""}${esc(c.name) || esc(c.char_id)}</option>`)
     .join("");
 }
 
@@ -742,7 +908,7 @@ $("#btnPosts").addEventListener("click", async () => {
   }…（配图较慢，请耐心等待）`;
   $("#btnPosts").disabled = true;
   try {
-    const r = await api("/api/posts", {
+    const r = await runTask("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -779,12 +945,12 @@ function renderPosts(posts) {
     if (p.image && p.image.url) {
       pimg = `<img class="pimg" src="${imgUrl(p.image.local_path, p.image.url)}" />`;
     } else if (p.image && p.image.error) {
-      pimg = `<div class="pimg">配图失败：${p.image.error}</div>`;
+      pimg = `<div class="pimg">配图失败：${esc(p.image.error)}</div>`;
     }
     card.innerHTML = `
       ${pimg}
       <div class="pbody">
-        <div class="ptype">${p.type_name}</div>
+        <div class="ptype">${esc(p.type_name)}</div>
         <div class="content">${escapeHtml(localized(p.content))}</div>
         <div class="post-actions">
           <button class="ghost rerender-post-img" data-post-id="${p.post_id}">重新生成图片</button>
@@ -848,6 +1014,7 @@ async function deleteRegularPost(btn) {
 // ========== IG POSTS VIEW ==========
 let IG_CHARS = [];
 let IG_ACTIVE_CHAR = null;
+let IG_LOAD_GEN = 0; // loadLatestIg 请求代数，防止慢响应渲染到已切换的角色名下
 
 async function initIgView() {
   await ensureStyles();
@@ -887,7 +1054,7 @@ function renderIgCharGrid() {
       ? `<span class="lang-badge ${c.lang}">${c.lang_name}</span>`
       : "";
     card.innerHTML = `<label class="char-pick" title="多选生成"><input type="checkbox" class="ig-csel" value="${c.char_id}" /></label>
-      ${cover}<div class="meta"><div class="name">${langTag}${c.name || "(未命名)"}</div>
+      ${cover}<div class="meta"><div class="name">${langTag}${esc(c.name) || "(未命名)"}</div>
       <div class="tag">点击查看已生成帖子</div></div>`;
     card.addEventListener("click", (e) => {
       if (e.target.closest(".char-pick")) return;
@@ -908,19 +1075,24 @@ function renderIgCharGrid() {
 
 async function loadLatestIg(charId = IG_ACTIVE_CHAR) {
   IG_ACTIVE_CHAR = charId;
+  const myGen = ++IG_LOAD_GEN;
   $("#igResults").innerHTML = "";
   if (!charId) return;
   const c = IG_CHARS.find((x) => x.char_id === charId);
   $("#igViewingTitle").textContent = c ? `正在查看：${c.lang_name ? "[" + c.lang_name + "] " : ""}${c.name || c.char_id}` : "";
   try {
     const b = await api("/api/ig_posts/" + charId + "/latest");
+    if (myGen !== IG_LOAD_GEN || charId !== IG_ACTIVE_CHAR) return; // 过期响应，丢弃
     if (b && b.posts && b.posts.length) {
       $("#igStatus").innerHTML = `已加载上次生成的 ${b.posts.length} 条（${new Date((b.created || 0) * 1000).toLocaleString()}）。重新生成会覆盖。`;
       renderIgPosts(b.posts);
     } else {
       $("#igStatus").innerHTML = "";
     }
-  } catch (e) { $("#igStatus").innerHTML = ""; }
+  } catch (e) {
+    if (myGen !== IG_LOAD_GEN || charId !== IG_ACTIVE_CHAR) return; // 过期响应，丢弃
+    $("#igStatus").innerHTML = "";
+  }
 }
 
 $("#btnIgSelAll").addEventListener("click", () => {
@@ -1004,15 +1176,15 @@ function renderIgPosts(posts) {
       badge = `<span class="badge">${t}</span>`;
       pimg = `<img class="pimg" src="${imgUrl(p.image.local_path, p.image.url)}" />`;
     } else if (p.image && p.image.error) {
-      badge = `<span class="badge">${p.image_type || ""} 配图失败</span>`;
-      pimg = `<div class="pimg">配图失败：${p.image.error}</div>`;
+      badge = `<span class="badge">${esc(p.image_type) || ""} 配图失败</span>`;
+      pimg = `<div class="pimg">配图失败：${esc(p.image.error)}</div>`;
     } else {
-      badge = `<span class="badge">${p.image_type || "图文"}（未生成图）</span>`;
+      badge = `<span class="badge">${esc(p.image_type) || "图文"}（未生成图）</span>`;
       pimg = `<div class="pimg">未生成配图</div>`;
     }
 
     const typeTag = p.post_type_name
-      ? `<span class="ttag ${p.post_type}">${p.post_type_name}</span>`
+      ? `<span class="ttag ${p.post_type}">${esc(p.post_type_name)}</span>`
       : "";
 
     const spec = p.selfie
@@ -1094,6 +1266,7 @@ let CHAT_DEFAULT_TPL = "";
 let CHAT_MODE = "normal";
 let CHAT_DEFAULT_TPLS = {};
 let CHAT_VIEWING_HISTORY = false;
+let CHAT_SELECT_GEN = 0; // selectChatChar 请求代数，用于丢弃过期响应
 
 async function initChatView() {
   CHAT_CHARS = await api("/api/characters");
@@ -1153,6 +1326,9 @@ function markActiveChatChar() {
 async function selectChatChar(charId, opts = {}) {
   if (!charId) return;
   CHAT_ACTIVE_CHAR = charId;
+  // 请求代数：每次调用自增，响应回来后若代数已过期（被更新的调用覆盖）则丢弃，
+  // 防止快速切换角色时旧角色的慢响应覆盖新角色的状态。
+  const myGen = ++CHAT_SELECT_GEN;
   markActiveChatChar();
   $("#chatEmpty").classList.add("hidden");
   $("#chatPanel").classList.remove("hidden");
@@ -1163,6 +1339,7 @@ async function selectChatChar(charId, opts = {}) {
       api("/api/character/" + charId),
       api("/api/chat/" + charId + "/latest?mode=" + CHAT_MODE),
     ]);
+    if (myGen !== CHAT_SELECT_GEN || charId !== CHAT_ACTIVE_CHAR) return; // 过期响应，丢弃
     CHAT_ACTIVE_REC = rec;
     CHAT_DEFAULT_TPL = latest.default_template || CHAT_DEFAULT_TPL || "";
     CHAT_DEFAULT_TPLS = latest.default_templates || CHAT_DEFAULT_TPLS;
@@ -1196,6 +1373,7 @@ async function selectChatChar(charId, opts = {}) {
     renderChatMessages();
     $("#chatStatus").innerHTML = CHAT_SESSION_ID ? "已载入最近一次对话。" : "已载入角色开场白，可直接开始聊天。";
   } catch (e) {
+    if (myGen !== CHAT_SELECT_GEN || charId !== CHAT_ACTIVE_CHAR) return; // 过期响应，丢弃
     $("#chatStatus").innerHTML = "载入失败：" + e.message;
     toast("聊天角色载入失败", "err");
   }
@@ -1350,7 +1528,11 @@ function renderAssistantItem(item) {
   return row;
 }
 
+// 发送按钮与回车共用同一在途标志，避免并发触发 /api/chat（会导致会话分叉/消息丢失）。
+let CHAT_SENDING = false;
+
 async function sendChatMessage() {
+  if (CHAT_SENDING) return;
   if (!CHAT_ACTIVE_CHAR) return toast("请先选择角色", "err");
   const input = $("#chatInput");
   const text = input.value.trim();
@@ -1358,6 +1540,7 @@ async function sendChatMessage() {
   input.value = "";
   CHAT_MESSAGES.push({ role: "user", content: text, created: Math.floor(Date.now() / 1000) });
   renderChatMessages();
+  CHAT_SENDING = true;
   const btn = $("#btnChatSend");
   btn.disabled = true;
   $("#chatStatus").innerHTML = `<span class="spinner"></span> 角色正在输入…`;
@@ -1393,6 +1576,7 @@ async function sendChatMessage() {
     $("#chatStatus").innerHTML = "失败：" + e.message;
     toast("聊天失败", "err");
   } finally {
+    CHAT_SENDING = false;
     btn.disabled = false;
     input.focus();
   }
@@ -1537,6 +1721,8 @@ let LANDING_STYLES = [];
 let ldCurrentHtml = "";
 let LD_CHARS = [];
 let LD_ACTIVE_CHAR = null;
+let LD_HTML_OWNER = null; // ldCurrentHtml 当前所属的角色 id，用于生成前一致性校验
+let LD_LOAD_GEN = 0; // loadLandingHistory 请求代数，防止慢响应渲染到已切换的角色名下
 
 function renderLdCharGrid() {
   const box = $("#ldCharGrid");
@@ -1562,12 +1748,13 @@ function renderLdCharGrid() {
       ? `<span class="lang-badge ${c.lang}">${c.lang_name}</span>`
       : "";
     card.innerHTML = `<label class="char-pick" title="多选批量生成"><input type="checkbox" class="ld-csel" value="${c.char_id}" /></label>
-      ${cover}<div class="meta"><div class="name">${langTag}${c.name || "(未命名)"}</div>
+      ${cover}<div class="meta"><div class="name">${langTag}${esc(c.name) || "(未命名)"}</div>
       <div class="tag">点击载入右侧编辑</div></div>`;
     card.addEventListener("click", (e) => {
       if (e.target.closest(".char-pick")) return;
       LD_ACTIVE_CHAR = c.char_id;
       ldCurrentHtml = "";
+      LD_HTML_OWNER = null;
       ldRenderPreview();
       $$("#ldCharGrid .ig-char-card").forEach((x) =>
         x.classList.toggle("active", x.dataset.charId === c.char_id)
@@ -1655,6 +1842,7 @@ $("#ldSeg").addEventListener("click", (e) => {
 
 $("#btnLandingReset").addEventListener("click", () => {
   ldCurrentHtml = "";
+  LD_HTML_OWNER = null;
   ldRenderPreview();
   $("#ldReq").value = "";
   toast("已重置，下次从零生成", "ok");
@@ -1699,6 +1887,7 @@ $("#btnLanding").addEventListener("click", async () => {
       if (r.generated.length) {
         LD_ACTIVE_CHAR = r.generated[0];
         ldCurrentHtml = "";
+        LD_HTML_OWNER = null;
         $$("#ldCharGrid .ig-char-card").forEach((x) =>
           x.classList.toggle("active", x.dataset.charId === LD_ACTIVE_CHAR));
         loadLandingHistory();
@@ -1716,8 +1905,15 @@ $("#btnLanding").addEventListener("click", async () => {
   // 单个：用当前载入的角色（或唯一勾选的）
   const charId = checked[0] || LD_ACTIVE_CHAR;
   if (!charId) return toast("请选择角色", "err");
+  // 一致性校验：只勾选了另一个角色（未点卡片切换 LD_ACTIVE_CHAR）时，
+  // ldCurrentHtml 仍属于之前载入的角色，不能把它当作 charId 的 current_html 发送迭代，
+  // 否则会把 A 的迭代结果覆盖保存为 B 的落地页。这种情况下改为从零生成，并提示用户。
+  const htmlBelongsToCharId = !!ldCurrentHtml.trim() && LD_HTML_OWNER === charId;
+  if (ldCurrentHtml.trim() && LD_HTML_OWNER && LD_HTML_OWNER !== charId) {
+    toast("勾选的角色与当前载入的落地页不一致，将从零生成，不会带入已载入内容", "err");
+  }
   const st = $("#ldStatus");
-  const isEdit = !!ldCurrentHtml.trim();
+  const isEdit = htmlBelongsToCharId;
   st.innerHTML = `<span class="spinner"></span> 正在${isEdit ? "修改" : "生成"}落地页…（约 20-60s）`;
   $("#btnLanding").disabled = true;
   try {
@@ -1732,11 +1928,14 @@ $("#btnLanding").addEventListener("click", async () => {
       }),
     });
     ldCurrentHtml = r.html_filled || r.html || "";
+    LD_HTML_OWNER = charId;
     ldRenderPreview();
     st.innerHTML = "已生成。右侧可切换代码编辑，或在上方追加要求继续迭代。";
     toast("落地页生成成功", "ok");
     $("#ldReq").value = "";
-    loadLandingHistory();
+    // 仅当生成的角色就是当前载入角色时才重载历史，
+    // 否则会用另一角色的历史页覆盖刚生成的预览。
+    if (charId === LD_ACTIVE_CHAR) loadLandingHistory();
   } catch (e) {
     st.innerHTML = "失败：" + e.message;
     toast("生成失败", "err");
@@ -1747,20 +1946,27 @@ $("#btnLanding").addEventListener("click", async () => {
 
 async function loadLandingHistory() {
   const charId = LD_ACTIVE_CHAR;
+  const myGen = ++LD_LOAD_GEN;
   const box = $("#ldHistory");
-  if (!charId) { box.innerHTML = ""; ldCurrentHtml = ""; ldRenderPreview(); return; }
+  if (!charId) { box.innerHTML = ""; ldCurrentHtml = ""; LD_HTML_OWNER = null; ldRenderPreview(); return; }
   try {
     const page = await api("/api/landing/" + charId);
+    if (myGen !== LD_LOAD_GEN || charId !== LD_ACTIVE_CHAR) return; // 过期响应，丢弃
     if (page && (page.html_filled || page.html)) {
       ldCurrentHtml = page.html_filled || page.html || "";
+      LD_HTML_OWNER = charId;
       ldRenderPreview();
-      box.innerHTML = `<div class='ld-hist-title'>已加载上次生成（${page.style_text || "无风格"} · ${new Date((page.created || 0) * 1000).toLocaleString()}），重新生成会覆盖。</div>`;
+      box.innerHTML = `<div class='ld-hist-title'>已加载上次生成（${esc(page.style_text) || "无风格"} · ${new Date((page.created || 0) * 1000).toLocaleString()}），重新生成会覆盖。</div>`;
     } else {
       ldCurrentHtml = "";
+      LD_HTML_OWNER = charId;
       ldRenderPreview();
       box.innerHTML = "";
     }
-  } catch (e) { box.innerHTML = ""; }
+  } catch (e) {
+    if (myGen !== LD_LOAD_GEN || charId !== LD_ACTIVE_CHAR) return; // 过期响应，丢弃
+    box.innerHTML = "";
+  }
 }
 
 // 卡片点击切换角色时已处理预览与历史加载，无需额外的 select change 监听。

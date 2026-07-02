@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>POPOP 角色生产链路</title>
-<link rel="stylesheet" href="/style.css?v=12" />
+<link rel="stylesheet" href="/style.css?v=18" />
 </head>
 <body>
 <header class="topbar">
@@ -16,6 +16,7 @@
     <a class="step" data-view="landing">④ 生成落地页</a>
     <a class="step" data-view="chat">聊天</a>
     <a class="step" data-view="styles">画风库</a>
+    <a class="step ext" href="https://api.popop.dev/admin" target="_blank" rel="noopener" title="打开 POPOP 平台">POPOP运营后台 ↗</a>
   </nav>
 </header>
 
@@ -83,6 +84,8 @@
       </div>
       <button id="btnBatchDelete" class="ghost danger">🗑 批量删除</button>
       <button id="btnBatchExport" class="ghost">📦 批量导出</button>
+      <button id="btnArcaSync" class="ghost" title="导出勾选角色到 POPOP：弹窗可选强制重推/同时推送帖子">☁️ 导出到POPOP</button>
+      <button id="btnStorageMigrate" class="ghost" title="把本地 data/ 存量数据全量迁移到 arca 通用存储（JSON 记录→存储中台，图片→OSS）。幂等可重跑；需已配置 ARCA_STORAGE_KEY">☁️⇪ 存量迁移到云端</button>
       <span id="selCount" class="muted"></span>
     </div>
     <div id="charList" class="char-grid"></div>
@@ -114,6 +117,7 @@
         </label>
       </div>
       <button id="btnIg" class="primary">为勾选角色生成 INS 帖子</button>
+      <button id="btnArcaSyncPosts" class="ghost" title="把勾选角色的最近一批 INS 帖子同步到 arca-i18n（未同步过的角色会先创建角色）">☁️ 同步帖子到 arca</button>
       <div id="igStatus" class="status"></div>
     </div>
     <h3 id="igViewingTitle" class="ig-viewing-title"></h3>
@@ -277,7 +281,28 @@
   </section>
 </main>
 
+<!-- 导出到 POPOP 选项对话框 -->
+<dialog id="arcaSyncDialog" class="arca-dialog">
+  <form method="dialog">
+    <h3>☁️ 导出到 POPOP</h3>
+    <p class="muted" id="arcaSyncDialogCount"></p>
+    <label class="check">
+      <input type="checkbox" id="arcaOptForce" />
+      强制重推（在 POPOP 重新创建全新角色；旧角色保留、不会删除）
+    </label>
+    <label class="check">
+      <input type="checkbox" id="arcaOptPosts" />
+      同时推送最近一批 INS 帖子（未同步过的帖子）
+    </label>
+    <p class="muted small">不勾选时：未导出过的角色会创建；已导出过的原地更新（名称/性别/物种/简介/音色/开场白/可见性），无变化则跳过。</p>
+    <div class="arca-dialog-actions">
+      <button value="cancel" class="ghost" type="submit">取消</button>
+      <button value="ok" id="arcaSyncConfirm" class="primary" type="submit">开始导出</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="toast" class="toast"></div>
-<script src="/app.js?v=18"></script>
+<script src="/app.js?v=22"></script>
 </body>
 </html>

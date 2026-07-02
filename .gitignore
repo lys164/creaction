@@ -29,3 +29,4 @@ nohup.out
 
 # 临时脚本
 _fix*.py
+.claude/

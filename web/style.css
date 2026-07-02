@@ -113,8 +113,7 @@ button.ghost:hover{border-color:var(--mut);background:var(--inset)}
 .char-pick input{width:16px;height:16px;cursor:pointer;accent-color:var(--acc,#6c5ce7);margin:0}
 .char-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 .char-cover-batch{display:flex;align-items:center;gap:6px}
-.char-cover-batch select{padding:7px 9px;border:1px solid var(--line2);border-radius:8px;background:var(--surface);color:inherit;font-size:13px;max-width:170px}
-.char-cover-batch #batchCoverMode{max-width:140px}
+.char-cover-batch select{width:auto;padding:7px 9px;border:1px solid var(--line2);border-radius:8px;background:var(--surface);color:inherit;font-size:13px}
 button.ghost.danger{color:#c0392b;border-color:#e7b6ae}
 button.ghost.danger:hover{color:#fff;background:#c0392b;border-color:#c0392b}
 .post-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
@@ -296,3 +295,50 @@ button.ghost:hover{color:var(--txt);border-color:var(--mut)}
 #chatInput{resize:none;min-height:46px;max-height:140px;margin:0;background:var(--inset)}
 #btnChatSend{margin:0;align-self:end;height:46px;min-width:82px}
 @media(max-width:920px){.chat-layout{grid-template-columns:1fr}.chat-sidebar{position:static;max-height:none}.chat-panel{min-height:640px}.chat-context-grid{grid-template-columns:1fr}.chat-bubble{max-width:86%}}
+
+/* ---- 按钮/工具栏布局规范：防文字折行、防溢出截断、统一行对齐 ---- */
+button{white-space:nowrap}
+.step{white-space:nowrap}
+/* 工具栏：统一行距与列距，行内元素垂直居中 */
+.char-toolbar{gap:10px;row-gap:10px}
+.ig-toolbar{row-gap:8px}
+.char-toolbar button,.ig-toolbar button{margin-top:0;flex:0 0 auto}
+/* 下拉：溢出用省略号而不是硬截断 */
+select{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.char-cover-batch{flex:0 0 auto}
+/* primary 与 ghost 同行时基线/高度对齐（如「生成 INS 帖子」+「同步帖子到 arca」） */
+#btnIg,#btnArcaSyncPosts{margin-top:8px;vertical-align:middle}
+#btnArcaSyncPosts{padding:10px 15px}
+/* 长文案按钮防溢出容器：允许整体换行到下一行，但按钮内部不折行 */
+.char-toolbar,.ig-toolbar,.row{min-width:0}
+/* 窄屏下工具栏收紧间距，避免频繁换行 */
+@media (max-width:900px){
+  .char-toolbar{gap:8px;row-gap:8px}
+}
+/* 手机宽度：封面批量组允许内部换行，select 可收缩，杜绝横向溢出 */
+@media (max-width:520px){
+  .char-cover-batch{flex-wrap:wrap;row-gap:8px;max-width:100%}
+  .char-cover-batch select{flex:0 1 auto;max-width:100%}
+  .char-toolbar button,.ig-toolbar button{padding:8px 11px}
+}
+/* ---- 导出到 POPOP 对话框 ---- */
+.arca-dialog{border:1px solid var(--line2);border-radius:14px;padding:22px 24px;max-width:440px;
+  background:var(--surface);color:var(--txt);box-shadow:0 18px 60px rgba(0,0,0,.18)}
+.arca-dialog::backdrop{background:rgba(30,25,20,.35)}
+.arca-dialog h3{margin:0 0 6px;font-size:16px}
+.arca-dialog .check{display:flex;gap:8px;align-items:flex-start;margin:10px 0;font-size:13.5px;line-height:1.5}
+.arca-dialog .check input{margin-top:3px}
+.arca-dialog .muted.small{font-size:12px;line-height:1.55;margin:10px 0 0}
+.arca-dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+.arca-dialog-actions .primary{margin-top:0;padding:9px 18px;font-size:13.5px}
+/* 批量封面组：显式禁止组内换行（>520px），按钮永不折行 */
+.char-cover-batch{flex-wrap:nowrap}
+.char-cover-batch button{white-space:nowrap;flex:0 0 auto}
+/* 角色卡右上角「从POPOP删除」小按钮（仅已同步角色显示） */
+.char-card{position:relative}
+.card-arca-del{position:absolute;top:8px;right:8px;z-index:2;cursor:pointer;
+  font-size:12px;line-height:1;padding:5px 7px;border-radius:8px;
+  border:1px solid var(--line2);background:rgba(255,255,255,.92);color:#c0392b;transition:.15s}
+.card-arca-del:hover{background:#c0392b;border-color:#c0392b;color:#fff}
+/* 顶栏外链 */
+.step.ext{color:var(--accent);font-weight:600}

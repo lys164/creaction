@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import api_client, config, pipeline
+from . import api_client, config, pipeline, storage
 
 CHAT_EMOTIONS = "neutral, happy, soft, teasing, sad, angry, anxious, embarrassed, tired, excited, jealous, lonely, relieved, flustered"
 STICKER_SCENES = "hello, yes, no, laugh, cry, sulk, sleep, heart, confused, shocked, cheer, hug"
@@ -521,21 +521,17 @@ def _public_session(session: dict) -> dict:
 
 
 def _save_session(session: dict) -> None:
-    path = _session_path(session["char_id"], session["session_id"])
-    path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json("chats", f"{session['char_id']}__{session['session_id']}",
+                      session, _session_path(session["char_id"], session["session_id"]))
 
 
 def _load_session(char_id: str, session_id: str) -> dict | None:
-    path = _session_path(char_id, session_id)
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return storage.load_json("chats", f"{char_id}__{session_id}",
+                             _session_path(char_id, session_id))
 
 
 def _latest_session(char_id: str, mode: str | None = None) -> dict | None:
+    # 本地缓存优先（mtime 最新）；本地无匹配时从远端按 char_id 查最近一条
     paths = sorted(_chat_dir(char_id).glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     for path in paths:
         try:
@@ -545,6 +541,29 @@ def _latest_session(char_id: str, mode: str | None = None) -> dict | None:
         if mode is not None and session.get("mode", "normal") != mode:
             continue
         return session
+    from . import arca_storage
+    if arca_storage.enabled():
+        try:
+            # 注意：后端 order_by 只把 "created_at" 特判为表原生列，其余取值
+            # （含 "updated_at"）一律拼成 data->>'updated_at' 走 JSON 字段查询
+            # ——业务 data 里并没有这个 key，结果恒为 NULL、排序不生效。因此
+            # 这里不能直接传 order_by="updated_at"。而 put_record 是 upsert，
+            # created_at 停留在会话首次创建时间，不代表"最近活跃"；真正的
+            # 活跃时间在每行的 updated_at（数据库维护的顶层列，随 upsert 更新）
+            # 里。所以按 char_id 拉回多条候选，在客户端按行级 updated_at 排序
+            # 取最新一条，语义上与本地分支按 mtime（最后写入时间）保持一致。
+            rows = arca_storage.query_records(
+                "chats", match={"char_id": char_id},
+                order_by="created_at", desc=True, limit=20)
+            candidates = [row for row in rows if isinstance(row.get("data"), dict)]
+            if mode is not None:  # 远端候选同样按 mode 过滤，语义与本地一致
+                candidates = [row for row in candidates
+                              if row["data"].get("mode", "normal") == mode]
+            if candidates:
+                candidates.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
+                return candidates[0]["data"]
+        except Exception:  # noqa: BLE001 远端不可用时保持本地语义
+            pass
     return None
 
 
@@ -658,17 +677,24 @@ def send_message(char_id: str, message: str, context: dict | None = None,
     if not text:
         raise ValueError("message is empty")
     context = _nonempty_context(context or {})
-    loaded = _load_session(char_id, session_id) if session_id else None
-    if loaded is None:
-        # 匿名模式没有开场白（陌生人配对）。
-        opening = _opening_items(record) if mode != "anonymous" else []
-        session = _new_session(char_id, context, opening, prompt_template, mode)
-    else:
+    if session_id:
+        loaded = _load_session(char_id, session_id)
+        if loaded is None:
+            # storage.load_json 无法区分"会话确实不存在"和"远端瞬时故障
+            # 只 warn 后返回 None"，两者都不该静默 fork 出新会话——否则会
+            # 话上下文无提示丢失、开场白重复注入，调用方指定的 session_id
+            # 被悄悄替换。显式抛错，让前端感知会话丢失并自行决定重试或
+            # 提示用户新开对话。
+            raise ValueError(f"session not found or unavailable: {session_id}")
         session = loaded
         mode = session.get("mode", "normal")
         session["context"] = {**session.get("context", {}), **context}
         if prompt_template is not None and prompt_template.strip():
             session["prompt_template"] = prompt_template.strip()
+    else:
+        # 匿名模式没有开场白（陌生人配对）。
+        opening = _opening_items(record) if mode != "anonymous" else []
+        session = _new_session(char_id, context, opening, prompt_template, mode)
     session["messages"].append({"role": "user", "content": text, "created": int(time.time())})
 
     llm_messages = [

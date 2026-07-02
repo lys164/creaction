@@ -2,6 +2,7 @@
 import base64
 import json
 import mimetypes
+import re
 import threading
 import time
 from pathlib import Path
@@ -90,7 +91,11 @@ def chat(
                         last_err = APIError(msg)
                         time.sleep(2 * (attempt + 1))
                         continue
-                    raise APIError(msg)
+                    # provider 专属业务错误（如 401/无效 key）：不重试同一
+                    # base，记为 last_err 后换池中下一个 provider，全部失败
+                    # 才在下面统一抛出
+                    last_err = APIError(msg)
+                    break
                 return data["choices"][0]["message"]["content"]
             except requests.exceptions.SSLError as e:
                 # domain likely blocked -> stop retrying this base, try next
@@ -120,19 +125,32 @@ def parse_json_text(text: str) -> Any:
     return _parse_json(text)
 
 
+_FENCE_OPEN_RE = re.compile(r"\A```[ \t]*(?:json)?[ \t]*\r?\n", re.IGNORECASE)
+_FENCE_CLOSE_RE = re.compile(r"\r?\n```[ \t]*\Z")
+
+
+def _strip_fence(t: str) -> str:
+    """剥离首尾的 ```json ... ``` 围栏。
+
+    不能用 split("```", 2)：JSON 字符串值内部若也含字面 ```（如分享的代码
+    片段），会在第一个内部围栏处被截断。正确做法是只匹配开头的起始围栏、
+    结尾的收尾围栏各一次，中间内容原样保留（哪怕内部还有更多 ``` 也不受
+    影响），取匹配到的候选中最长的一段以尽量保留完整正文。
+    """
+    open_m = _FENCE_OPEN_RE.match(t)
+    close_m = _FENCE_CLOSE_RE.search(t)
+    if open_m and close_m and close_m.start() >= open_m.end():
+        return t[open_m.end():close_m.start()]
+    if open_m:
+        # 收尾围栏缺失（模型输出被截断等）：仅去掉起始围栏
+        return t[open_m.end():]
+    return t
+
+
 def _parse_json(text: str) -> Any:
     t = text.strip()
     if t.startswith("```"):
-        # remove ```json ... ``` fences
-        t = t.split("```", 2)
-        # after split, fenced content is in the middle
-        if len(t) >= 2:
-            body = t[1]
-            if body.lstrip().lower().startswith("json"):
-                body = body.lstrip()[4:]
-            t = body.strip()
-        else:
-            t = text.strip()
+        t = _strip_fence(t).strip()
     # find first { or [ to last } or ]
     try:
         return json.loads(t)
@@ -195,15 +213,27 @@ def submit_image(
                         last_err = APIError(msg)
                         time.sleep(2 * (attempt + 1))
                         continue
-                    raise APIError(f"submit_image: {msg}")
+                    # provider 专属业务错误（如 401/无效 key）：记为 last_err
+                    # 后换池中下一个 provider，而不是直接冲出整个轮询
+                    last_err = APIError(f"submit_image: {msg}")
+                    break
                 try:
                     return data["data"][0]["task_id"], provider
                 except (KeyError, IndexError) as e:
                     raise APIError(f"submit_image unexpected response: {data}") from e
-            except (requests.exceptions.SSLError,
-                    requests.exceptions.ConnectionError) as e:
+            except requests.exceptions.SSLError as e:
+                # domain likely blocked -> stop retrying this base, try next
                 last_err = e
-                break  # domain blocked -> next base
+                break
+            except requests.exceptions.ConnectionError as e:
+                last_err = e
+                break
+            except (requests.RequestException, KeyError, ValueError) as e:
+                # 含 ReadTimeout(RequestException) 与非 JSON 响应体(r.json() 抛
+                # JSONDecodeError⊂ValueError)：同一 base 内重试，用尽后仍会
+                # 轮到下一个 base，保持与 chat() 一致的故障切换语义
+                last_err = e
+                time.sleep(2 * (attempt + 1))
     raise APIError(f"submit_image failed on all API domains: {last_err}")
 
 
@@ -258,8 +288,24 @@ def generate_image(
     local_path = None
     if save_path:
         local_path = str(save_path)
-        img_data = requests.get(url, timeout=120).content
-        Path(local_path).write_bytes(img_data)
+        resp = requests.get(url, timeout=120)
+        # 签名 URL 过期或 CDN 瞬时 4xx/5xx 时不能把错误页字节当 PNG 落盘/上传，
+        # 否则会静默损坏本地缓存与 OSS 私有桶
+        if not resp.ok:
+            raise APIError(
+                f"generate_image download failed: HTTP {resp.status_code} for {url}"
+            )
+        # 只拦明确的错误页（html/json/xml/text），不拦 octet-stream 等对象存储
+        # 常见头，否则会误杀本可成功的下载。
+        content_type = resp.headers.get("Content-Type", "").lower()
+        if content_type.startswith(("text/", "application/json", "application/xml")):
+            raise APIError(
+                f"generate_image download failed: unexpected Content-Type "
+                f"{content_type!r} for {url}"
+            )
+        img_data = resp.content
+        from . import storage as _storage
+        _storage.save_file(Path(local_path), img_data, content_type="image/png")
     return {
         "task_id": task_id,
         "url": url,

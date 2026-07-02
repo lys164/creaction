@@ -1,6 +1,7 @@
 """FastAPI backend for the POPOP production pipeline."""
 import shutil
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import chat, config, landing, pipeline, prompts, styles, tasks
+from . import arca_sync, chat, config, landing, pipeline, prompts, styles, tasks, storage
 
 app = FastAPI(title="POPOP Pipeline")
 
@@ -115,6 +116,13 @@ class ChatReq(BaseModel):
     mode: str = "normal"
 
 
+class ArcaSyncReq(BaseModel):
+    char_ids: list[str]
+    force: bool = False
+    sync_landing: bool | None = None
+    sync_posts: bool = False  # 默认只同步角色本体；帖子入口传 True 才发帖
+
+
 # ---------- meta ----------
 @app.get("/api/languages")
 def get_languages():
@@ -181,9 +189,9 @@ def create_personas(
         if not (f.filename or getattr(f, "size", None)):
             continue  # skip empty multipart placeholder
         ext = Path(f.filename or "img.png").suffix or ".png"
-        dest = config.UPLOAD_DIR / f"{int(time.time()*1000)}_{len(saved)}{ext}"
-        with dest.open("wb") as out:
-            shutil.copyfileobj(f.file, out)
+        dest = config.UPLOAD_DIR / f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{len(saved)}{ext}"
+        data = f.file.read()
+        storage.save_file(dest, data)  # 本地 + OSS 双写
         saved.append(str(dest))
 
     # 纯文字模式：没有图片时必须有补充要求，否则无依据可生成。
@@ -198,12 +206,16 @@ def create_personas(
 
     def _job(tid: str):
         results = []
+        group_errors = []
         for group in groups:
-            results.extend(
-                pipeline.create_personas_from_images(
-                    group, lang_list, user_hint=user_hint
+            try:
+                results.extend(
+                    pipeline.create_personas_from_images(
+                        group, lang_list, user_hint=user_hint
+                    )
                 )
-            )
+            except Exception as e:  # noqa: BLE001 单组失败不丢弃其它组已生成的角色
+                group_errors.append(str(e))
             tasks.bump(tid)
 
         cover_errors = {}
@@ -228,6 +240,7 @@ def create_personas(
             "count": len(results),
             "characters": results,
             "cover_errors": cover_errors,
+            "group_errors": group_errors,
         }
 
     tasks.run(task_id, _job)
@@ -335,32 +348,41 @@ def import_personas_from_json(
 
 @app.put("/api/persona")
 def update_persona(req: PersonaUpdateReq):
-    rec = pipeline.load_character(req.char_id)
-    rec["persona"] = req.persona
-    pipeline.save_character(rec)
+    with pipeline.char_lock(req.char_id):  # 与后台任务的读改写互斥
+        rec = pipeline.load_character(req.char_id)
+        rec["persona"] = req.persona
+        pipeline.save_character(rec)
     return rec
 
 
 @app.post("/api/characters/regenerate_persona")
 def regenerate_personas(req: CharIdsReq):
-    """批量重新生成人设（不改图、不动外貌/封面/帖子），并发处理。"""
-    done, errors = [], {}
+    """批量重新生成人设：长耗时 LLM 调用改后台任务，返回 task_id 轮询，
+    避免同步等待撞反代读超时(502 假报失败而服务端仍在跑)。"""
+    tid = tasks.create_task("regen_personas", total=len(req.char_ids))
 
-    def _one(cid: str):
-        try:
-            pipeline.regenerate_persona(cid)
-            return cid, None
-        except Exception as e:  # noqa: BLE001
-            return cid, str(e)
+    def _job(tid: str):
+        done, errors = [], {}
 
-    if req.char_ids:
-        with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
-            for cid, err in ex.map(_one, req.char_ids):
-                if err is None:
-                    done.append(cid)
-                else:
-                    errors[cid] = err
-    return {"regenerated": done, "errors": errors}
+        def _one(cid: str):
+            try:
+                pipeline.regenerate_persona(cid)
+                return cid, None
+            except Exception as e:  # noqa: BLE001
+                return cid, str(e)
+
+        if req.char_ids:
+            with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+                for cid, err in ex.map(_one, req.char_ids):
+                    if err is None:
+                        done.append(cid)
+                    else:
+                        errors[cid] = err
+                    tasks.bump(tid)
+        return {"regenerated": done, "errors": errors}
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
 
 
 @app.post("/api/opening")
@@ -371,31 +393,45 @@ def regenerate_opening(req: RegenOpeningReq):
 
 @app.post("/api/characters/regenerate_opening")
 def batch_regenerate_opening(req: BatchOpeningReq):
-    """批量重写开场白（不改图、不动其它人设/外貌/封面/帖子），并发处理。"""
-    done, errors = [], {}
+    """批量重写开场白：长耗时 LLM 调用改后台任务，返回 task_id 轮询，
+    避免同步等待撞反代读超时(502 假报失败而服务端仍在跑)。"""
+    tid = tasks.create_task("regen_opening", total=len(req.char_ids))
 
-    def _one(cid: str):
-        try:
-            pipeline.regenerate_opening(cid, user_hint=req.user_hint)
-            return cid, None
-        except Exception as e:  # noqa: BLE001
-            return cid, str(e)
+    def _job(tid: str):
+        done, errors = [], {}
 
-    if req.char_ids:
-        with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
-            for cid, err in ex.map(_one, req.char_ids):
-                if err is None:
-                    done.append(cid)
-                else:
-                    errors[cid] = err
-    return {"regenerated": done, "errors": errors}
+        def _one(cid: str):
+            try:
+                pipeline.regenerate_opening(cid, user_hint=req.user_hint)
+                return cid, None
+            except Exception as e:  # noqa: BLE001
+                return cid, str(e)
+
+        if req.char_ids:
+            with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+                for cid, err in ex.map(_one, req.char_ids):
+                    if err is None:
+                        done.append(cid)
+                    else:
+                        errors[cid] = err
+                    tasks.bump(tid)
+        return {"regenerated": done, "errors": errors}
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
 
 
 @app.post("/api/characters/delete")
 def delete_characters(req: CharIdsReq):
-    """批量删除角色。"""
-    deleted = [cid for cid in req.char_ids if pipeline.delete_character(cid)]
-    return {"deleted": deleted}
+    """批量删除角色。单个失败(如远端存储删除失败)不中断其余，错误逐个返回。"""
+    deleted, errors = [], {}
+    for cid in req.char_ids:
+        try:
+            if pipeline.delete_character(cid):
+                deleted.append(cid)
+        except Exception as e:  # noqa: BLE001 远端删除失败需暴露并允许重试
+            errors[cid] = str(e)
+    return {"deleted": deleted, "errors": errors}
 
 
 @app.post("/api/characters/export")
@@ -472,13 +508,21 @@ def make_batch_cover(req: BatchCoverReq):
 # ---------- step 4: posts ----------
 @app.post("/api/posts")
 def make_posts(req: PostsReq):
-    return pipeline.generate_posts(
-        req.char_id,
-        req.post_type_ids,
-        count_per_type=req.count_per_type,
-        style_id=req.style_id,
-        with_images=req.with_images,
-    )
+    """长耗时(LLM+批量生图)改后台任务：立即返回 task_id，前端轮询 /api/tasks/{id}。
+    同步等待会撞反代读超时(504)，而生成仍在继续、结果丢失。"""
+    tid = tasks.create_task("posts")
+
+    def _job(tid: str):
+        return pipeline.generate_posts(
+            req.char_id,
+            req.post_type_ids,
+            count_per_type=req.count_per_type,
+            style_id=req.style_id,
+            with_images=req.with_images,
+        )
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
 
 
 @app.get("/api/posts/{char_id}")
@@ -501,9 +545,16 @@ def delete_post(char_id: str, batch_id: str, post_id: str):
 
 @app.post("/api/ig_posts")
 def make_ig_posts(req: IGPostsReq):
-    return pipeline.generate_instagram_posts(
-        req.char_id, n=req.n, style_id=req.style_id, with_images=req.with_images
-    )
+    """同上：后台任务化，返回 task_id。"""
+    tid = tasks.create_task("ig_posts")
+
+    def _job(tid: str):
+        return pipeline.generate_instagram_posts(
+            req.char_id, n=req.n, style_id=req.style_id, with_images=req.with_images
+        )
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
 
 
 @app.post("/api/ig_posts/batch")
@@ -649,6 +700,61 @@ def send_chat(req: ChatReq):
     )
 
 
+# ---------- arca sync ----------
+@app.post("/api/arca/sync")
+def arca_sync_batch(req: ArcaSyncReq):
+    tid = tasks.create_task("arca_sync", total=len(req.char_ids))
+
+    def _job(tid: str):
+        rows = []
+        for cid in req.char_ids:
+            try:
+                rows.append(arca_sync.sync_character(
+                    cid, force=req.force, sync_landing=req.sync_landing,
+                    sync_posts=req.sync_posts))
+            except Exception as e:  # noqa: BLE001 单角色失败不中断整批
+                rows.append({"char_id": cid, "arca_character_id": None,
+                             "posts": [], "errors": [str(e)], "skipped": False,
+                             "landing_url": None})
+            tasks.bump(tid)
+        return rows
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.post("/api/arca/storage/migrate")
+def arca_storage_migrate():
+    """把本地 data/ 存量全量迁移到 arca 通用存储（JSON→存储中台，图片→OSS）。幂等可重跑。"""
+    tid = tasks.create_task("arca_storage_migrate")
+
+    def _job(tid: str):
+        return storage.migrate_all(progress=lambda n: tasks.bump(tid, n))
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.post("/api/arca/delete")
+def arca_delete_batch(req: CharIdsReq):
+    """删除 arca 上的已同步角色并清空本地映射（本地角色数据不动）。"""
+    tid = tasks.create_task("arca_delete", total=len(req.char_ids))
+
+    def _job(tid: str):
+        rows = []
+        for cid in req.char_ids:
+            try:
+                rows.append(arca_sync.remove_from_arca(cid))
+            except Exception as e:  # noqa: BLE001 单角色失败不中断整批
+                rows.append({"char_id": cid, "arca_character_id": None,
+                             "deleted": False, "skipped": False, "errors": [str(e)]})
+            tasks.bump(tid)
+        return rows
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
 # ---------- styles management ----------
 @app.put("/api/styles")
 def replace_styles(new_styles: list[dict]):
@@ -660,7 +766,7 @@ def replace_styles(new_styles: list[dict]):
 @app.get("/img/{name}")
 def serve_image(name: str):
     p = config.IMAGE_DIR / name
-    if not p.exists():
+    if not storage.ensure_file(p):  # 本地缺失时从 arca OSS 回源
         raise HTTPException(404, "image not found")
     return FileResponse(
         str(p),
@@ -671,7 +777,7 @@ def serve_image(name: str):
 @app.get("/upload/{name}")
 def serve_upload(name: str):
     p = config.UPLOAD_DIR / name
-    if not p.exists():
+    if not storage.ensure_file(p):
         raise HTTPException(404, "not found")
     return FileResponse(str(p))
 

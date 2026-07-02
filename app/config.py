@@ -13,7 +13,7 @@ API_BASES = os.environ.get(
 ).split(",")
 API_BASES = [b.strip() for b in API_BASES if b.strip()]
 API_BASE = os.environ.get("POPOP_API_BASE", API_BASES[0])
-API_KEY = os.environ.get("POPOP_API_KEY", "")
+API_KEY = os.environ.get("POPOP_API_KEY", "sk-ucowuTBV99jgB3CXhGJw3MTGPsqNSEF6zAZFYCjyfLZOuVxR")
 _DEFAULT_API_PROVIDERS = [{"base": b, "key": API_KEY} for b in API_BASES]
 
 
@@ -130,4 +130,39 @@ def lang_name(lang: str) -> str:
 def lang_directive(lang: str) -> str:
     """Combined native + locale guidance injected into every prompt."""
     return f"{LANGUAGE_NATIVE.get(lang, '')} {LOCALE_GUIDE.get(lang, '')}".strip()
+
+
+# ---- arca-i18n 同步配置 ----
+ARCA_BASE_URL = os.environ.get("ARCA_BASE_URL", "https://api.popop.dev/").rstrip("/")
+ARCA_UID = os.environ.get("ARCA_UID", "608e5d3149e448c2a67e7ae2dfaea4f7") # hello@popop.ai
+# token 获取方式：local=用共享密钥本地 PyJWT 自签；endpoint=调内网 /internal/tool/gen_jwt_token
+ARCA_JWT_MODE = os.environ.get("ARCA_JWT_MODE", "endpoint")
+ARCA_ACCESS_SECRET = os.environ.get("ARCA_ACCESS_SECRET", "")
+ARCA_JWT_EXPIRES = int(os.environ.get("ARCA_JWT_EXPIRES", "2592000"))  # 30 天
+ARCA_REGION = os.environ.get("ARCA_REGION", "KR")
+# 角色语言 → X-Region 映射（两位大写国家码；CN 会被 arca RegionBlock 拒 403，勿用）。
+# env 传 JSON 覆盖，如 {"zh":"TW","ja":"JP","ko":"KR","en":"US"}；查不到回退 ARCA_REGION。
+_DEFAULT_REGION_BY_LANG = {
+    "zh": "TW",        # arca 中文统一 zh-Hant(繁中)，归属 TW/HK 等繁中地区；CN 被拦
+    "zh-Hant": "TW",
+    "ja": "JP",
+    "ko": "KR",
+    "en": "US",
+}
+try:
+    ARCA_REGION_BY_LANG = {
+        str(k): str(v).upper()
+        for k, v in json.loads(os.environ.get("ARCA_REGION_BY_LANG", "") or "{}").items()
+    } or _DEFAULT_REGION_BY_LANG
+except (json.JSONDecodeError, AttributeError):
+    ARCA_REGION_BY_LANG = _DEFAULT_REGION_BY_LANG
+ARCA_APP_VERSION = os.environ.get("ARCA_APP_VERSION", "")
+ARCA_POST_VISIBILITY = int(os.environ.get("ARCA_POST_VISIBILITY", "0"))  # 0=跟随角色可见性(推荐)；1公开2好友3私密=显式覆盖
+ARCA_SYNC_LANDING = os.environ.get("ARCA_SYNC_LANDING", "1") not in ("0", "false", "False", "")
+ARCA_TOS_BUCKET_PUBLIC = os.environ.get("ARCA_TOS_BUCKET_PUBLIC", "bucket-popop-i18n-prod")  # 落地页 HTML 用公有桶（留空则用凭证返回的 bucket）
+# 调试：打印 arca 每次 HTTP 原始请求/响应（Authorization 与凭证字段自动脱敏）
+ARCA_DEBUG = os.environ.get("ARCA_DEBUG", "1") not in ("0", "false", "False", "")
+# arca 存储中台（通用 JSONB 集合存储）数据面 API Key（sk_...，在 /admin/storage_hub 开通）。
+# 配置后本地 JSON 记录/图片以 arca 为主存、本地为缓存；留空则纯本地存储（历史行为）。
+ARCA_STORAGE_KEY = os.environ.get("ARCA_STORAGE_KEY", "sk_5c581cae262b4f54b838246942dd30de3375f9d3f283df24424d9f09502615cb")
 

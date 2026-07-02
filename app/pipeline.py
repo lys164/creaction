@@ -17,7 +17,34 @@ from pathlib import Path
 
 import requests
 
-from . import api_client, config, landing, prompts, styles
+from . import api_client, config, landing, prompts, storage, styles
+
+
+# 按角色的进程内互斥锁：所有对同一 record 的读-改-写都应持锁，
+# 防止后台任务与前台请求并发时整文件覆盖丢写。
+import threading as _threading
+_CHAR_LOCKS: dict[str, _threading.RLock] = {}
+_CHAR_LOCKS_GUARD = _threading.Lock()
+
+
+def char_lock(char_id: str) -> _threading.RLock:
+    with _CHAR_LOCKS_GUARD:
+        lock = _CHAR_LOCKS.get(char_id)
+        if lock is None:
+            lock = _CHAR_LOCKS[char_id] = _threading.RLock()
+        return lock
+
+
+def _locked(fn):
+    """按首参 char_id 持角色锁执行：所有对同一 record/批次的读-改-写互斥，
+    防止后台批量任务与前台请求并发时整文件覆盖丢写。"""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(char_id, *args, **kwargs):
+        with char_lock(char_id):
+            return fn(char_id, *args, **kwargs)
+    return wrapper
 
 COVER_SPEC_VERSION = 2
 
@@ -31,8 +58,9 @@ def _char_path(char_id: str) -> Path:
 
 
 def _existing_source_images(record: dict) -> list[str]:
-    """Source image paths that still exist on disk (uploads may be cleaned up)."""
-    return [p for p in record.get("source_images", []) if p and Path(p).exists()]
+    """Source image paths that exist locally or can be restored from OSS."""
+    return [p for p in record.get("source_images", [])
+            if p and storage.ensure_file(Path(p))]
 
 
 def _first_source_image(record: dict) -> str | None:
@@ -42,25 +70,21 @@ def _first_source_image(record: dict) -> str | None:
 
 
 def load_character(char_id: str) -> dict:
-    p = _char_path(char_id)
-    if not p.exists():
+    record = storage.load_json("personas", char_id, _char_path(char_id))
+    if record is None:
         raise FileNotFoundError(f"character {char_id} not found")
-    return json.loads(p.read_text(encoding="utf-8"))
+    return record
 
 
 def save_character(record: dict) -> None:
-    _char_path(record["char_id"]).write_text(
-        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    storage.save_json("personas", record["char_id"], record,
+                      _char_path(record["char_id"]))
 
 
 def list_characters() -> list[dict]:
     out = []
-    for p in sorted(config.PERSONA_DIR.glob("*.json")):
-        try:
-            r = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
+    records = storage.list_json("personas", config.PERSONA_DIR)
+    for _key, r in sorted(records.items()):
         name = r.get("persona", {}).get("name", "")
         if isinstance(name, dict):  # legacy multilingual record
             name = name.get("zh") or next(iter(name.values()), "")
@@ -73,6 +97,7 @@ def list_characters() -> list[dict]:
             "cover_url": r.get("cover", {}).get("url") if r.get("cover") else None,
             "has_identity": bool(r.get("identity")),
             "exported": bool(r.get("exported")),
+            "arca_synced": bool(r.get("arca_character_id")),
             "created": r.get("created"),
         })
     return out
@@ -232,6 +257,7 @@ def create_personas_from_images(image_paths: list[str], langs: list[str],
     return records
 
 
+@_locked
 def regenerate_persona(char_id: str) -> dict:
     """只重新生成人设 schema：复用同一来源（源图 或 导入的原始 JSON）、同语言、同补充要求，
     原地覆盖 persona。
@@ -388,6 +414,7 @@ def extract_source_objects(payload) -> list[dict]:
     return []
 
 
+@_locked
 def regenerate_opening(char_id: str, user_hint: str = "") -> dict:
     """只重写角色【开场白】(persona.opening)：依据其它人设信息生成新的 note + messages。
 
@@ -410,14 +437,28 @@ def regenerate_opening(char_id: str, user_hint: str = "") -> dict:
 
 
 def _source_image_is_referenced(path: str) -> bool:
-    """Return True if any remaining character record still references upload path."""
-    for persona_path in config.PERSONA_DIR.glob("*.json"):
+    """Return True if any remaining character record still references upload path.
+
+    删除性守卫必须 fail-safe：启用远端存储时若远端查询失败，保守返回 True
+    （视为仍被引用、跳过删除），绝不能在只看到本地残缺视图时误删共享上传图。
+    """
+    for p in config.PERSONA_DIR.glob("*.json"):
         try:
-            rec = json.loads(persona_path.read_text(encoding="utf-8"))
+            rec = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         if path in rec.get("source_images", []):
             return True
+    from . import arca_storage
+    if arca_storage.enabled():
+        try:
+            rows = storage.query_all("personas")
+        except Exception:  # noqa: BLE001 远端不可达 → 拒删
+            return True
+        for row in rows:
+            rec = row.get("data") or {}
+            if path in rec.get("source_images", []):
+                return True
     return False
 
 
@@ -450,7 +491,7 @@ def _image_bytes(image: dict | None) -> bytes | None:
     if not isinstance(image, dict):
         return None
     local = image.get("local_path")
-    if local and Path(local).exists():
+    if local and storage.ensure_file(Path(local)):
         try:
             return Path(local).read_bytes()
         except OSError:
@@ -513,7 +554,7 @@ def _inline_landing_posts(html: str, post_urls: list[str] | None) -> str:
             continue
         name = Path(url).name
         p = config.IMAGE_DIR / name
-        if not p.exists():
+        if not storage.ensure_file(p):  # 冷缓存从 OSS 回源，避免导出页槽位静默为空
             continue
         try:
             b = p.read_bytes()
@@ -647,6 +688,7 @@ def export_characters_zip(char_ids: list[str]) -> bytes:
     return buf.getvalue()
 
 
+@_locked
 def delete_character(char_id: str) -> bool:
     """删除一个角色及所有以角色 id 归属的数据。"""
     p = _char_path(char_id)
@@ -658,6 +700,28 @@ def delete_character(char_id: str) -> bool:
             record = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             record = None
+
+    # 远端存储联动删除：persona 记录 + 该角色的批次/ig/landing/chat 记录。
+    # 注意顺序：远端删除成功后才删本地文件——否则远端失败重试时 record 已丢，
+    # 共享上传图清理会被跳过。
+    # 远端删除失败必须上抛（否则残留记录会被 list/load 回源"复活"），由上层报错重试。
+    from . import arca_storage
+    if arca_storage.enabled():
+        arca_storage.delete_record("personas", char_id)
+        for coll in ("ig_batches", "landings"):
+            arca_storage.delete_record(coll, char_id)
+        for coll in ("post_batches", "chats"):
+            for row in arca_storage.query_records(
+                    coll, match={"char_id": char_id}, limit=500):
+                if row.get("key"):
+                    arca_storage.delete_record(coll, row["key"])
+        deleted_any = True
+        # OSS 图片/目录级联清理（尽力而为）：不清会永久残留并被 /img 回源复活
+        storage.delete_oss_prefix(f"images/{char_id}_")
+        for sub in ("posts", "landing", "chat"):
+            storage.delete_oss_prefix(f"{sub}/{char_id}/")
+
+    if p.exists():
         p.unlink()
         deleted_any = True
 
@@ -692,6 +756,7 @@ def delete_character(char_id: str) -> bool:
                     and not _source_image_is_referenced(src)
                 ):
                     src_path.unlink(missing_ok=True)
+                    storage.delete_oss_file(src_path)
                     deleted_any = True
             except OSError:
                 pass
@@ -702,6 +767,7 @@ def delete_character(char_id: str) -> bool:
 # --------------------------------------------------------------------------
 # Step 2: persona -> identity (appearance DNA)
 # --------------------------------------------------------------------------
+@_locked
 def build_identity(char_id: str) -> dict:
     """Build stable appearance DNA from the persona and one main visual anchor.
 
@@ -748,6 +814,7 @@ def build_cover_spec(char_id: str) -> dict:
     return record
 
 
+@_locked
 def generate_cover(
     char_id: str,
     style_id: str,
@@ -872,6 +939,7 @@ def _render_post_image(record: dict, post: dict, style: dict) -> dict:
     return post
 
 
+@_locked
 def generate_posts(
     char_id: str,
     post_type_ids: list[str],
@@ -946,12 +1014,12 @@ def generate_posts(
         "with_images": with_images,
         "posts": posts,
     }
-    (_posts_dir(char_id) / f"{batch_id}.json").write_text(
-        json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    storage.save_json("post_batches", f"{char_id}__{batch_id}", batch,
+                      _posts_dir(char_id) / f"{batch_id}.json")
     return batch
 
 
+@_locked
 def rerender_post_image(char_id: str, batch_id: str, post_id: str,
                         style_id: str | None = None) -> dict:
     """Re-render one image in a regular post batch without regenerating text/spec."""
@@ -968,9 +1036,8 @@ def rerender_post_image(char_id: str, batch_id: str, post_id: str,
         if post.get("post_id") == post_id:
             _render_post_image(record, post, style)
             batch["style_id"] = style_id
-            (_posts_dir(char_id) / f"{batch_id}.json").write_text(
-                json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            storage.save_json("post_batches", f"{char_id}__{batch_id}", batch,
+                              _posts_dir(char_id) / f"{batch_id}.json")
             return {"post": post, "batch": batch}
     raise ValueError(f"post {post_id} not found in batch {batch_id}")
 
@@ -987,6 +1054,7 @@ def _delete_post_image(post: dict) -> None:
             pass
 
 
+@_locked
 def delete_post_from_batch(char_id: str, batch_id: str, post_id: str) -> dict:
     """Delete one regular post from a saved batch."""
     batch = load_batch(char_id, batch_id)
@@ -1002,9 +1070,8 @@ def delete_post_from_batch(char_id: str, batch_id: str, post_id: str) -> dict:
         raise ValueError(f"post {post_id} not found in batch {batch_id}")
     _delete_post_image(deleted)
     batch["posts"] = kept
-    (_posts_dir(char_id) / f"{batch_id}.json").write_text(
-        json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    storage.save_json("post_batches", f"{char_id}__{batch_id}", batch,
+                      _posts_dir(char_id) / f"{batch_id}.json")
     return {"deleted": post_id, "batch": batch}
 
 
@@ -1021,11 +1088,12 @@ def _cover_url_for_landing(record: dict) -> str | None:
     """Public URL the iframe/standalone page can load for the cover slot."""
     cover = record.get("cover") or {}
     lp = cover.get("local_path")
-    if lp and Path(lp).exists():
+    if lp and storage.ensure_file(Path(lp)):
         return f"/img/{Path(lp).name}"
     return cover.get("url")
 
 
+@_locked
 def generate_landing(
     char_id: str,
     style_text: str | None = None,
@@ -1058,7 +1126,7 @@ def generate_landing(
     content: list[dict] = [{"type": "text", "text": user_text}]
     cover_lp = record.get("cover", {}).get(
         "local_path") if record.get("cover") else None
-    if cover_lp and Path(cover_lp).exists():
+    if cover_lp and storage.ensure_file(Path(cover_lp)):  # 冷缓存从 OSS 回源
         content.append(
             {"type": "image_url",
              "image_url": {"url": api_client.file_to_data_uri(cover_lp)}}
@@ -1086,19 +1154,15 @@ def generate_landing(
         "html_filled": saved_html,  # cover URL baked in for standalone use
     }
     # 单角色只保留最新一份，重新生成直接覆盖
-    (_landing_dir(char_id) / "landing_latest.json").write_text(
-        json.dumps(page, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    storage.save_json("landings", char_id, page,
+                      _landing_dir(char_id) / "landing_latest.json")
     return page
 
 
 def load_latest_landing(char_id: str) -> dict | None:
-    p = _landing_dir(char_id) / "landing_latest.json"
-    if not p.exists():
-        return None
-    try:
-        page = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    page = storage.load_json("landings", char_id,
+                             _landing_dir(char_id) / "landing_latest.json")
+    if page is None:
         return None
     # Re-inject the cover on read so pages saved before the injector handled
     # background-image divs (and pages whose cover changed) still display it.
@@ -1110,8 +1174,28 @@ def load_latest_landing(char_id: str) -> dict | None:
 
 
 def load_batch(char_id: str, batch_id: str) -> dict:
-    p = _posts_dir(char_id) / f"{batch_id}.json"
-    return json.loads(p.read_text(encoding="utf-8"))
+    batch = storage.load_json("post_batches", f"{char_id}__{batch_id}",
+                              _posts_dir(char_id) / f"{batch_id}.json")
+    if batch is None:
+        raise FileNotFoundError(f"batch {batch_id} not found for {char_id}")
+    return batch
+
+
+def list_batches(char_id: str) -> list[dict]:
+    """该角色的普通帖子批次（新到旧）。
+
+    远端键是 "char__batch"，本地文件名是 "batch.json"：query 按 char_id 过滤
+    （避免拉整集合/跨角色污染），远端键剥前缀映射回本地名（避免同批次重复出现）。
+    """
+    prefix = f"{char_id}__"
+    batches = storage.list_json(
+        "post_batches", _posts_dir(char_id), pattern="batch_*.json",
+        match={"char_id": char_id},
+        remote_key_to_local=lambda k: k[len(prefix):] if k.startswith(prefix) else None)
+    out = [b for b in batches.values()
+           if isinstance(b, dict) and b.get("char_id") == char_id]
+    out.sort(key=lambda b: b.get("created", 0), reverse=True)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -1120,7 +1204,7 @@ def load_batch(char_id: str, batch_id: str) -> dict:
 def _ref_image_uri_for_selfie(record: dict) -> str | None:
     """Prefer the redrawn cover as the i2i reference; fall back to source image."""
     cover = record.get("cover") or {}
-    if cover.get("local_path") and Path(cover["local_path"]).exists():
+    if cover.get("local_path") and storage.ensure_file(Path(cover["local_path"])):
         return api_client.file_to_data_uri(cover["local_path"])
     if cover.get("url"):
         return cover["url"]
@@ -1208,6 +1292,7 @@ def _sibling_used_photo_kinds(record: dict, sample_k: int = 4) -> list[str]:
     return kinds
 
 
+@_locked
 def generate_instagram_posts(
     char_id: str,
     n: int | None = None,
@@ -1290,22 +1375,17 @@ def generate_instagram_posts(
         "posts": posts,
     }
     # 单角色只保留最新一份，重新生成直接覆盖
-    (_posts_dir(char_id) / "ig_latest.json").write_text(
-        json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    storage.save_json("ig_batches", char_id, batch,
+                      _posts_dir(char_id) / "ig_latest.json")
     return batch
 
 
 def load_latest_ig(char_id: str) -> dict | None:
-    p = _posts_dir(char_id) / "ig_latest.json"
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return storage.load_json("ig_batches", char_id,
+                             _posts_dir(char_id) / "ig_latest.json")
 
 
+@_locked
 def rerender_ig_post_image(char_id: str, post_id: str,
                            style_id: str | None = None) -> dict:
     """Re-render one image in the latest Instagram batch."""
@@ -1324,13 +1404,13 @@ def rerender_ig_post_image(char_id: str, post_id: str,
             _render_ig_post_image(
                 record, post, record["identity"], style_prompt, True)
             batch["style_id"] = style_id
-            (_posts_dir(char_id) / "ig_latest.json").write_text(
-                json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            storage.save_json("ig_batches", char_id, batch,
+                              _posts_dir(char_id) / "ig_latest.json")
             return {"post": post, "batch": batch}
     raise ValueError(f"Instagram post {post_id} not found")
 
 
+@_locked
 def delete_ig_post(char_id: str, post_id: str) -> dict:
     """Delete one post from the latest Instagram batch."""
     batch = load_latest_ig(char_id)
@@ -1348,7 +1428,6 @@ def delete_ig_post(char_id: str, post_id: str) -> dict:
     _delete_post_image(deleted)
     batch["posts"] = kept
     batch["n"] = len(kept)
-    (_posts_dir(char_id) / "ig_latest.json").write_text(
-        json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    storage.save_json("ig_batches", char_id, batch,
+                      _posts_dir(char_id) / "ig_latest.json")
     return {"deleted": post_id, "batch": batch}
