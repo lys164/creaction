@@ -111,3 +111,46 @@ def test_arca_storage_get_404_returns_none(monkeypatch):
 
     monkeypatch.setattr(ash.requests, "get", lambda *a, **k: _R())
     assert ash.get_record("personas", "nope") is None
+
+
+def test_save_json_oss_fields_split_and_restore(monkeypatch, tmp_path):
+    ash, st = _mods(monkeypatch, key="sk_test")
+    monkeypatch.setattr(ash, "ensure_collection", lambda *a, **k: None)
+
+    oss_store = {}
+
+    class _FakeBucket:
+        def put_object(self, key, data, headers=None):
+            oss_store[key] = data
+
+        def get_object(self, key):
+            import io
+            if key not in oss_store:
+                raise KeyError(key)
+            return io.BytesIO(oss_store[key])
+
+    monkeypatch.setattr(st, "_oss_bucket", lambda: _FakeBucket())
+    put = {}
+    monkeypatch.setattr(ash, "put_record", lambda coll, key, data: put.update(data=data))
+
+    page = {"char_id": "c1", "html": "<html>大页面</html>",
+            "html_filled": "<html>filled</html>", "style_text": "ins"}
+    local = tmp_path / "landing_latest.json"
+    st.save_json("landings", "c1", page, local, oss_fields=["html", "html_filled"])
+
+    # 本地缓存仍是完整版
+    import json as _j
+    assert _j.loads(local.read_text())["html"] == "<html>大页面</html>"
+    # hub 记录里 html 变占位，元数据保留
+    assert put["data"]["html"] == {"__oss_key__": "creaction-data/hubfields/landings/c1/html"}
+    assert put["data"]["style_text"] == "ins"
+    # OSS 收到了 HTML 本体
+    assert oss_store["creaction-data/hubfields/landings/c1/html"] == "<html>大页面</html>".encode()
+
+    # 回源还原：本地缺失时 load_json 从 hub 拿占位记录并从 OSS 拉回原文
+    monkeypatch.setattr(ash, "get_record", lambda coll, key: dict(put["data"]))
+    local2 = tmp_path / "restored.json"
+    obj = st.load_json("landings", "c1", local2)
+    assert obj["html"] == "<html>大页面</html>"
+    assert obj["html_filled"] == "<html>filled</html>"
+    assert _j.loads(local2.read_text())["html"] == "<html>大页面</html>"  # 缓存完整版

@@ -1154,8 +1154,10 @@ def generate_landing(
         "html_filled": saved_html,  # cover URL baked in for standalone use
     }
     # 单角色只保留最新一份，重新生成直接覆盖
+    # html 本体不进 storage_hub(单条 256KB 上限)，剥离到 OSS，hub 只存元数据
     storage.save_json("landings", char_id, page,
-                      _landing_dir(char_id) / "landing_latest.json")
+                      _landing_dir(char_id) / "landing_latest.json",
+                      oss_fields=["html", "html_filled"])
     return page
 
 

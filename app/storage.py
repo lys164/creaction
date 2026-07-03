@@ -50,13 +50,57 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 
 
 # ---------------------------------------------------------------- JSON 记录
-def save_json(collection: str, key: str, obj: dict, local: Path) -> None:
+_OSS_FIELD_MARK = "__oss_key__"  # hub 记录里大字段的占位标记
+
+
+def _field_oss_key(collection: str, key: str, field: str) -> str:
+    return f"{_OSS_PREFIX}/hubfields/{collection}/{key}/{field}"
+
+
+def _split_oss_fields(collection: str, key: str, obj: dict,
+                      oss_fields: list[str]) -> dict:
+    """把 obj 的指定大字段(str)上传 OSS，返回 hub 版记录（字段替换为占位）。
+
+    落地页 HTML 等大文本不进 storage_hub（单条 data 上限 256KB），
+    hub 只存元数据 + `{"__oss_key__": ...}` 占位。
+    """
+    slim = dict(obj)
+    bkt = _oss_bucket()
+    for field in oss_fields:
+        val = obj.get(field)
+        if not isinstance(val, str) or not val:
+            continue
+        okey = _field_oss_key(collection, key, field)
+        bkt.put_object(okey, val.encode("utf-8"),
+                       headers={"Content-Type": "text/plain; charset=utf-8"})
+        slim[field] = {_OSS_FIELD_MARK: okey}
+    return slim
+
+
+def _restore_oss_fields(obj: dict) -> dict:
+    """把远端记录里的 OSS 占位字段拉回原文（拉取失败置 None，不阻断）。"""
+    for field, val in list(obj.items()):
+        if isinstance(val, dict) and _OSS_FIELD_MARK in val:
+            try:
+                data = _oss_bucket().get_object(val[_OSS_FIELD_MARK]).read()
+                obj[field] = data.decode("utf-8")
+            except Exception as e:  # noqa: BLE001
+                log.warning("storage oss 字段回源 %s 失败: %s", val[_OSS_FIELD_MARK], e)
+                obj[field] = None
+    return obj
+
+
+def save_json(collection: str, key: str, obj: dict, local: Path,
+              oss_fields: list[str] | None = None) -> None:
     _atomic_write_text(local, json.dumps(obj, ensure_ascii=False, indent=2))
     if not arca_storage.enabled():
         return
     try:
         _ensure(collection)
-        arca_storage.put_record(collection, key, obj)
+        remote_obj = obj
+        if oss_fields:
+            remote_obj = _split_oss_fields(collection, key, obj, oss_fields)
+        arca_storage.put_record(collection, key, remote_obj)
     except Exception as e:  # noqa: BLE001 远端失败不阻断本地（迁移可补推）
         log.warning("storage put %s/%s 失败: %s", collection, key, e)
 
@@ -74,7 +118,8 @@ def load_json(collection: str, key: str, local: Path) -> dict | None:
     except Exception as e:  # noqa: BLE001
         log.warning("storage get %s/%s 失败: %s", collection, key, e)
         return None
-    if obj is not None:  # 回源命中 → 回写本地缓存
+    if obj is not None:  # 回源命中 → 还原 OSS 大字段占位 → 回写本地完整缓存
+        obj = _restore_oss_fields(obj)
         try:
             _atomic_write_text(local, json.dumps(obj, ensure_ascii=False, indent=2))
         except OSError:
@@ -189,7 +234,8 @@ def migrate_all(progress=None) -> dict:
         if progress:
             progress(1)
 
-    def _put(coll: str, key: str, local: Path):
+    def _put(coll: str, key: str, local: Path,
+             oss_fields: list[str] | None = None):
         try:
             obj = json.loads(local.read_text(encoding="utf-8"))
             if coll == "styles" and isinstance(obj, list):
@@ -197,6 +243,8 @@ def migrate_all(progress=None) -> dict:
             if not isinstance(obj, dict):
                 return
             _ensure(coll)
+            if oss_fields:
+                obj = _split_oss_fields(coll, key, obj, oss_fields)
             arca_storage.put_record(coll, key, obj)
             stats[coll] += 1
         except Exception as e:  # noqa: BLE001
@@ -218,7 +266,8 @@ def migrate_all(progress=None) -> dict:
     for char_dir in sorted(config.LANDING_DIR.iterdir() if config.LANDING_DIR.exists() else []):
         p = char_dir / "landing_latest.json"
         if char_dir.is_dir() and p.exists():
-            _put("landings", char_dir.name, p)
+            _put("landings", char_dir.name, p,
+                 oss_fields=["html", "html_filled"])  # html 走 OSS 不进 hub
     for char_dir in sorted(config.CHAT_DIR.iterdir() if config.CHAT_DIR.exists() else []):
         if not char_dir.is_dir():
             continue
