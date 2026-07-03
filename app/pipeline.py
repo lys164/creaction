@@ -81,12 +81,112 @@ def list_characters() -> list[dict]:
 # --------------------------------------------------------------------------
 # Step 1: image -> persona  (one separate character PER language)
 # --------------------------------------------------------------------------
+_PERSONALITY_CHAIN_FIELDS = (
+    "decisive_event", "response", "cost",
+    "desire_outer", "desire_inner", "desire_bottom_line", "healing",
+)
+_HUMAN_SPECIES_MARKERS = ("人类", "인간", "human", "人間")
+
+
+def _job_snippet(social_status) -> str:
+    """First clause of social_status, used for the cross-character avoid list."""
+    if not isinstance(social_status, str):
+        return ""
+    s = social_status.strip()
+    for sep in ("。", ". ", "；", ";", "\n"):
+        idx = s.find(sep)
+        if idx > 0:
+            s = s[:idx]
+            break
+    return s[:24]
+
+
+def _recent_persona_traits(lang: str, exclude_char_id: str | None = None,
+                           max_records: int = 40) -> tuple[list[str], list[str], list[str]]:
+    """Collect (names, job snippets, overused tags) from recent same-language
+    characters, for the diversity avoid lists injected into persona prompts."""
+    records = []
+    for p in config.PERSONA_DIR.glob("*.json"):
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if rec.get("lang") != lang or rec.get("char_id") == exclude_char_id:
+            continue
+        records.append(rec)
+    records.sort(key=lambda r: r.get("created", 0), reverse=True)
+    records = records[:max_records]
+
+    names: list[str] = []
+    jobs: list[str] = []
+    tag_counts: dict[str, int] = {}
+    for rec in records:
+        persona = rec.get("persona") or {}
+        name = persona.get("name")
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+        job = _job_snippet(persona.get("social_status"))
+        if job:
+            jobs.append(job)
+        for t in persona.get("tags") or []:
+            if isinstance(t, str) and t.strip():
+                tag_counts[t.strip()] = tag_counts.get(t.strip(), 0) + 1
+    # 只把真正扎堆的 tag 列入避让（≥3 次且覆盖 ≥20% 的近期角色）
+    threshold = max(3, len(records) // 5)
+    overused = [t for t, c in sorted(tag_counts.items(), key=lambda x: -x[1])
+                if c >= threshold]
+    # 去重保序
+    names = list(dict.fromkeys(names))
+    jobs = list(dict.fromkeys(jobs))
+    return names, jobs, overused[:8]
+
+
+def _is_plain_human(persona: dict) -> bool:
+    """True when the character is an ordinary human with no special premise."""
+    species = persona.get("species")
+    if isinstance(species, str) and species.strip():
+        s = species.strip().lower()
+        if not any(m in s for m in _HUMAN_SPECIES_MARKERS):
+            return False
+    premise = persona.get("premise")
+    return not (isinstance(premise, str) and premise.strip())
+
+
+def _postprocess_persona(persona: dict, archetype: str | None = None) -> dict:
+    """Enforce conditional-field rules the model tends to ignore.
+
+    - situational_reactions is only for non-human / special-premise characters;
+      strip it from ordinary humans (observed 61/62 filled despite the rule).
+    - "plain" archetype characters must not carry a personality causal chain or
+      a hidden_side — blank them even if the model wrote them anyway.
+    """
+    if not isinstance(persona, dict):
+        return persona
+    if _is_plain_human(persona):
+        persona.pop("situational_reactions", None)
+    if archetype == "plain":
+        personality = persona.get("personality")
+        if isinstance(personality, dict):
+            for key in _PERSONALITY_CHAIN_FIELDS:
+                if personality.get(key):
+                    personality[key] = ""
+        if persona.get("hidden_side"):
+            persona["hidden_side"] = ""
+    return persona
+
+
 def create_persona_one_lang(image_paths: list[str], lang: str,
                             user_hint: str = "", group_id: str | None = None) -> dict:
     """Create a single-language character: persona authored natively in `lang`."""
     uris = [api_client.file_to_data_uri(p) for p in image_paths]
-    messages = prompts.build_persona_messages(uris, lang, user_hint=user_hint)
+    archetype = prompts.sample_archetype()
+    names, jobs, tags = _recent_persona_traits(lang)
+    diversity_block = prompts.build_persona_diversity_block(
+        lang, archetype, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
+    messages = prompts.build_persona_messages(
+        uris, lang, user_hint=user_hint, diversity_block=diversity_block)
     persona = api_client.chat_json(messages, temperature=0.85)
+    persona = _postprocess_persona(persona, archetype)
 
     char_id = _new_id("char")
     record = {
@@ -96,6 +196,7 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         "created": int(time.time()),
         "source_images": image_paths,
         "user_hint": user_hint,
+        "archetype": archetype,
         "persona": persona,
         "identity": None,
         "cover": None,
@@ -144,11 +245,22 @@ def regenerate_persona(char_id: str) -> dict:
     if record.get("import_source") is not None:
         messages = prompts.build_persona_from_json_messages(
             record["import_source"], lang, user_hint=user_hint)
+        persona = api_client.chat_json(messages, temperature=0.85)
+        record["persona"] = _postprocess_persona(persona)
     else:
         uris = [api_client.file_to_data_uri(p)
                 for p in _existing_source_images(record)]
-        messages = prompts.build_persona_messages(uris, lang, user_hint=user_hint)
-    record["persona"] = api_client.chat_json(messages, temperature=0.85)
+        # 重刷时重新掷骰子：换角色类型/种子，避免刷回同一种模式。
+        archetype = prompts.sample_archetype()
+        names, jobs, tags = _recent_persona_traits(lang, exclude_char_id=char_id)
+        diversity_block = prompts.build_persona_diversity_block(
+            lang, archetype, avoid_names=names, recent_jobs=jobs,
+            overused_tags=tags)
+        messages = prompts.build_persona_messages(
+            uris, lang, user_hint=user_hint, diversity_block=diversity_block)
+        persona = api_client.chat_json(messages, temperature=0.85)
+        record["persona"] = _postprocess_persona(persona, archetype)
+        record["archetype"] = archetype
     record.pop("cover_spec", None)
     save_character(record)
     return record
@@ -210,6 +322,7 @@ def create_persona_from_json_one_lang(source_obj: dict, lang: str,
     messages = prompts.build_persona_from_json_messages(
         source_obj, lang, user_hint=user_hint)
     persona = api_client.chat_json(messages, temperature=0.85)
+    persona = _postprocess_persona(persona)
 
     char_id = _new_id("char")
     record = {
@@ -353,9 +466,25 @@ def _image_bytes(image: dict | None) -> bytes | None:
     return None
 
 
+# 导出兜底：真实社交平台名一律替换成 Popop（prompt 层已要求生成时就用 Popop，
+# 这里只是最后一道保险）。长词在前，避免"인스타그램"被"인스타"截断替换。
+_BRAND_TOKEN_REPLACEMENTS = [
+    "Instagram", "instagram", "INSTAGRAM",
+    "인스타그램", "인스타", "インスタグラム", "インスタ",
+    "小红书", "Threads", "threads", "스레드", "スレッズ",
+    "Twitter", "twitter", "推特", "트위터", "ツイッター",
+    "TikTok", "tiktok", "틱톡", "抖音",
+]
+# 短缩写只在无字母上下文时替换（"发个ins"命中，"insert/<ins>"不命中）。
+_BRAND_SHORT_RE = re.compile(r"(?<![A-Za-z</])(?:ins|IG)(?![A-Za-z>])")
+
+
 def _apply_brand_replacements(text: str) -> str:
-    """Keep generated/exported brand names unchanged."""
-    return text
+    """Replace real social-platform names with Popop in exported text."""
+    for token in _BRAND_TOKEN_REPLACEMENTS:
+        if token in text:
+            text = text.replace(token, "Popop")
+    return _BRAND_SHORT_RE.sub("Popop", text)
 
 
 def _inline_landing_cover(html: str, cover_url: str | None,
@@ -622,10 +751,16 @@ def build_cover_spec(char_id: str) -> dict:
 def generate_cover(
     char_id: str,
     style_id: str,
-    use_reference: bool = False,
+    use_reference: bool | None = None,
     mode: str = "fill_missing",
 ) -> dict:
     """Generate a cover image.
+
+    use_reference:
+    - None (default): auto — use the source image as i2i reference whenever the
+      style is photographic and a source image exists. The cover anchors every
+      later selfie i2i, and covers drawn without a reference are visibly worse.
+    - True/False: explicit override.
 
     mode:
     - "fill_missing": keep existing identity/spec, generate only missing data.
@@ -671,6 +806,8 @@ def generate_cover(
         scene=cover_spec.get("scene"),
     )
 
+    if use_reference is None:
+        use_reference = prompts.is_photographic_style(style["prompt"])
     image_urls = None
     if use_reference:
         src = _first_source_image(record)

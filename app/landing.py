@@ -184,6 +184,7 @@ _MSG_I18N = {
         "request": "# 用户要求：",
         "default_request": "请根据角色信息生成主页",
         "output_lang": "\n\n⚠️ 页面上所有可见文字（标题、正文、标签、装饰文案等）一律使用简体中文。",
+        "brand_rule": "⚠️ 品牌规则：角色发帖/聊天所在的平台一律称「Popop」，页面文案不得出现 Instagram/ins/Threads/小红书/推特 等真实社交平台名。",
         "design_keywords": r"交互|互动|滑动|布局|美观|组件|模块|元件",
     },
     "ja": {
@@ -201,6 +202,7 @@ _MSG_I18N = {
         "request": "# ユーザーの要望：",
         "default_request": "キャラクター情報をもとにホームページを生成してください",
         "output_lang": "\n\n⚠️ ページ上のすべての可視テキスト（見出し・本文・ラベル・装飾コピーなど）は必ず日本語で書いてください。",
+        "brand_rule": "⚠️ ブランド規則：キャラクターが投稿・チャットするプラットフォームは必ず「Popop」と呼ぶこと。Instagram/インスタ/Threads/X など実在のSNS名をページ文言に出さない。",
         "design_keywords": r"インタラクション|操作|スライド|レイアウト|デザイン|コンポーネント|モジュール",
     },
     "ko": {
@@ -218,6 +220,7 @@ _MSG_I18N = {
         "request": "# 사용자 요청:",
         "default_request": "캐릭터 정보를 바탕으로 메인 페이지를 생성해 주세요",
         "output_lang": "\n\n⚠️ 페이지의 모든 가시 텍스트(제목, 본문, 라벨, 장식 문구 등)는 전부 한국어로 작성하세요.",
+        "brand_rule": "⚠️ 브랜드 규칙: 캐릭터가 글 올리고 대화하는 플랫폼은 반드시 「Popop」이라 부른다. Instagram/인스타/Threads/스레드/X 같은 실제 SNS명을 페이지 문구에 쓰지 않는다.",
         "design_keywords": r"인터랙션|상호작용|슬라이드|레이아웃|디자인|컴포넌트|모듈",
     },
     "en": {
@@ -235,6 +238,7 @@ _MSG_I18N = {
         "request": "# User request:",
         "default_request": "Please generate a homepage based on the character info",
         "output_lang": "\n\n⚠️ All visible text on the page (titles, body, labels, decorative copy, etc.) must be written in English.",
+        "brand_rule": "⚠️ Brand rule: the platform where the character posts and chats is always called \"Popop\". Never use real social-network names (Instagram/Threads/X/TikTok) in the page copy.",
         "design_keywords": r"interactive|interaction|slide|layout|aesthetic|component|module",
     },
 }
@@ -445,6 +449,8 @@ def build_user_message(persona: dict, lang: str, has_cover: bool,
     parts.append(labels["page_lang"].format(
         name=config.lang_name(lang), directive=config.lang_directive(lang)
     ))
+    if labels.get("brand_rule"):
+        parts.append(labels["brand_rule"])
 
     command = (request or "").strip()
     if style_text:
