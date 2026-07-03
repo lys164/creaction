@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>角色聊天 · 轻量版</title>
+  <style>
+    :root {
+      --accent: #6b5bd2; --accent-soft: #ece9fb; --line: #e6e3da;
+      --surface: #fff; --inset: #f5f3ec; --txt: #2b2a28; --mut: #8b877e;
+      --bg: #f3f0e8;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "PingFang SC", sans-serif; background: var(--bg); color: var(--txt); }
+    button { font: inherit; cursor: pointer; }
+    .ghost { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; color: var(--txt); }
+    .ghost:hover { border-color: var(--accent); }
+    .primary { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; }
+    textarea, input { font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--txt); background: var(--surface); width: 100%; }
+
+    .wrap { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+    .sidebar { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+    .sidebar-head { padding: 14px; border-bottom: 1px solid var(--line); }
+    .sidebar-head h1 { font-size: 15px; margin: 0 0 10px; }
+    .char-list { flex: 1; overflow: auto; padding: 8px; }
+    .char-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+    .char-item:hover { background: var(--inset); }
+    .char-item.active { background: var(--accent-soft); border-color: var(--accent); }
+    .char-avatar { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+    .char-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .char-meta { min-width: 0; }
+    .char-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .char-id { font-size: 11px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lang-badge { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); margin-right: 4px; }
+
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+    .empty { margin: auto; color: var(--mut); }
+    .panel { display: flex; flex-direction: column; height: 100%; }
+    .panel.hidden { display: none; }
+    .head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .head .char-avatar { width: 42px; height: 42px; }
+    .head-title { font-size: 15px; font-weight: 600; }
+    .head-sub { font-size: 12px; color: var(--mut); }
+    .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .mode-switch { display: inline-flex; background: var(--inset); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+    .mode-btn { border: none; background: transparent; color: var(--mut); border-radius: 6px; padding: 5px 12px; font-size: 13px; }
+    .mode-btn.active { background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+    .music-bubble { background: #f2f7ff; }
+    .match-bubble { background: #fff4f8; border-color: #f0c6d8; }
+    .match-bubble .type-label { color: #d1477a; background: #ffe1ec; }
+
+    .drawer { border-bottom: 1px solid var(--line); background: var(--inset); padding: 0 16px; }
+    .drawer summary { cursor: pointer; color: var(--mut); font-size: 13px; padding: 11px 0; font-weight: 600; }
+    .ctx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding-bottom: 12px; }
+    .ctx-grid .field { display: flex; flex-direction: column; gap: 3px; }
+    .ctx-grid .field span { font-size: 11px; color: var(--mut); }
+    .ctx-grid .wide { grid-column: 1 / -1; }
+    .ctx-grid input, .ctx-grid textarea { font-size: 13px; }
+
+    .prompt-box { padding: 0 0 12px; }
+    .prompt-box textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; resize: vertical; }
+    .prompt-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .prompt-actions .muted { font-size: 12px; color: var(--mut); }
+
+    .history-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; max-height: 280px; overflow: auto; }
+    .history-item { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; }
+    .history-item.active { border-color: var(--accent); background: var(--accent-soft); }
+    .history-top { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--mut); }
+    .history-count { margin-left: auto; }
+    .history-tag { color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 1px 7px; font-size: 10px; }
+    .history-preview { font-size: 13px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .status { padding: 0 16px; margin: 8px 0 0; font-size: 13px; color: var(--mut); min-height: 18px; }
+    .messages { flex: 1; padding: 18px; overflow: auto; display: flex; flex-direction: column; }
+    .placeholder { margin: auto; color: var(--mut); }
+    .row { display: flex; margin: 6px 0; }
+    .row.user { justify-content: flex-end; }
+    .row.assistant { justify-content: flex-start; }
+    .row.state { justify-content: center; }
+    .bubble { max-width: min(74%, 560px); padding: 10px 13px; border-radius: 16px; line-height: 1.5; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+    .user-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+    .assistant-bubble { background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+    .type-label { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 7px; margin: 0 6px 6px 0; }
+    .voice-bubble { border-style: dashed; }
+    .sticker-bubble { min-width: 110px; text-align: center; }
+    .image-bubble { background: #fffaf3; }
+    .html-bubble { background: #fdfcf8; min-width: 200px; }
+    .html-title { font-weight: 700; margin: 2px 0 4px; }
+    .extra { font-size: 12px; color: var(--mut); margin-top: 4px; }
+    .open-html { margin-top: 8px; }
+    .note { align-self: center; font-size: 12px; color: var(--mut); background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; margin: 8px auto; }
+    .raw-output { max-width: min(88%, 720px); margin: 2px 0 6px; }
+    .raw-output summary { cursor: pointer; font-size: 11px; color: var(--mut); list-style: none; user-select: none; }
+    .raw-output summary::before { content: "▸ "; }
+    .raw-output[open] summary::before { content: "▾ "; }
+    .log-body { margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); padding: 8px 10px; max-height: 460px; overflow: auto; }
+    .log-meta { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--mut); margin-bottom: 8px; }
+    .log-block { margin-bottom: 10px; }
+    .log-block:last-child { margin-bottom: 0; }
+    .log-label { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--accent); margin-bottom: 3px; }
+    .raw-output pre { margin: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--txt); }
+    .state-chip { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--mut); background: rgba(255,255,255,.7); border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; }
+    .state-emotion { color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 1px 7px; font-size: 11px; }
+
+    .input-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 13px 16px; border-top: 1px solid var(--line); background: var(--surface); }
+    .input-row textarea { resize: none; min-height: 46px; max-height: 140px; }
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: #333; color: #fff; padding: 10px 18px; border-radius: 8px; opacity: 0; transition: .3s; pointer-events: none; z-index: 99; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.ok { background: #2e8b57; } .toast.err { background: #c0392b; }
+    @media (max-width: 720px) { .wrap { grid-template-columns: 1fr; } .sidebar { display: none; } .ctx-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h1>角色聊天 · 轻量版</h1>
+        <input id="search" type="text" placeholder="搜索角色名 / ID" />
+      </div>
+      <div id="charList" class="char-list"></div>
+    </aside>
+    <main class="main">
+      <div id="empty" class="empty">先从左侧选择一个角色。</div>
+      <div id="panel" class="panel hidden">
+        <div class="head">
+          <div class="char-avatar" id="avatar">?</div>
+          <div>
+            <div id="title" class="head-title">未选择角色</div>
+            <div id="sub" class="head-sub"></div>
+          </div>
+          <div class="head-actions">
+            <div class="mode-switch" id="modeSwitch">
+              <button type="button" class="mode-btn active" data-mode="normal">普通</button>
+              <button type="button" class="mode-btn" data-mode="anonymous">匿名</button>
+            </div>
+            <button id="btnHistory" class="ghost" type="button">历史</button>
+            <button id="btnNew" class="ghost" type="button">新对话</button>
+          </div>
+        </div>
+        <details class="drawer" id="historyBox" hidden>
+          <summary>历史对话</summary>
+          <div id="historyList" class="history-list"></div>
+        </details>
+        <details class="drawer">
+          <summary>本次聊天 prompt 模板（占位符如 {{name}} 会自动替换，留空用默认）</summary>
+          <div class="prompt-box">
+            <textarea id="promptTpl" rows="8" placeholder="留空则使用默认模板。修改只对「新对话」生效。"></textarea>
+            <div class="prompt-actions">
+              <button id="btnTplReset" class="ghost" type="button">恢复默认模板</button>
+              <span id="tplHint" class="muted"></span>
+            </div>
+          </div>
+        </details>
+        <details class="drawer">
+          <summary>对话上下文（选填，会拼进 prompt）</summary>
+          <div class="ctx-grid">
+            <label class="field"><span>当前关系 relationship</span><input id="ctxRelationship" type="text" /></label>
+            <label class="field"><span>用户设定 user_persona</span><input id="ctxUserPersona" type="text" /></label>
+            <label class="field"><span>对用户印象 user_impression</span><input id="ctxUserImpression" type="text" /></label>
+            <label class="field"><span>一起经历 plot_summary</span><input id="ctxPlotSummary" type="text" /></label>
+            <label class="field"><span>用户位置 location</span><input id="ctxLocation" type="text" /></label>
+            <label class="field"><span>天气 weather</span><input id="ctxWeather" type="text" /></label>
+            <label class="field wide"><span>今天总结 day_summary</span><input id="ctxDaySummary" type="text" /></label>
+            <label class="field wide"><span>今日日程 day_schedule</span><textarea id="ctxDaySchedule" rows="2"></textarea></label>
+          </div>
+        </details>
+        <div id="status" class="status"></div>
+        <div id="messages" class="messages"></div>
+        <form id="form" class="input-row">
+          <textarea id="input" rows="2" placeholder="输入要发给角色的话。Enter 发送，Shift+Enter 换行。"></textarea>
+          <button id="btnSend" class="primary" type="submit">发送</button>
+        </form>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="chat.js"></script>
+</body>
+</html>

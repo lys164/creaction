@@ -36,7 +36,8 @@ class IdentityReq(BaseModel):
 class CoverReq(BaseModel):
     char_id: str
     style_id: str
-    use_reference: bool = False
+    # None = auto：写实画风且有源图时自动用 i2i 参考（见 pipeline.generate_cover）
+    use_reference: bool | None = None
     mode: str = "fill_missing"
 
 
@@ -101,7 +102,7 @@ class BatchOpeningReq(BaseModel):
 class BatchCoverReq(BaseModel):
     char_ids: list[str]
     style_id: str
-    use_reference: bool = False
+    use_reference: bool | None = None
     mode: str = "fill_missing"
 
 
@@ -110,6 +111,8 @@ class ChatReq(BaseModel):
     message: str
     session_id: str | None = None
     context: dict = Field(default_factory=dict)
+    prompt_template: str | None = None
+    mode: str = "normal"
 
 
 # ---------- meta ----------
@@ -209,7 +212,7 @@ def create_personas(
                 cid = rec.get("char_id")
                 try:
                     pipeline.generate_cover(
-                        cid, cover_style_id, use_reference=False,
+                        cid, cover_style_id, use_reference=None,
                         mode="fill_missing",
                     )
                     return cid, None
@@ -307,7 +310,7 @@ def import_personas_from_json(
                 cid = rec.get("char_id")
                 try:
                     pipeline.generate_cover(
-                        cid, cover_style_id, use_reference=False,
+                        cid, cover_style_id, use_reference=None,
                         mode="fill_missing",
                     )
                     return cid, None
@@ -419,7 +422,21 @@ def make_identity(req: IdentityReq):
 # ---------- step 3: cover ----------
 @app.post("/api/cover")
 def make_cover(req: CoverReq):
-    return pipeline.generate_cover(req.char_id, req.style_id, req.use_reference, req.mode)
+    """Generate one cover in the background.
+
+    A single cover render can take longer than the reverse-proxy timeout, so the
+    endpoint returns a task_id and the client polls /api/tasks/{id}.
+    """
+    task_id = tasks.create_task("cover", total=1)
+
+    def _job(tid: str):
+        page = pipeline.generate_cover(
+            req.char_id, req.style_id, req.use_reference, req.mode)
+        tasks.bump(tid)
+        return page
+
+    tasks.run(task_id, _job)
+    return {"task_id": task_id}
 
 
 @app.post("/api/characters/batch_cover")
@@ -606,8 +623,18 @@ def get_latest_landing(char_id: str):
 
 # ---------- character chat ----------
 @app.get("/api/chat/{char_id}/latest")
-def get_latest_chat(char_id: str):
-    return chat.latest(char_id)
+def get_latest_chat(char_id: str, mode: str = "normal"):
+    return chat.latest(char_id, mode=mode)
+
+
+@app.get("/api/chat/{char_id}/sessions")
+def list_chat_sessions(char_id: str, mode: str | None = None):
+    return chat.list_sessions(char_id, mode=mode)
+
+
+@app.get("/api/chat/{char_id}/session/{session_id}")
+def get_chat_session(char_id: str, session_id: str):
+    return chat.get_session(char_id, session_id)
 
 
 @app.post("/api/chat")
@@ -617,6 +644,8 @@ def send_chat(req: ChatReq):
         req.message,
         context=req.context,
         session_id=req.session_id,
+        prompt_template=req.prompt_template,
+        mode=req.mode,
     )
 
 

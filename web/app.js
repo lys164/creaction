@@ -650,10 +650,12 @@ async function showCharDetail(charId) {
     cs.innerHTML = `<span class="spinner"></span> ${modeName} 中…（约 60-120s）`;
     $("#btnCover").disabled = true;
     try {
-      await api("/api/cover", {
+      await runTask("/api/cover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ char_id: charId, style_id: styleId, mode }),
+      }, (done, total) => {
+        cs.innerHTML = `<span class="spinner"></span> ${modeName} 中… ${done}/${total || 1}`;
       });
       cs.innerHTML = "封面已生成。";
       toast("封面生成成功", "ok");
@@ -1088,6 +1090,10 @@ let CHAT_ACTIVE_CHAR = null;
 let CHAT_ACTIVE_REC = null;
 let CHAT_SESSION_ID = null;
 let CHAT_MESSAGES = [];
+let CHAT_DEFAULT_TPL = "";
+let CHAT_MODE = "normal";
+let CHAT_DEFAULT_TPLS = {};
+let CHAT_VIEWING_HISTORY = false;
 
 async function initChatView() {
   CHAT_CHARS = await api("/api/characters");
@@ -1155,9 +1161,11 @@ async function selectChatChar(charId, opts = {}) {
   try {
     const [rec, latest] = await Promise.all([
       api("/api/character/" + charId),
-      api("/api/chat/" + charId + "/latest"),
+      api("/api/chat/" + charId + "/latest?mode=" + CHAT_MODE),
     ]);
     CHAT_ACTIVE_REC = rec;
+    CHAT_DEFAULT_TPL = latest.default_template || CHAT_DEFAULT_TPL || "";
+    CHAT_DEFAULT_TPLS = latest.default_templates || CHAT_DEFAULT_TPLS;
     const p = rec.persona || {};
     const summary = p.profile || (p.personality && p.personality.summary) || "";
     $("#chatTitle").innerHTML = `${rec.lang ? `<span class="lang-badge ${rec.lang}">${LANG_NAMES_FULL[rec.lang] || rec.lang}</span>` : ""}${escapeHtml(localized(p.name) || rec.char_id)}`;
@@ -1167,6 +1175,7 @@ async function selectChatChar(charId, opts = {}) {
     const session = latest.session;
     if (opts.forceNew) {
       CHAT_SESSION_ID = null;
+      setChatTemplate("");
       CHAT_MESSAGES = (latest.opening || []).length
         ? [{ role: "assistant", items: latest.opening, is_opening: true, created: Math.floor(Date.now() / 1000) }]
         : [];
@@ -1174,19 +1183,38 @@ async function selectChatChar(charId, opts = {}) {
       // 保持当前会话状态，仅刷新角色头部。
     } else if (session && session.messages && session.messages.length) {
       CHAT_SESSION_ID = session.session_id;
+      setChatTemplate(session.prompt_template || "");
       CHAT_MESSAGES = session.messages;
     } else {
       CHAT_SESSION_ID = null;
+      setChatTemplate("");
       CHAT_MESSAGES = (latest.opening || []).length
         ? [{ role: "assistant", items: latest.opening, is_opening: true, created: Math.floor(Date.now() / 1000) }]
         : [];
     }
+    CHAT_VIEWING_HISTORY = false;
     renderChatMessages();
     $("#chatStatus").innerHTML = CHAT_SESSION_ID ? "已载入最近一次对话。" : "已载入角色开场白，可直接开始聊天。";
   } catch (e) {
     $("#chatStatus").innerHTML = "载入失败：" + e.message;
     toast("聊天角色载入失败", "err");
   }
+}
+
+function setChatTemplate(tpl) {
+  const box = $("#chatPromptTpl");
+  if (box) box.value = tpl || "";
+  updateChatTplHint();
+}
+
+function updateChatTplHint() {
+  const box = $("#chatPromptTpl");
+  const hint = $("#chatTplHint");
+  if (!box || !hint) return;
+  const custom = box.value.trim().length > 0;
+  hint.textContent = custom
+    ? (CHAT_SESSION_ID ? "本会话使用自定义模板" : "将用自定义模板开始新对话")
+    : "当前使用默认模板";
 }
 
 function renderChatAvatar(rec) {
@@ -1235,8 +1263,32 @@ function renderChatMessages() {
       box.appendChild(note);
     }
     items.forEach((it) => box.appendChild(renderAssistantItem(it)));
+    if (m.call_log) box.appendChild(renderCallLogRow(m.call_log));
   });
   box.scrollTop = box.scrollHeight;
+}
+
+function prettyJsonLog(raw) {
+  if (typeof raw !== "string") return JSON.stringify(raw, null, 2);
+  try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (e) { return raw; }
+}
+
+function renderCallLogRow(log) {
+  const sections = [];
+  const meta = [log.model && `model: ${log.model}`, log.temperature != null && `temperature: ${log.temperature}`, log.max_tokens != null && `max_tokens: ${log.max_tokens}`].filter(Boolean).join("   ");
+  if (meta) sections.push(`<div class="chat-log-meta">${escapeHtml(meta)}</div>`);
+  (log.messages || []).forEach((msg) => {
+    const label = msg.role === "system" ? "SYSTEM PROMPT" : msg.role === "user" ? "INPUT · user" : "INPUT · assistant";
+    sections.push(`<div class="chat-log-block"><div class="chat-log-label">${escapeHtml(label)}</div><pre>${escapeHtml(prettyJsonLog(msg.content))}</pre></div>`);
+  });
+  sections.push(`<div class="chat-log-block"><div class="chat-log-label">OUTPUT</div><pre>${escapeHtml(prettyJsonLog(log.output))}</pre></div>`);
+  const row = document.createElement("div");
+  row.className = "chat-row assistant";
+  const det = document.createElement("details");
+  det.className = "chat-raw-output";
+  det.innerHTML = `<summary>模型调用日志</summary><div class="chat-log-body">${sections.join("")}</div>`;
+  row.appendChild(det);
+  return row;
 }
 
 function renderUserBubble(content) {
@@ -1278,10 +1330,23 @@ function renderAssistantItem(item) {
   }
   if (type === "state_update") {
     row.className = "chat-row state";
-    row.innerHTML = `<div class="chat-state">${escapeHtml(data.status || data.emotion || "状态已更新")}</div>`;
+    const parts = [];
+    if (data.status) parts.push(`<span class="chat-state-status">${escapeHtml(data.status)}</span>`);
+    if (data.emotion) parts.push(`<span class="chat-state-emotion">${escapeHtml(data.emotion)}</span>`);
+    row.innerHTML = `<div class="chat-state">${parts.join("") || escapeHtml("状态已更新")}</div>`;
     return row;
   }
-  row.innerHTML = `<div class="chat-bubble assistant-bubble">${escapeHtml(data.content || "")}</div>`;
+  if (type === "music") {
+    row.innerHTML = `<div class="chat-bubble assistant-bubble music-bubble"><span class="chat-type-label">MUSIC</span>${escapeHtml(data.content || "")}</div>`;
+    return row;
+  }
+  if (type === "match_action") {
+    const greeting = data.greeting || data.content || "";
+    row.innerHTML = `<div class="chat-bubble assistant-bubble match-bubble"><span class="chat-type-label">加好友</span><div>对方同意后的第一句</div>${greeting ? `<div class="chat-extra">${escapeHtml(greeting)}</div>` : ""}</div>`;
+    return row;
+  }
+  const emotionTag = data.emotion && data.emotion !== "default" ? `<div class="chat-extra">${escapeHtml(data.emotion)}</div>` : "";
+  row.innerHTML = `<div class="chat-bubble assistant-bubble">${escapeHtml(data.content || "")}${emotionTag}</div>`;
   return row;
 }
 
@@ -1297,18 +1362,25 @@ async function sendChatMessage() {
   btn.disabled = true;
   $("#chatStatus").innerHTML = `<span class="spinner"></span> 角色正在输入…`;
   try {
+    const payload = {
+      char_id: CHAT_ACTIVE_CHAR,
+      message: text,
+      session_id: CHAT_SESSION_ID,
+      context: chatContextPayload(),
+      mode: CHAT_MODE,
+    };
+    if (!CHAT_SESSION_ID) {
+      const tpl = ($("#chatPromptTpl")?.value || "").trim();
+      if (tpl) payload.prompt_template = tpl;
+    }
     const r = await api("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        char_id: CHAT_ACTIVE_CHAR,
-        message: text,
-        session_id: CHAT_SESSION_ID,
-        context: chatContextPayload(),
-      }),
+      body: JSON.stringify(payload),
     });
     CHAT_SESSION_ID = r.session.session_id;
     CHAT_MESSAGES = r.session.messages || [];
+    if (r.session.prompt_template !== undefined) setChatTemplate(r.session.prompt_template || "");
     renderChatMessages();
     $("#chatStatus").innerHTML = "";
   } catch (e) {
@@ -1327,12 +1399,98 @@ async function sendChatMessage() {
 }
 
 $("#chatSearch")?.addEventListener("input", renderChatCharGrid);
+$("#chatModeSwitch")?.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".chat-mode-btn");
+  if (!btn || btn.dataset.mode === CHAT_MODE) return;
+  CHAT_MODE = btn.dataset.mode;
+  $$("#chatModeSwitch .chat-mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === CHAT_MODE));
+  CHAT_SESSION_ID = null;
+  CHAT_MESSAGES = [];
+  if (CHAT_ACTIVE_CHAR) await selectChatChar(CHAT_ACTIVE_CHAR, { forceNew: true });
+  toast(CHAT_MODE === "anonymous" ? "已切换到匿名聊天模式" : "已切换到普通聊天模式", "ok");
+});
 $("#btnChatNew")?.addEventListener("click", async () => {
   CHAT_SESSION_ID = null;
   CHAT_MESSAGES = [];
   if (CHAT_ACTIVE_CHAR) await selectChatChar(CHAT_ACTIVE_CHAR, { forceNew: true });
   toast("已开始新对话", "ok");
 });
+$("#chatPromptTpl")?.addEventListener("input", updateChatTplHint);
+$("#btnChatTplReset")?.addEventListener("click", () => {
+  setChatTemplate("");
+  toast("已恢复默认模板（新对话生效）", "ok");
+});
+$("#btnChatHistory")?.addEventListener("click", async () => {
+  const box = $("#chatHistoryBox");
+  if (!box || !CHAT_ACTIVE_CHAR) return;
+  box.hidden = false;
+  box.open = true;
+  await loadChatHistory();
+});
+
+async function loadChatHistory() {
+  const list = $("#chatHistoryList");
+  if (!list) return;
+  list.innerHTML = '<p class="muted">加载中…</p>';
+  try {
+    const r = await api("/api/chat/" + CHAT_ACTIVE_CHAR + "/sessions?mode=" + CHAT_MODE);
+    const sessions = r.sessions || [];
+    if (!sessions.length) {
+      list.innerHTML = '<p class="muted">暂无历史对话。</p>';
+      return;
+    }
+    list.innerHTML = "";
+    sessions.forEach((s) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "chat-history-item" + (s.session_id === CHAT_SESSION_ID ? " active" : "");
+      const when = s.updated ? new Date(s.updated * 1000).toLocaleString() : "";
+      const tag = s.has_custom_template ? '<span class="chat-history-tag">自定义</span>' : "";
+      item.innerHTML = `<div class="chat-history-top">${when}${tag}<span class="chat-history-count">${s.message_count} 条</span></div>
+        <div class="chat-history-preview">${escapeHtml(s.preview || "(无内容)")}</div>`;
+      item.addEventListener("click", () => openChatSession(s.session_id));
+      list.appendChild(item);
+    });
+  } catch (e) {
+    list.innerHTML = '<p class="muted">加载失败：' + escapeHtml(e.message) + "</p>";
+  }
+}
+
+async function openChatSession(sessionId) {
+  if (!CHAT_ACTIVE_CHAR || !sessionId) return;
+  $("#chatStatus").innerHTML = `<span class="spinner"></span> 载入历史对话…`;
+  try {
+    const r = await api("/api/chat/" + CHAT_ACTIVE_CHAR + "/session/" + sessionId);
+    const session = r.session;
+    CHAT_SESSION_ID = session.session_id;
+    CHAT_MESSAGES = session.messages || [];
+    setChatTemplate(session.prompt_template || "");
+    fillChatContext(session.context || {});
+    renderChatMessages();
+    await loadChatHistory();
+    $("#chatStatus").innerHTML = "已载入该历史对话，可继续聊天。";
+  } catch (e) {
+    $("#chatStatus").innerHTML = "载入失败：" + e.message;
+    toast("历史对话载入失败", "err");
+  }
+}
+
+function fillChatContext(ctx) {
+  const map = {
+    relationship: "chatRelationship",
+    user_persona: "chatUserPersona",
+    user_impression: "chatUserImpression",
+    plot_summary: "chatPlotSummary",
+    location: "chatLocation",
+    weather: "chatWeather",
+    day_summary: "chatDaySummary",
+    day_schedule: "chatDaySchedule",
+  };
+  Object.entries(map).forEach(([k, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = ctx[k] || "";
+  });
+}
 $("#chatForm")?.addEventListener("submit", (e) => {
   e.preventDefault();
   sendChatMessage();

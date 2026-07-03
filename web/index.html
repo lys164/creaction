@@ -192,8 +192,27 @@
               <div id="chatTitle" class="chat-title">未选择角色</div>
               <div id="chatSub" class="chat-sub muted"></div>
             </div>
+            <div class="chat-mode-switch" id="chatModeSwitch">
+              <button type="button" class="chat-mode-btn active" data-mode="normal">普通</button>
+              <button type="button" class="chat-mode-btn" data-mode="anonymous">匿名</button>
+            </div>
+            <button id="btnChatHistory" class="ghost" type="button">历史</button>
             <button id="btnChatNew" class="ghost">新对话</button>
           </div>
+          <details class="chat-context" id="chatHistoryBox" hidden>
+            <summary>历史对话</summary>
+            <div id="chatHistoryList" class="chat-history-list"></div>
+          </details>
+          <details class="chat-context">
+            <summary>本次聊天 prompt 模板（占位符如 {{name}} 会自动替换，留空用默认）</summary>
+            <div class="chat-prompt-box">
+              <textarea id="chatPromptTpl" rows="8" placeholder="留空则使用默认模板。修改只对「新对话」生效。"></textarea>
+              <div class="chat-prompt-actions">
+                <button id="btnChatTplReset" class="ghost" type="button">恢复默认模板</button>
+                <span id="chatTplHint" class="muted"></span>
+              </div>
+            </div>
+          </details>
           <details class="chat-context">
             <summary>对话上下文（选填，会拼进 prompt 的「相对方信息 / 今天」）</summary>
             <div class="chat-context-grid">
