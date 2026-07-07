@@ -48,6 +48,8 @@ class PostsReq(BaseModel):
     count_per_type: int = 2
     style_id: str | None = None
     with_images: bool = True
+    # 链路：real=真实人设 / light=轻剧情 / adult=成人向；None=沿用角色已存 track
+    track: str | None = None
 
 
 class RerenderImageReq(BaseModel):
@@ -59,6 +61,7 @@ class IGPostsReq(BaseModel):
     n: int | None = None
     style_id: str | None = None
     with_images: bool = True
+    track: str | None = None
 
 
 class BatchIGPostsReq(BaseModel):
@@ -66,6 +69,7 @@ class BatchIGPostsReq(BaseModel):
     n: int | None = None
     style_id: str | None = None
     with_images: bool = True
+    track: str | None = None
 
 
 class LandingReq(BaseModel):
@@ -88,6 +92,12 @@ class PersonaUpdateReq(BaseModel):
 
 class CharIdsReq(BaseModel):
     char_ids: list[str]
+
+
+class RegenPersonaReq(BaseModel):
+    char_ids: list[str]
+    # 链路覆盖：None=沿用角色已存 track（默认 real）
+    track: str | None = None
 
 
 class RegenOpeningReq(BaseModel):
@@ -176,6 +186,8 @@ def create_personas(
     langs: str = Form("zh,ja,ko,en"),
     with_cover: bool = Form(False),
     cover_style_id: str = Form(""),
+    track: str = Form("real"),
+    source: str = Form(""),
 ):
     """Upload images (optional) → one native character per selected language.
 
@@ -211,7 +223,8 @@ def create_personas(
             try:
                 results.extend(
                     pipeline.create_personas_from_images(
-                        group, lang_list, user_hint=user_hint
+                        group, lang_list, user_hint=user_hint, track=track,
+                        source=source
                     )
                 )
             except Exception as e:  # noqa: BLE001 单组失败不丢弃其它组已生成的角色
@@ -256,6 +269,8 @@ def import_personas_from_json(
     with_cover: bool = Form(False),
     cover_style_id: str = Form(""),
     limit: int = Form(0),
+    track: str = Form("real"),
+    source: str = Form(""),
 ):
     """Import existing character JSON files. Each source object becomes one
     character group; one native record is created per selected language.
@@ -306,7 +321,8 @@ def import_personas_from_json(
                 results.extend(
                     pipeline.create_personas_from_json_obj(
                         obj, lang_list, user_hint=user_hint,
-                        download_image=download_image,
+                        download_image=download_image, track=track,
+                        source=source,
                     )
                 )
             except Exception as e:  # noqa: BLE001 keep batch resilient
@@ -356,7 +372,7 @@ def update_persona(req: PersonaUpdateReq):
 
 
 @app.post("/api/characters/regenerate_persona")
-def regenerate_personas(req: CharIdsReq):
+def regenerate_personas(req: RegenPersonaReq):
     """批量重新生成人设：长耗时 LLM 调用改后台任务，返回 task_id 轮询，
     避免同步等待撞反代读超时(502 假报失败而服务端仍在跑)。"""
     tid = tasks.create_task("regen_personas", total=len(req.char_ids))
@@ -366,7 +382,7 @@ def regenerate_personas(req: CharIdsReq):
 
         def _one(cid: str):
             try:
-                pipeline.regenerate_persona(cid)
+                pipeline.regenerate_persona(cid, track=req.track)
                 return cid, None
             except Exception as e:  # noqa: BLE001
                 return cid, str(e)
@@ -519,6 +535,7 @@ def make_posts(req: PostsReq):
             count_per_type=req.count_per_type,
             style_id=req.style_id,
             with_images=req.with_images,
+            track=req.track,
         )
 
     tasks.run(tid, _job)
@@ -550,7 +567,8 @@ def make_ig_posts(req: IGPostsReq):
 
     def _job(tid: str):
         return pipeline.generate_instagram_posts(
-            req.char_id, n=req.n, style_id=req.style_id, with_images=req.with_images
+            req.char_id, n=req.n, style_id=req.style_id,
+            with_images=req.with_images, track=req.track
         )
 
     tasks.run(tid, _job)
@@ -569,7 +587,7 @@ def make_batch_ig_posts(req: BatchIGPostsReq):
             try:
                 batch = pipeline.generate_instagram_posts(
                     cid, n=req.n, style_id=req.style_id,
-                    with_images=req.with_images
+                    with_images=req.with_images, track=req.track
                 )
                 return cid, batch, None
             except Exception as e:  # noqa: BLE001

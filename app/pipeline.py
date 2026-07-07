@@ -17,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-from . import api_client, config, landing, prompts, storage, styles
+from . import api_client, config, landing, prompts, storage, styles, voices
 
 
 # 按角色的进程内互斥锁：所有对同一 record 的读-改-写都应持锁，
@@ -46,11 +46,53 @@ def _locked(fn):
             return fn(char_id, *args, **kwargs)
     return wrapper
 
-COVER_SPEC_VERSION = 2
+COVER_SPEC_VERSION = 3
+_RECENTLY_USED_VOICES: list[str] = []
+_VOICE_LOCK = _threading.Lock()
 
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+
+def _gender_for_voice(persona: dict) -> str | None:
+    raw = str(persona.get("gender", "")).lower()
+    if any(m in raw for m in ("男", "남", "male", "man", "男性")):
+        return "男"
+    if any(m in raw for m in ("女", "여", "female", "woman", "女性")):
+        return "女"
+    return None
+
+
+def _randomize_voice(persona: dict, lang: str) -> dict:
+    """Override model-chosen voice with a random gender-matched pick.
+
+    The LLM tends to overuse the same voice IDs. Keeping a small recent-memory
+    rotation makes batches across languages/characters sound more diverse.
+    """
+    if not isinstance(persona, dict):
+        return persona
+    all_voices = voices.list_for(lang)
+    if not all_voices:
+        return persona
+    gender = _gender_for_voice(persona)
+    pool = [v for v in all_voices if v.get("gender") == gender] if gender else []
+    if not pool:
+        pool = all_voices
+
+    with _VOICE_LOCK:
+        available = [v for v in pool if v.get("id") not in _RECENTLY_USED_VOICES]
+        if not available:
+            available = pool
+        chosen = random.choice(available).get("id")
+        if not chosen:
+            return persona
+        persona["voice"] = chosen
+        _RECENTLY_USED_VOICES.append(chosen)
+        max_memory = max(len(pool) - 1, 1)
+        while len(_RECENTLY_USED_VOICES) > max_memory:
+            _RECENTLY_USED_VOICES.pop(0)
+    return persona
 
 
 def _char_path(char_id: str) -> Path:
@@ -69,6 +111,33 @@ def _first_source_image(record: dict) -> str | None:
     return imgs[0] if imgs else None
 
 
+def _cover_as_local_image(record: dict) -> str | None:
+    """Materialize the character's cover into a local file for use as a
+    persona-inference reference. Prefer an existing local cover; otherwise
+    download the cover URL into UPLOAD_DIR. Returns a local path or None."""
+    cover = record.get("cover") or {}
+    lp = cover.get("local_path")
+    if lp and storage.ensure_file(Path(lp)):
+        return lp
+    url = cover.get("url")
+    if isinstance(url, str) and url.lower().startswith("http"):
+        return _download_image(url)
+    return None
+
+
+def _regen_reference_images(record: dict) -> list[str]:
+    """Reference images to feed persona regeneration, in priority order:
+    existing source images first, else fall back to the cover image.
+    Never returns empty just to allow image-free generation — callers must
+    skip regeneration when this is empty."""
+    imgs = _existing_source_images(record)
+    if imgs:
+        return imgs
+    cover_local = _cover_as_local_image(record)
+    return [cover_local] if cover_local else []
+
+
+
 def load_character(char_id: str) -> dict:
     record = storage.load_json("personas", char_id, _char_path(char_id))
     if record is None:
@@ -79,6 +148,18 @@ def load_character(char_id: str) -> dict:
 def save_character(record: dict) -> None:
     storage.save_json("personas", record["char_id"], record,
                       _char_path(record["char_id"]))
+
+
+def _served_image_url(image: dict | None) -> str | None:
+    """Prefer this service's /img route over provider URLs that may expire/403."""
+    if not isinstance(image, dict):
+        return None
+    local_path = image.get("local_path")
+    if local_path:
+        name = Path(str(local_path)).name
+        if name:
+            return f"/img/{name}"
+    return image.get("url")
 
 
 def list_characters() -> list[dict]:
@@ -94,10 +175,11 @@ def list_characters() -> list[dict]:
             "lang": r.get("lang"),
             "lang_name": config.lang_name(r.get("lang")) if r.get("lang") else None,
             "group_id": r.get("group_id"),
-            "cover_url": r.get("cover", {}).get("url") if r.get("cover") else None,
+            "cover_url": _served_image_url(r.get("cover")),
             "has_identity": bool(r.get("identity")),
             "exported": bool(r.get("exported")),
             "arca_synced": bool(r.get("arca_character_id")),
+            "source": r.get("source") or "",
             "created": r.get("created"),
         })
     return out
@@ -201,7 +283,8 @@ def _postprocess_persona(persona: dict, archetype: str | None = None) -> dict:
 
 
 def create_persona_one_lang(image_paths: list[str], lang: str,
-                            user_hint: str = "", group_id: str | None = None) -> dict:
+                            user_hint: str = "", group_id: str | None = None,
+                            track: str = "real", source: str = "") -> dict:
     """Create a single-language character: persona authored natively in `lang`."""
     uris = [api_client.file_to_data_uri(p) for p in image_paths]
     archetype = prompts.sample_archetype()
@@ -209,9 +292,11 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
     diversity_block = prompts.build_persona_diversity_block(
         lang, archetype, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
     messages = prompts.build_persona_messages(
-        uris, lang, user_hint=user_hint, diversity_block=diversity_block)
+        uris, lang, user_hint=user_hint, diversity_block=diversity_block,
+        track=track)
     persona = api_client.chat_json(messages, temperature=0.85)
     persona = _postprocess_persona(persona, archetype)
+    _randomize_voice(persona, lang)
 
     char_id = _new_id("char")
     record = {
@@ -222,6 +307,8 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         "source_images": image_paths,
         "user_hint": user_hint,
         "archetype": archetype,
+        "track": track,
+        "source": source,
         "persona": persona,
         "identity": None,
         "cover": None,
@@ -232,7 +319,9 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
 
 
 def create_personas_from_images(image_paths: list[str], langs: list[str],
-                                user_hint: str = "") -> list[dict]:
+                                user_hint: str = "",
+                                track: str = "real",
+                                source: str = "") -> list[dict]:
     """For each selected language, create an independent native character record.
 
     All records from the same upload share a `group_id`.
@@ -244,7 +333,8 @@ def create_personas_from_images(image_paths: list[str], langs: list[str],
 
     def _one(lang: str) -> dict:
         return create_persona_one_lang(
-            image_paths, lang, user_hint=user_hint, group_id=group_id
+            image_paths, lang, user_hint=user_hint, group_id=group_id,
+            track=track, source=source
         )
 
     with ThreadPoolExecutor(max_workers=min(len(langs), config.MAX_WORKERS)) as ex:
@@ -258,7 +348,7 @@ def create_personas_from_images(image_paths: list[str], langs: list[str],
 
 
 @_locked
-def regenerate_persona(char_id: str) -> dict:
+def regenerate_persona(char_id: str, track: str | None = None) -> dict:
     """只重新生成人设 schema：复用同一来源（源图 或 导入的原始 JSON）、同语言、同补充要求，
     原地覆盖 persona。
 
@@ -266,16 +356,25 @@ def regenerate_persona(char_id: str) -> dict:
     """
     record = load_character(char_id)
     lang = record.get("lang", config.LANGUAGES[0])
+    # 界面可临时覆盖链路；覆盖后持久化到 record，后续发帖沿用新 track
+    if track:
+        record["track"] = track
+    track = record.get("track", "real")
     user_hint = record.get("user_hint", "")
     # 从原始 JSON 导入的角色：用同一份 import_source 重新扩写，保持忠实保留。
     if record.get("import_source") is not None:
         messages = prompts.build_persona_from_json_messages(
-            record["import_source"], lang, user_hint=user_hint)
+            record["import_source"], lang, user_hint=user_hint, track=track)
         persona = api_client.chat_json(messages, temperature=0.85)
         record["persona"] = _postprocess_persona(persona)
+        _randomize_voice(record["persona"], lang)
     else:
-        uris = [api_client.file_to_data_uri(p)
-                for p in _existing_source_images(record)]
+        # 原图优先；原图不在则回退用封面图推理，绝不无图凭空随机生成。
+        ref_images = _regen_reference_images(record)
+        if not ref_images:
+            raise ValueError(
+                f"{char_id} 没有可用的原图或封面图，跳过重新生成（拒绝无图随机生成）")
+        uris = [api_client.file_to_data_uri(p) for p in ref_images]
         # 重刷时重新掷骰子：换角色类型/种子，避免刷回同一种模式。
         archetype = prompts.sample_archetype()
         names, jobs, tags = _recent_persona_traits(lang, exclude_char_id=char_id)
@@ -283,9 +382,11 @@ def regenerate_persona(char_id: str) -> dict:
             lang, archetype, avoid_names=names, recent_jobs=jobs,
             overused_tags=tags)
         messages = prompts.build_persona_messages(
-            uris, lang, user_hint=user_hint, diversity_block=diversity_block)
+            uris, lang, user_hint=user_hint, diversity_block=diversity_block,
+            track=track)
         persona = api_client.chat_json(messages, temperature=0.85)
         record["persona"] = _postprocess_persona(persona, archetype)
+        _randomize_voice(record["persona"], lang)
         record["archetype"] = archetype
     record.pop("cover_spec", None)
     save_character(record)
@@ -338,7 +439,9 @@ def _extract_image_url(source_obj: dict) -> str | None:
 def create_persona_from_json_one_lang(source_obj: dict, lang: str,
                                       user_hint: str = "",
                                       group_id: str | None = None,
-                                      source_image: str | None = None) -> dict:
+                                      source_image: str | None = None,
+                                      track: str = "real",
+                                      source: str = "") -> dict:
     """Create a single-language character from an existing source JSON object.
 
     The original object is stored under `import_source` so the persona can be
@@ -346,9 +449,10 @@ def create_persona_from_json_one_lang(source_obj: dict, lang: str,
     shared across all language variants of the same source object.
     """
     messages = prompts.build_persona_from_json_messages(
-        source_obj, lang, user_hint=user_hint)
+        source_obj, lang, user_hint=user_hint, track=track)
     persona = api_client.chat_json(messages, temperature=0.85)
     persona = _postprocess_persona(persona)
+    _randomize_voice(persona, lang)
 
     char_id = _new_id("char")
     record = {
@@ -358,6 +462,8 @@ def create_persona_from_json_one_lang(source_obj: dict, lang: str,
         "created": int(time.time()),
         "source_images": [source_image] if source_image else [],
         "user_hint": user_hint,
+        "track": track,
+        "source": source,
         "import_source": source_obj,
         "persona": persona,
         "identity": None,
@@ -370,7 +476,9 @@ def create_persona_from_json_one_lang(source_obj: dict, lang: str,
 
 def create_personas_from_json_obj(source_obj: dict, langs: list[str],
                                   user_hint: str = "",
-                                  download_image: bool = True) -> list[dict]:
+                                  download_image: bool = True,
+                                  track: str = "real",
+                                  source: str = "") -> list[dict]:
     """For one source object, create an independent native character per language.
 
     All records from the same source share a `group_id` and (if available) the
@@ -385,7 +493,7 @@ def create_personas_from_json_obj(source_obj: dict, langs: list[str],
     def _one(lang: str) -> dict:
         return create_persona_from_json_one_lang(
             source_obj, lang, user_hint=user_hint, group_id=group_id,
-            source_image=source_image)
+            source_image=source_image, track=track, source=source)
 
     records = []
     with ThreadPoolExecutor(max_workers=min(len(langs), config.MAX_WORKERS)) as ex:
@@ -613,6 +721,8 @@ def _export_one_character(zf: zipfile.ZipFile, char_id: str, used_folders: set) 
         "char_id": char_id,
         "lang": lang,
         "name": name,
+        "source": record.get("source", ""),
+        "track": record.get("track", "real"),
         "persona": persona,
         "posts": posts,
     }
@@ -802,14 +912,19 @@ def build_cover_spec(char_id: str) -> dict:
         build_identity(char_id)
         record = load_character(char_id)
 
+    cover_ref = _first_source_image(record)
+    cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
     messages = prompts.build_cover_spec_messages(
-        record["persona"], record["identity"])
+        record["persona"], record["identity"], cover_ref_uri)
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
         "variable": spec.get("variable", {}),
+        "shooting": spec.get("shooting", {}),
         "scene": spec.get("scene", {}),
         "version": COVER_SPEC_VERSION,
     }
+    if cover_ref:
+        record["cover_spec"]["reference_image"] = cover_ref
     save_character(record)
     return record
 
@@ -871,6 +986,7 @@ def generate_cover(
         persona_mood=mood,
         variable=cover_spec.get("variable"),
         scene=cover_spec.get("scene"),
+        shooting=cover_spec.get("shooting"),
     )
 
     if use_reference is None:
@@ -946,9 +1062,13 @@ def generate_posts(
     count_per_type: int = 2,
     style_id: str | None = None,
     with_images: bool = True,
+    track: str | None = None,
 ) -> dict:
     """Generate posts for each selected type, then optionally render images."""
     record = load_character(char_id)
+    if track and record.get("track") != track:
+        record["track"] = track  # 界面临时覆盖链路并持久化
+        save_character(record)
     if not record.get("identity"):
         build_identity(char_id)
         record = load_character(char_id)
@@ -967,7 +1087,7 @@ def generate_posts(
             return []
         msgs = prompts.build_post_messages(
             persona, identity, pt, record.get("lang", config.LANGUAGES[0]),
-            count=count_per_type,
+            count=count_per_type, track=record.get("track", "real"),
         )
         items = api_client.chat_json(msgs, temperature=0.9)
         if isinstance(items, dict):
@@ -1300,6 +1420,7 @@ def generate_instagram_posts(
     n: int | None = None,
     style_id: str | None = None,
     with_images: bool = True,
+    track: str | None = None,
 ) -> dict:
     """Infer N recent IG posts, then render images:
     - selfie  -> image-to-image using the redrawn cover as reference
@@ -1307,6 +1428,9 @@ def generate_instagram_posts(
     - text_only -> no image
     """
     record = load_character(char_id)
+    if track and record.get("track") != track:
+        record["track"] = track  # 界面临时覆盖链路并持久化
+        save_character(record)
     if not record.get("identity"):
         build_identity(char_id)
         record = load_character(char_id)
@@ -1322,7 +1446,7 @@ def generate_instagram_posts(
     feed = api_client.chat_json(
         prompts.build_ig_feed_messages(
             persona, record.get("lang", config.LANGUAGES[0]), n=n,
-            avoid_kinds=avoid_kinds,
+            avoid_kinds=avoid_kinds, track=record.get("track", "real"),
         ),
         temperature=0.95,
     )

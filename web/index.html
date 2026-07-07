@@ -59,6 +59,18 @@
           </label>
         </div>
       </div>
+      <label class="field track-field">
+        <span>生成链路</span>
+        <select id="createTrack" class="track-sel">
+          <option value="real">链路一：真实人设</option>
+          <option value="light">链路二：轻剧情</option>
+          <option value="adult">链路三：成人向</option>
+        </select>
+      </label>
+      <label class="field track-field">
+        <span>Source（来源标记，选填；打在角色上，导出时写入 character.json）</span>
+        <input type="text" id="createSource" class="track-sel" placeholder="例如：batch-0707 / 某活动 / 渠道名" />
+      </label>
       <button id="btnPersona" class="primary">生成人设（按所选语言各自生成）</button>
       <div id="uploadStatus" class="status"></div>
     </div>
@@ -68,10 +80,17 @@
   <section id="view-characters" class="view">
     <h2>角色库</h2>
     <div id="charLangFilter" class="lang-filter"></div>
+    <div id="charSourceFilter" class="lang-filter source-filter"></div>
     <div id="charToolbar" class="char-toolbar">
       <button id="btnSelAll" class="ghost">全选</button>
       <button id="btnSelNone" class="ghost">取消选择</button>
       <button id="btnBatchPersona" class="ghost">↻ 批量重生人设</button>
+      <select id="regenTrack" class="track-sel" title="重生链路">
+        <option value="">链路：沿用角色原链路</option>
+        <option value="real">链路一：真实人设</option>
+        <option value="light">链路二：轻剧情</option>
+        <option value="adult">链路三：成人向</option>
+      </select>
       <button id="btnBatchOpening" class="ghost">💬 批量重写开场白</button>
       <div class="char-cover-batch">
         <select id="batchStyle" title="封面画风"></select>
@@ -116,6 +135,15 @@
           <input type="checkbox" id="igWithImages" checked /> 同时生成配图
         </label>
       </div>
+        <label class="field small track-field">
+          <span>生成链路</span>
+          <select id="igTrack" class="track-sel">
+            <option value="">沿用角色原链路</option>
+            <option value="real">链路一：真实人设</option>
+            <option value="light">链路二：轻剧情</option>
+            <option value="adult">链路三：成人向</option>
+          </select>
+        </label>
       <button id="btnIg" class="primary">为勾选角色生成 INS 帖子</button>
       <button id="btnArcaSyncPosts" class="ghost" title="把勾选角色的最近一批 INS 帖子同步到 arca-i18n（未同步过的角色会先创建角色）">☁️ 同步帖子到 arca</button>
       <div id="igStatus" class="status"></div>
@@ -263,6 +291,15 @@
           <input type="checkbox" id="withImages" checked /> 同时生成配图
         </label>
       </div>
+      <label class="field track-field">
+        <span>生成链路</span>
+        <select id="postTrack" class="track-sel">
+          <option value="">沿用角色原链路</option>
+          <option value="real">链路一：真实人设</option>
+          <option value="light">链路二：轻剧情</option>
+          <option value="adult">链路三：成人向</option>
+        </select>
+      </label>
       <button id="btnPosts" class="primary">批量生成帖子</button>
       <div id="postStatus" class="status"></div>
     </div>

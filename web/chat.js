@@ -257,7 +257,7 @@ function assistantItem(item) {
     return row;
   }
   if (type === "sticker") {
-    row.innerHTML = `<div class="bubble assistant-bubble sticker-bubble"><span class="type-label">STICKER</span><div>${escapeHtml(data.scene || "sticker")}</div><div class="extra">${escapeHtml(data.emotion || "")}</div></div>`;
+    row.innerHTML = `<div class="bubble assistant-bubble sticker-bubble"><span class="type-label">STICKER</span><div>${escapeHtml(data.scene || "sticker")}</div><div class="extra">${escapeHtml(data.desc || data.emotion || "")}</div></div>`;
     return row;
   }
   if (type === "image") {
@@ -287,6 +287,11 @@ function assistantItem(item) {
   }
   if (type === "music") {
     row.innerHTML = `<div class="bubble assistant-bubble music-bubble"><span class="type-label">MUSIC</span>${escapeHtml(data.content || "")}</div>`;
+    return row;
+  }
+  if (type === "dating_card") {
+    const meta = [data.location, data.status, data.outfit, data.emotion].filter(Boolean).map(escapeHtml).join(" · ");
+    row.innerHTML = `<div class="bubble assistant-bubble dating-bubble"><span class="type-label">约会邀请</span><div class="dating-title">${escapeHtml(data.title || "见一面")}</div>${meta ? `<div class="extra">${meta}</div>` : ""}${data.description ? `<div>${escapeHtml(data.description)}</div>` : ""}${data.button ? `<button class="ghost" type="button">${escapeHtml(data.button)}</button>` : ""}</div>`;
     return row;
   }
   if (type === "match_action") {

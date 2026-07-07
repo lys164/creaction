@@ -245,6 +245,10 @@ button.ghost:hover{color:var(--txt);border-color:var(--mut)}
 .chat-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
 .chat-sub{font-size:12px;margin-top:2px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #btnChatHistory,#btnChatNew{flex:none}
+.source-filter{margin-top:6px}
+.track-field{margin:6px 0}
+.track-field>span{display:block;font-size:13px;color:var(--mut);margin-bottom:4px}
+.track-sel{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;min-width:160px}
 .chat-mode-switch{margin-left:auto;flex:none;display:inline-flex;background:var(--inset,#f5f3ec);border:1px solid var(--line);border-radius:9px;padding:2px}
 .chat-mode-btn{border:none;background:transparent;color:var(--mut);border-radius:7px;padding:5px 13px;font-size:13px;cursor:pointer}
 .chat-mode-btn.active{background:#fff;color:var(--accent-h);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}

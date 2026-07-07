@@ -20,6 +20,19 @@ def _content_for_lang(content, lang: str) -> str:
     return content or ""
 
 
+def _post_visibility(record: dict) -> int:
+    """帖子可见性（/post/create 只接受 1公开/2好友/3私密，不再接受 0）。
+
+    显式配置 ARCA_POST_VISIBILITY=1/2/3 时透传；否则（0=跟随角色）按角色
+    visibility 派生：public→1、private→3，缺省按公开。
+    """
+    cfg = config.ARCA_POST_VISIBILITY
+    if cfg in (1, 2, 3):
+        return cfg
+    vis = ((record.get("persona") or {}).get("visibility") or "").strip().lower()
+    return 3 if vis == "private" else 1
+
+
 def _upload_cover(record: dict, lang: str) -> list[dict]:
     """上传封面并包成 arca 的 UserUploadImage（裸 StorageObject 会被 go-zero 解析拒 400）。
 
@@ -251,6 +264,7 @@ def _sync_character_locked(char_id: str, *, force: bool,
         return result
 
     # 2) 发帖（仅 sync_posts=True；逐条 resilient；已同步过的 post 跳过）
+    post_vis = _post_visibility(record)
     synced = record.setdefault("arca_post_ids", {})
     for post in _latest_posts(char_id):
         pid = post.get("post_id")
@@ -268,7 +282,8 @@ def _sync_character_locked(char_id: str, *, force: bool,
                     Path(lp).read_bytes(),
                     f"creaction/{char_id}/post_{pid}.png", "image/png", lang)
                 image_objs = [obj]
-            arca_pid = arca_client.create_post(cid, content, image_objs, lang)
+            arca_pid = arca_client.create_post(
+                cid, content, image_objs, lang, visibility=post_vis)
             # 先记映射并立即落盘：后续任何失败（可见性补偿/进程中断）重试时
             # 不会重复 create（/post/create 无幂等键，重复必产生重复帖）。
             synced[pid] = arca_pid

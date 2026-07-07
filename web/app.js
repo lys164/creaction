@@ -92,6 +92,51 @@ function filterByLang(chars, key) {
   return lg ? chars.filter((c) => c.lang === lg) : chars;
 }
 
+// 当前来源筛选值（角色库专用）。"" = 全部，"__none__" = 无来源。
+let SOURCE_FILTER = "";
+
+// 渲染来源筛选条：从角色列表里收集所有 source 值（含"无来源"）。
+function renderSourceFilter(containerId, chars, onChange) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const counts = {};
+  let noneN = 0;
+  chars.forEach((c) => {
+    const s = (c.source || "").trim();
+    if (s) counts[s] = (counts[s] || 0) + 1;
+    else noneN += 1;
+  });
+  const sources = Object.keys(counts).sort();
+  // 没有任何显式来源时不显示筛选条
+  if (!sources.length) {
+    box.innerHTML = "";
+    SOURCE_FILTER = "";
+    return;
+  }
+  const opts = [{ v: "", label: `全部来源 (${chars.length})` }]
+    .concat(sources.map((s) => ({ v: s, label: `${s} (${counts[s]})` })));
+  if (noneN) opts.push({ v: "__none__", label: `无来源 (${noneN})` });
+  box.innerHTML = opts
+    .map((o) => `<button class="lang-chip${SOURCE_FILTER === o.v ? " on" : ""}" data-v="${escapeHtml(o.v)}">${escapeHtml(o.label)}</button>`)
+    .join("");
+  box.querySelectorAll(".lang-chip").forEach((b) => {
+    b.addEventListener("click", () => {
+      SOURCE_FILTER = b.dataset.v;
+      box.querySelectorAll(".lang-chip").forEach((x) =>
+        x.classList.toggle("on", x.dataset.v === b.dataset.v)
+      );
+      onChange();
+    });
+  });
+}
+
+// 按当前来源筛选过滤角色列表。
+function filterBySource(chars) {
+  if (!SOURCE_FILTER) return chars;
+  if (SOURCE_FILTER === "__none__") return chars.filter((c) => !(c.source || "").trim());
+  return chars.filter((c) => (c.source || "").trim() === SOURCE_FILTER);
+}
+
 function imgUrl(local_path, url) {
   const bust = `_t=${Date.now()}`;
   if (local_path) {
@@ -328,6 +373,8 @@ $("#btnPersona").addEventListener("click", async () => {
       fd.append("download_image", $("#downloadImage").checked);
       fd.append("with_cover", withCover);
       fd.append("cover_style_id", withCover ? $("#createCoverStyle").value : "");
+      fd.append("track", $("#createTrack").value);
+      fd.append("source", $("#createSource").value.trim());
       const r = await runTask("/api/personas/import_json", { method: "POST", body: fd }, (done, total) => {
         st.innerHTML = `<span class="spinner"></span> 导入中… ${done}/${total} 个角色`;
       });
@@ -354,6 +401,8 @@ $("#btnPersona").addEventListener("click", async () => {
     fd.append("langs", langs.join(","));
     fd.append("with_cover", withCover);
     fd.append("cover_style_id", withCover ? $("#createCoverStyle").value : "");
+    fd.append("track", $("#createTrack").value);
+    fd.append("source", $("#createSource").value.trim());
     const r = await runTask("/api/personas", { method: "POST", body: fd }, (done, total) => {
       st.innerHTML = `<span class="spinner"></span> 生成中… ${done}/${total} 组`;
     });
@@ -390,15 +439,16 @@ async function loadCharacters() {
   }
   CHAR_LIST = await api("/api/characters");
   renderLangFilter("charLangFilter", "char", CHAR_LIST, renderCharList);
+  renderSourceFilter("charSourceFilter", CHAR_LIST, renderCharList);
   renderCharList();
 }
 
 function renderCharList() {
-  const list = filterByLang(CHAR_LIST, "char");
+  const list = filterBySource(filterByLang(CHAR_LIST, "char"));
   const box = $("#charList");
   box.innerHTML = "";
   if (!list.length) {
-    box.innerHTML = '<p class="muted">没有符合当前语种的角色。</p>';
+    box.innerHTML = '<p class="muted">没有符合当前筛选条件的角色。</p>';
     updateSelCount();
     return;
   }
@@ -684,7 +734,7 @@ $("#btnBatchPersona").addEventListener("click", async () => {
     const r = await runTask("/api/characters/regenerate_persona", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ char_ids: ids }),
+      body: JSON.stringify({ char_ids: ids, track: $("#regenTrack").value || null }),
     }, (done, total) => { btn.textContent = `重生中… ${done}/${total}`; });
     const errN = Object.keys(r.errors || {}).length;
     toast(`已重生 ${r.regenerated.length} 个${errN ? `，${errN} 个失败` : ""}`, errN ? "err" : "ok");
@@ -917,6 +967,7 @@ $("#btnPosts").addEventListener("click", async () => {
         count_per_type: parseInt($("#countPerType").value) || 2,
         style_id: null,
         with_images: withImages,
+        track: $("#postTrack").value || null,
       }),
     });
     st.innerHTML = `已生成 ${r.posts.length} 条帖子。`;
@@ -1126,6 +1177,7 @@ $("#btnIg").addEventListener("click", async () => {
         n,
         style_id: null,
         with_images: withImages,
+        track: $("#igTrack").value || null,
       }),
     }, (done, total) => {
       st.innerHTML = `<span class="spinner"></span> 生成中… ${done}/${total} 个角色`;
