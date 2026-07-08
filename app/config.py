@@ -52,6 +52,13 @@ LLM_MODEL = os.environ.get("POPOP_LLM_MODEL", "gemini-3.1-pro-preview")
 CHAT_MODEL = os.environ.get("POPOP_CHAT_MODEL", "gemini-3.5-flash")
 IMAGE_MODEL = os.environ.get("POPOP_IMAGE_MODEL", "gpt-image-2")
 
+# ---- Embeddings (火山方舟 Ark，用于灵感库语义检索) ----
+# Ark 的向量模型走 /embeddings/multimodal 端点、返回 data.embedding、不支持真批量，
+# 与标准 OpenAI /embeddings 不同，api_client.embed 会据 base 自动切换协议。
+EMBED_BASE = os.environ.get("POPOP_EMBED_BASE", "https://ark.cn-beijing.volces.com/api/v3")
+EMBED_KEY = os.environ.get("POPOP_EMBED_KEY", "")
+EMBED_MODEL = os.environ.get("POPOP_EMBED_MODEL", "doubao-embedding-vision-251215")
+
 # Image generation defaults
 IMAGE_SIZE_COVER = "3:4"      # portrait cover
 IMAGE_RESOLUTION = "2k"

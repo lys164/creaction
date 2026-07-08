@@ -145,6 +145,74 @@ def parse_json_text(text: str) -> Any:
     return _parse_json(text)
 
 
+def _embed_one_ark(text: str, base: str, key: str, model: str,
+                   max_retries: int, timeout: int) -> list[float]:
+    """火山方舟 Ark 单条文本向量：/embeddings/multimodal，返回 data.embedding。"""
+    url = f"{base.rstrip('/')}/embeddings/multimodal"
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    payload = {"model": model, "input": [{"type": "text", "text": text}]}
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            data = r.json()
+            if "error" in data:
+                msg = data["error"].get("message", "")
+                if "wait" in msg.lower() or r.status_code in (429, 500, 503):
+                    last_err = APIError(msg)
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                raise APIError(msg)
+            return data["data"]["embedding"]
+        except (requests.RequestException, KeyError, ValueError) as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    raise APIError(f"ark embed failed: {last_err}")
+
+
+def _embed_one_openai(text: str, base: str, key: str, model: str,
+                      max_retries: int, timeout: int) -> list[float]:
+    """标准 OpenAI 兼容 /embeddings：返回 data[0].embedding。"""
+    url = f"{base.rstrip('/')}/embeddings"
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    payload = {"model": model, "input": text}
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            data = r.json()
+            if "error" in data:
+                raise APIError(data["error"].get("message", ""))
+            return data["data"][0]["embedding"]
+        except (requests.RequestException, KeyError, ValueError) as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    raise APIError(f"openai embed failed: {last_err}")
+
+
+def embed(
+    inputs: list[str],
+    model: str | None = None,
+    max_retries: int = 3,
+    timeout: int = 60,
+) -> list[list[float]]:
+    """Text embeddings for inspiration retrieval.
+
+    Uses the dedicated embedding provider (config.EMBED_BASE/KEY/MODEL). Ark's
+    vision embedding model needs the /embeddings/multimodal endpoint and does
+    NOT support real batching, so inputs are embedded one by one. Order preserved.
+    Raises APIError on failure so callers can fall back to lexical matching.
+    """
+    if not inputs:
+        return []
+    base = config.EMBED_BASE
+    key = config.EMBED_KEY or config.API_KEY
+    model = model or config.EMBED_MODEL
+    is_ark = "volces.com" in base or "ark" in base.lower()
+    fn = _embed_one_ark if is_ark else _embed_one_openai
+    return [fn(t, base, key, model, max_retries, timeout) for t in inputs]
+
+
 _FENCE_OPEN_RE = re.compile(r"\A```[ \t]*(?:json)?[ \t]*\r?\n", re.IGNORECASE)
 _FENCE_CLOSE_RE = re.compile(r"\r?\n```[ \t]*\Z")
 

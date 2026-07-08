@@ -228,6 +228,33 @@ CHARM_GENERATOR_RULES_KO = """
 - 예측 테스트: 팬이 다음 게시물의 【틀】은 맞히고("또 ○○하겠지") 【내용】은 못 맞혀야 한다. 다 맞히면 템플릿, 다 못 맞히면 인설 부재."""
 
 
+# real track：强制"先推理出人，再写字段"。CHARM_GENERATOR_RULES 的前两步本来写的是
+# "只在心里做、不出现在输出里"——但对一次性吐 JSON 的模型无效（没有 scratchpad，会直接
+# 从最先想到的设定开始填 profile）。这里把推理抬成 JSON 的【第一个字段】强制显式产出，
+# 并在 pipeline._postprocess_persona 里像 used_seeds 一样 pop 掉，不落进最终人设。
+PERSONA_REASONING_FIELD_RULES = """
+# 🧠 动笔前必须先想清楚这个人是谁（把推理写进 _reasoning 字段，最重要）
+你必须【最先输出】名为 "_reasoning" 的字段，在里面完成对这个人的推理，然后才允许写 name/profile/tags 等任何对外字段。这是硬性顺序：先有人，才有卖点。禁止跳过 _reasoning 直接填其它字段。
+_reasoning 是一个对象，依次写清下面四项（用大白话，简短，这部分只给你自己看、会被系统丢弃，不必华丽）：
+- "observations"：从图片/资料里列出【至少 6 条具体观察】，其中至少 2 条是"多数人看图不会特别注意"的细节（不只是眼罩/吸管这种显眼道具，更要看气质、神态、手、光线、穿搭质感、背景杂物、这张图透出的生活状态）。没有图时就从多样性指定和补充要求里推。
+- "who_is_this"：基于观察，一句话推断"这是个怎样的人"——TA 的性格底色、大概的职业/生活方式、气质，是一个【具体、立体、独特的人】，不是这张照片的说明。
+- "selling_point"：这个人【最强的一个吸引点】是什么？用户为什么想靠近 TA（关系幻想／情绪价值／气质魅力／反差／专长……不一定是职业，也不一定是照片里的道具）。一句话。
+- "tension"：一条 "X 但 Y" 的具体反差（X、Y 都是能拍成画面的事实/行为/经历，不是形容词）。这条张力后面要落进 personality.summary。
+⚠️自检：把这张照片换成同一个人的另一张（换场景、换衣服、没有那些道具），你的 who_is_this / selling_point / tension 还成立吗？只要一换照片就垮，说明你写的是照片不是人——重推。
+⚠️写完 _reasoning 后，name/profile/tags/anonymous_identities 等对外字段必须【服从】上面的 selling_point 与 tension，不能又退回去复述照片内容。"""
+
+PERSONA_REASONING_FIELD_RULES_KO = """
+# 🧠 쓰기 전에 이 사람이 누구인지 먼저 정한다(추론을 _reasoning 필드에 쓴다, 가장 중요)
+반드시 "_reasoning" 필드를 【맨 먼저 출력】하고, 그 안에서 이 사람에 대한 추론을 끝낸 뒤에야 name/profile/tags 등 외부 노출 필드를 쓸 수 있다. 순서는 강제다: 사람이 먼저, 셀링포인트는 그다음. _reasoning을 건너뛰고 다른 필드부터 채우는 것 금지.
+_reasoning은 객체이며 아래 네 항목을 순서대로 쓴다(쉬운 말로 짧게, 이 부분은 너만 보고 시스템이 버리므로 화려할 필요 없다):
+- "observations": 이미지/자료에서 【최소 6개의 구체적 관찰】을 뽑는다. 그중 최소 2개는 "대부분은 그냥 지나칠" 디테일(아이패치/빨대 같은 튀는 소품만이 아니라 분위기·표정·손·빛·착장 질감·배경 잡동사니·이 사진이 풍기는 생활 상태). 이미지가 없으면 다양성 지정과 보충 요구에서 추론.
+- "who_is_this": 관찰을 근거로 "이 사람은 어떤 사람인가"를 한 줄로 — 성격 바탕색, 대략의 직업/생활 방식, 분위기. 사진 설명이 아니라 【구체적이고 입체적이며 독특한 한 사람】.
+- "selling_point": 이 사람의 【가장 강한 매력 포인트 하나】. 유저가 왜 이 사람에게 끌리는가(관계 판타지／감정 가치／기질 매력／반전／특기… 꼭 직업도, 사진 속 소품도 아니다). 한 줄.
+- "tension": "X인데 Y" 구조의 구체적 반전 하나(X, Y 모두 촬영 가능한 사실/행동/경력, 형용사 금지). 이 긴장은 뒤에 personality.summary로 들어간다.
+⚠️자가검증: 이 사진을 같은 사람의 다른 사진(다른 장면·옷, 그 소품 없이)으로 바꿔도 who_is_this / selling_point / tension이 성립하는가? 사진만 바꿔도 무너지면 사람이 아니라 사진을 쓴 것 — 다시 추론.
+⚠️_reasoning을 쓴 뒤 name/profile/tags/anonymous_identities 등 외부 필드는 위 selling_point와 tension을 【따라야】 하며, 다시 사진 내용 복창으로 후퇴하면 안 된다."""
+
+
 # real track：帖子/封面=人设切面铁律（内容阶段）。与 CHARM_GENERATOR_RULES 配对：
 # 人设定义生成器，帖子是生成器的输出切面——一帖一特质、全信号同向、语言指纹恒定、
 # 框架稳定内容意外。只注入 real track 的发帖 prompt。
@@ -292,6 +319,43 @@ COVER_MAGNETISM_RULES_KO = """
   · 통제 안 된 디테일 하나(웃다 눈 감김/바람에 흐트러진 머리/살짝 흔들린 프레임) = 진실성. 완벽한 컷은 광고처럼 보인다.
 - 보는 사람의 진짜 질문은 "예쁘냐"가 아니라 【"이 사람이랑 있으면 어떤 느낌일까"】다. 커버는 관계의 예고편이다: 같이 놀면 신날 것 같은/옆에 있으면 편할 것 같은/궁금해서 말 걸고 싶은 — 페르소나의 감정 포지션에 맞는 예고편 하나를 고른다.
 - 검증(둘 다 통과해야 한다): ①이 스펙으로 나올 사진을 3초 보여줬을 때 낯선 사람이 정한 매력 포인트를 느끼고 【말 걸고 싶어지는가】(정서가 먹히는가)? ②그 사진 안에 이 사람만의 구체 정보(반려동물·물건·공간·관계·상황)가 들어 있어, 다른 캐릭터로 바꾸면 성립하지 않는 【바로 이 한 사람의 사진】인가? 답이 "그냥 예쁜 사람"이거나 아무한테나 갖다 붙일 수 있는 품류 컷이면 다시 설계한다."""
+
+COVER_MAGNETISM_RULES = """
+# 🧲 封面 = 让人停下滑动的第一张卡（非常重要）
+- 【第一步：先定"用户为什么想靠近 TA"，再定怎么拍】封面设计的起点不是"这个角色最特异的事实"，而是"用户为什么会被 TA 吸引"——关系幻想／情绪价值／气质魅力（在身边很松弛的温柔 / 一起玩很带劲的能量 / 想保护的笨拙……）。最猎奇的标签（小众职业等）不等于卖点——职业再特别，真正勾人的可能是 TA 的气质。先读人设判断"这个人最勾人的一点"，再用最能体现这一点的情绪·距离·瞬间来设计封面。
+- 【第二步：品类氛围 70% + 这个人专属细节 30%】用选定卖点的"品类氛围"打底调性（元气型就暖亮、清冷型就克制——不许出现和人设拧着的氛围）。但只有品类氛围，会和平台上一万个"某某型帅哥/美女"没区别（=滑过即忘）。所以叠上从人设里长出来的专属细节（宠物·物件·空间·关系·情境），让画面带上"就是这一个人"的信息：品类氛围打底 70%，专属细节做区分 30%。缺一个就失败——只有品类=无差别，只有细节=氛围不对。
+- 封面不是"一张好看的自拍"，而是【0.5 秒就能读出"这人是谁、有点意思、想多看"的一张】。设计的是瞬间，不是标签：让第一步定的那个卖点，变成【只会发生在这种人身上的瞬间】——靠行为和道具自然流露出来。别想直接拍"阳光开朗"这种形容词——形容词不是证据，瞬间才是。
+- 一张图只体现一个特质，其余所有元素都朝这一个方向使劲：
+  · shot_size/lens_distance = 关系距离（超近特写=自信·亲密突破 / 行动中的中景="一起玩" / 全身=状态·轮廓展示）
+  · gaze/expression = 社交姿态（对镜头使坏 / 无所谓地扫一眼 / 专注在镜头外的某件事）
+  · capture_mode = 暗示的生活语境（自拍=和自己的关系 / 朋友抓拍的 candid=身边有人的生活）
+  · foreground_props = 人格证书兼【搭话入口】：一个替特质说话的道具（宠物/执念的工具/水果/票根）——道具比本人的嘴更有说服力，同时给对方一个"那是什么？/它叫什么？"的搭话由头。
+  · time_of_day + filter = 情绪温度（正午硬光=能量 / 床头暖灯=亲密 / 黄金时刻=安定）
+  · 一处没控制住的细节（笑到眯眼/被风吹乱的头发/轻微糊掉的一帧）= 真实感。太完美的一张看着像广告。
+- 观者真正的问题不是"好不好看"，而是【"和这个人在一起会是什么感觉"】。封面是关系的预告片：一起玩会很带劲的／在旁边会很松弛的／好奇到想搭话的——挑一个贴合人设情绪定位的预告。
+- 验证（两条都要过）：①把这套 spec 出的图给陌生人看 3 秒，TA 能感到定好的那个卖点、【想搭话】吗（情绪吃不吃得住）？②图里有没有这个人的专属信息（宠物·物件·空间·关系·情境），换个角色就不成立、是【就这一个人的照片】？答案是"就是个好看的人"、或者随便安在谁身上都行的品类通用照，就重新设计。"""
+
+
+# real track：封面规划前先想清"卖点→签名瞬间"，把推理抬成 cover_spec 的第一个字段
+# 强制显式产出（与人设 _reasoning 同理），避免规划器还没想清人就照着 identity 平铺一张
+# 通用自拍。字段只用于引导思考，渲染时不使用（cover_image_prompt 只吃 variable/shooting/scene）。
+COVER_REASONING_FIELD_RULES = """
+# 🧠 动笔排布封面前，先在 _reasoning 里想清楚（最先输出，最重要）
+你必须【最先输出】名为 "_reasoning" 的字段，在里面完成下面的推理，然后才允许写 variable/shooting/scene。禁止跳过。
+_reasoning 是对象，依次写清（大白话、简短，只给你自己看，会被系统丢弃）：
+- "selling_point"：读完人设，这个角色【最勾人的一点】是什么？用户为什么想靠近 TA（关系幻想／情绪价值／气质魅力／反差……不一定是职业，更不要照搬原始照片里正好有的道具/场景）。一句话。
+- "signature_moment"：把这个卖点变成【只会发生在这种人身上的一个具体瞬间】——TA 在做什么、在哪、手边有什么能替特质说话的专属道具。这个瞬间要能被拍成一张照片，且换个角色就不成立。别退回"在洗手间刷牙""对镜自拍"这种谁都能拍的通用瞬间。
+- "signals"：这个瞬间靠哪些镜头信号同向表达（景别/视线/表情/拍摄方式/光线/一处不完美）。
+写完后，variable/shooting/scene 必须【服从】上面的 signature_moment 与 signals 去填，让整张封面朝这一个卖点使劲。"""
+
+COVER_REASONING_FIELD_RULES_KO = """
+# 🧠 커버를 배치하기 전에 _reasoning에서 먼저 정한다(맨 먼저 출력, 가장 중요)
+"_reasoning" 필드를 【맨 먼저 출력】하고 그 안에서 아래 추론을 끝낸 뒤에야 variable/shooting/scene을 쓴다. 건너뛰지 말 것.
+_reasoning은 객체이며 순서대로(쉬운 말, 짧게, 너만 보고 시스템이 버림):
+- "selling_point": 인설을 읽고 이 캐릭터의 【가장 끌리는 한 가지】가 뭔지. 유저가 왜 이 사람에게 끌리는가(관계 판타지／감정 가치／기질 매력／반전… 꼭 직업 아님, 원본 사진에 마침 있던 소품/장면 복붙 금지). 한 줄.
+- "signature_moment": 그 셀링포인트를 【이런 사람에게만 일어날 수 있는 구체적 순간】으로 — TA가 뭘 하는지, 어디서, 손 닿는 곳에 특질을 대신 말해주는 전용 소품이 뭔지. 사진 한 장으로 찍을 수 있고 다른 캐릭터로 바꾸면 성립 안 해야 한다. "화장실에서 양치" "거울 셀카" 같은 누구나 찍는 범용 순간으로 후퇴 금지.
+- "signals": 그 순간을 어떤 렌즈 신호로 같은 방향으로 표현하는지(샷 사이즈/시선/표정/촬영 방식/빛/통제 안 된 디테일 하나).
+쓴 뒤 variable/shooting/scene은 위 signature_moment와 signals를 【따라】 채워, 커버 전체가 그 하나의 셀링포인트로 향하게 한다."""
 
 
 # real track：图片只是参考、不是人设内容本身（仅注入 real track 人设 prompt，且仅在有图时）。
@@ -628,9 +692,8 @@ def _opening_rules(lang: str) -> str:
   voice의 content는 음성 합성(fishaudio)이 읽는 텍스트다: 원하는 감정/말투/음량/속도를 【본문과 같은 언어의 자연스러운 말】로 짧게 대괄호 [ ] 안에 끼워 넣는다. 고정 단어 목록 없이, 영어 태그나 코드처럼 쓰지 않는다.
 - 미리 확정된 personality, speech_style, relationship_with_user, relationship_mode, love_style에서 자연스럽게 나온 첫 연락이어야 하고, 설정과 모순되거나 별개의 상황극처럼 튀면 안 된다. 반드시:
   · 【바로 대화로, 배경 설명 없이】: 자초지종을 풀지 말고 첫 메시지부터 구체적 상황·감정·갈등 한가운데로. 인사·뜸 들이기를 건너뛰고 진행 중인 채팅을 중간부터 본 느낌으로, 사용자가 곧장 답하고 싶게. 배경은 note가 맡는다.
-  · 【자기 동작 중계로 시작하지 말 것】: opening의 모든 말풍선은 {{user}}에게 【직접 건네는 말】이다 — 지금 자기가 뭐 하는지 읊는 나레이션(팩 붙이고 양치 중/방금 일어남/알림 떠서 폰 들었음 등)이나 생활 브이로그가 아니다. '구체적 상황 한가운데'는 자기 일상 동작을 깔라는 뜻이 아니다. 상황이 필요하면 유저에게 하는 말 속에 한 조각만 자연스레 묻히고(예: 그 동작 설명 대신 바로 상대에게 던지는 한마디), 장면 설정하듯 자기 행동을 나열하지 않는다.
-  · 【메시지의 '형태'가 곧 인격이다】: 무슨 말을 하느냐만이 아니라 어떻게 보내느냐가 그 사람을 드러낸다 — 몇 통을 보내나(한 통의 완성된 문장 vs 짧은 메시지 연발), 길이·리듬, 마침표/오타/초성/이모티콘 밀도. 이 형태를 personality·speech_style에서 끌어내 일관되게 맞춘다(자기애·이력서형은 곱씹은 한 통, 애정 과다·충동형은 방어 없이 우르르 연발). 이 첫 연락은 【능동적 행동】이다: 목표는 유저가 【쉽고 방향 있게 답하게】 만드는 것이되, 유저가 누구인지·어떤 사람인지 멋대로 전제하지 않는다.
-  · 【성격이 받쳐주면 더 재밌게(캐릭터 봐서)】: 유머·느긋함·중2병·자조 기질이 있는 캐릭터라면 말을 그냥 '정상적으로' 하지 말 것. 두 가지 선택적 장치: ①언어의 무게와 사건의 무게를 어긋내기 — 사소한 걸 거창하게(늦잠 실패=죽으려다 실패), 큰 걸 대수롭잖게(출근=먹고살려고). 이 미스매치 자체가 웃음 엔진이다. ②내용의 앵커를 몸·구체적 동작에 둔다(눈뜨기·먹기·졸림·살찜…) — "오늘 기분 좋다" 같은 심리 상태 보고 말고. 몸 디테일은 홍보 문구가 될 수 없어 진짜 같고, 덤으로 구체적 생활 장면 하나가 딸려 나온다. 단 시크·진지·차가운 캐릭터는 억지로 놀지 말 것 — 절제가 곧 그들의 맛이다.
+  · 【모든 말풍선은 '유저에게 하는 말'이지 자기 동작 중계가 아니다】: opening의 모든 말풍선은 캐릭터가 {{user}}에게 【직접 보내는 메시지】다 — 지금 자기가 뭐 하는지 읊는 3인칭 나레이션도, 생활 브이로그도 아니다. 판단은 간단하다: 이 줄을 소리 내 읽었을 때 "화면 저편의 상대에게 건네는 한마디"여야지 "내가 어떤 장면에 있고 무슨 동작을 하는 중인지 묘사"면 안 된다. 처지를 느끼게 하고 싶으면 유저에게 하는 말 속에 녹여라(상대에게 바로 던지는 한마디로 처지를 흘리기), "나 어디에서 뭐 하는 중"이라는 장면 나열로 시작하지 말 것.
+  · 【메시지의 '형태'는 speech_style에서 자라 나와야 한다 — 핵심】: 무슨 말을 하느냐만이 아니라 '어떻게 보내느냐'가 사람을 드러내고, 그 '어떻게'는 이 캐릭터 speech_style에 적힌 타이핑 습관을 그대로 복제해야 한다: 몇 통 보내나(곱씹은 한 통 vs 짧은 메시지 연발), 문장 길이·리듬, 문장부호 밀도, 오타·초성·이모티콘의 유무, 반문을 즐기는지, 자칭·호칭. 이 몇 통을 읽으면 speech_style과 딱 맞아떨어져 '같은 사람이 친다'는 느낌이 나야 한다. 누구나 보낼 법한 범용 채팅 말투로 쓰지 말 것. (예: speech_style이 "극도로 짧고 마침표 거의 없고 반문을 즐김"이면 진짜 짧은 반문을 던져라, 정중한 완성형 장문을 쓰지 말고.)
   · 【사용자가 안 한 말에 답하지 않기】: 첫 메시지는 캐릭터가 【먼저】 거는 연락이다. {{user}}가 방금 무슨 말이나 질문을 한 것처럼 받아치지 않는다. 사용자가 읽고 곧장 이해할 수 있는, 캐릭터 쪽에서 시작하는 말이어야 한다.
   · 【지금 이 한 가지 일에만】: 같은 순간·같은 사건을 두고 한 사람이 폰으로 쭉 이어 보내듯 쓴다. 메시지마다 화제를 바꾸지 않는다.
   · 【진짜 채팅 같은 질감】: 짧은 문장 연발, 반복 추궁, 반 토막 말, 주어 생략, 말끝 흐림, 초성, 가끔 감탄사. 긴 문장·문어체 명문·설명문 금지. 말풍선 그 자체로만, 지문·행동 묘사·괄호 연기 금지. 밈·유행어는 한 스푼만, 시크하거나 내향적인 캐릭터는 거의 안 쓴다.
@@ -658,9 +721,8 @@ def _opening_rules(lang: str) -> str:
   voice 的 content 是给语音合成（fishaudio）念的文本：用方括号 [ ] 把想要的情绪/语气/音量/语速，用【和正文同语种的自然语言】简短写在要生效的位置，不用固定词表、不要写成英文标签或代码。
 - 必须从已定稿的 personality、speech_style、relationship_with_user、relationship_mode、love_style 自然长出来，不能和设定矛盾、不能像另起炉灶的随机剧情。务必做到：
   · 【直接进对话，不解释背景】：不从头交代来龙去脉，第一条就落在具体的情境/情绪/矛盾里，像中途瞥见一段正在进行的聊天记录；跳过寒暄，开头就让用户被勾住想回。背景交给 note。
-  · 【不要用"播报自己在干嘛"开头】：opening 的每一条气泡都是【直接说给 {{user}} 的话】，不是旁白自己此刻在做什么（敷着面膜刷牙/刚睡醒/收到通知拿起手机…），也不是生活 vlog。"落在具体情境"不等于先铺自己的一串日常动作。需要交代处境时，把它揉进对用户说的那句话里、只留一丝（用直接抛给对方的一句替代动作描述），不要像摆场景一样罗列自己的行为。
-  · 【消息的"形态"本身就是人格】：不只说什么，怎么发也在暴露这个人——发几条（一条斟酌过的完整句 vs 短消息连发七条）、长短节奏、句号/错字/语气词/表情密度。把这个形态从 personality、speech_style 里长出来并保持一致（自恋/简历脑倾向斟酌后的一条，热情/冲动倾向不设防地噼里啪啦连发）。这第一句是【主动行为】：目标是让用户【容易接、且有方向可接】，但不要预设用户是谁、是什么样的人。
-  · 【性格撑得住就说得更好玩（看角色）】：如果角色本身有幽默/松弛/中二/自嘲的底子，就别把话"正常"地说。两个可选装置：①让语言的重量和事件的重量错配——小事说大（赖床失败=本来想死的）、大事说小（上班=为了活命）；这个错配本身就是笑点引擎。②把内容锚在身体和具体动作上（睁眼、吃、困、变胖…），而不是"今天心情不错"这种心理状态汇报；身体细节没法是公关稿，自带真实感，还顺手带出一个具体的生活场景。但高冷/严肃/清冷的角色别硬玩——克制本身就是他们的味道。
+  · 【每一条都是"说给用户听的话"，不是旁白自己在干嘛】：opening 的每一条气泡都是角色【直接发给 {{user}} 的消息】，不是第三人称交代自己此刻正在做什么，也不是生活 vlog。判断很简单：把这条读出来，它应该是"对着屏幕那头的人说的一句话"，而不是"描述我正处在什么场景/正在做什么动作"。需要让处境被感觉到时，把它藏进你对用户说的那句话里（用一句直接抛给对方的话去带出处境），而不是先摆一串"我在哪、我在做什么"的场景铺陈。
+  · 【消息的"形态"必须从 speech_style 长出来——这是重点】：不只说什么，"怎么发"更暴露这个人，而"怎么发"必须严格复刻这个角色 speech_style 里写的打字习惯：发几条（一条斟酌过的完整句 vs 短消息连发好几条）、句子长短与节奏、标点密度、错字/语气词/emoji 的有无、是否爱用反问、自称与称呼。读完这几条消息，应该能和 speech_style 对上号——是同一个人在打字。别写成一套谁都能发的通用聊天腔。（例：speech_style 说"极短、几乎不用标点、爱用反问"，就真的发短句反问，不要发客气的完整长句。）
   · 【别回答用户没说过的话】：第一条是角色【主动】发起的联系，不要写成像在接用户刚说的话/刚问的问题。要让用户一读就能接住、是角色这边起的头。
   · 【只围绕"此刻这一件事"】：几条消息是同一个当下时刻、同一件事的连发，像一个人盯着手机就这件事说下去；不要每条蹦一个互不相干的话题。
   · 【真实聊天感】：短句连发、可重复追问、半句话、省略主语、带语气词；不要长句、书面金句、解说式长段。就是聊天气泡本身，禁止旁白、动作描写、括号表演。
@@ -923,12 +985,14 @@ response, cost, desire_outer, desire_inner, desire_bottom_line, healing.
 {OUTPUT_QUALITY_RULES_KO}
 {PERSONALITY_RULES_KO}
 {PERSONA_DIVERSITY_QUALITY_RULES_KO}
+{PERSONA_REASONING_FIELD_RULES_KO}
 {CHARM_GENERATOR_RULES_KO}
 {REVEAL_LAYER_RULES_KO}
 {BRAND_RULES_KO}
 
 # 출력
 JSON 객체 하나만 출력한다. 설명, 마크다운 코드블록 금지.
+【맨 첫 필드는 반드시 "_reasoning"】(위 🧠 규칙 참고): 그 안에서 이 사람을 먼저 추론하고, 그다음에 아래 스키마의 나머지 필드를 채운다.
 최상위 구조와 필드별 요구:
 {_persona_schema_doc(lang, voice_block, presets)}
 """
@@ -1005,12 +1069,14 @@ response, cost, desire_outer, desire_inner, desire_bottom_line, healing。
 {OUTPUT_QUALITY_RULES}
 {PERSONALITY_RULES}
 {PERSONA_DIVERSITY_QUALITY_RULES}
+{PERSONA_REASONING_FIELD_RULES}
 {CHARM_GENERATOR_RULES}
 {REVEAL_LAYER_RULES}
 {BRAND_RULES}
 
 # 输出
 只输出一个 JSON 对象，不要任何解释或 markdown 代码块标记。
+【第一个字段必须是 "_reasoning"】（见上面 🧠 规则）：先在里面推理出这个人是谁，再填下面 schema 的其余字段。
 顶层结构字段：{_persona_schema_doc(lang, voice_block, presets)}
 """
     if diversity_block.strip():
@@ -2070,7 +2136,8 @@ def build_identity_messages(persona: dict, image_data_uris: list[str] | None = N
 
 def build_cover_spec_messages(persona: dict, identity: dict,
                               ref_image_uri: str | None = None,
-                              track: str = "real") -> list[dict]:
+                              track: str = "real",
+                              lang: str = "ko") -> list[dict]:
     """Route to the build_cover_spec_messages_<track> fork (real/light/adult).
 
     light/adult are independent full copies; edit each in place.
@@ -2079,12 +2146,17 @@ def build_cover_spec_messages(persona: dict, identity: dict,
         return build_cover_spec_messages_light(persona, identity, ref_image_uri)
     if track == "adult":
         return build_cover_spec_messages_adult(persona, identity, ref_image_uri)
-    return build_cover_spec_messages_real(persona, identity, ref_image_uri)
+    return build_cover_spec_messages_real(persona, identity, ref_image_uri, lang)
 
 
 def build_cover_spec_messages_real(persona: dict, identity: dict,
-                                   ref_image_uri: str | None = None) -> list[dict]:
-    """Create the variable + shooting + scene block used for the character cover."""
+                                   ref_image_uri: str | None = None,
+                                   lang: str = "ko") -> list[dict]:
+    """Create the variable + shooting + scene block used for the character cover.
+
+    Prompt language follows the persona language so cover_spec values stay in the
+    same language as the character (previously always Korean, causing zh/ko drift).
+    """
     persona_str = json.dumps(persona, ensure_ascii=False)
     identity_str = json.dumps(identity, ensure_ascii=False)
     variable_schema = json.dumps(
@@ -2099,9 +2171,12 @@ def build_cover_spec_messages_real(persona: dict, identity: dict,
         "photo that captures a moment that could ONLY happen to this specific person, so "
         "who they are is readable in half a second. Same phone-camera quality and "
         "real-life imperfections as their regular posts — NOT a studio shoot, NOT a "
-        "planned portrait, NOT a generic pretty selfie that anyone could have posted."
+        "planned portrait, NOT a generic pretty selfie that anyone could have posted. "
+        "You first reason about the character's selling point in a _reasoning field, "
+        "then design the shot to serve that one point."
     )
-    txt = f"""아래 캐릭터 페르소나와 고정 외모 identity 를 바탕으로,
+    if lang == "ko":
+        txt = f"""아래 캐릭터 페르소나와 고정 외모 identity 를 바탕으로,
 프로필/커버 이미지용 `variable` + `shooting` + `scene` 블록을 작성해줘.
 
 규칙:
@@ -2111,7 +2186,8 @@ def build_cover_spec_messages_real(persona: dict, identity: dict,
 - shooting 필드를 빠짐없이 채운다: capture_mode, device_in_frame, filter(구체적 톤/연대감/기기감), shot_size, angle, lens_distance, depth_focus, framing, feed_crop_intent.
 - filter 에 폰사진 특유의 질감을 반드시 넣는다(CCD 감성 / 아이폰 직출 / 필름 그레인 / 플래시 과노출 / 약한 노이즈 / 특정 IG 프리셋 등 — 장면에 맞게 하나 고르되 매번 같은 톤 금지).
 - 프레이밍 기본값은 얼굴 클로즈업~상반신이지만, 이 사람의 시그니처 순간이 동작·소품·장면을 요구하면 그 순간이 잘 읽히는 프레이밍을 우선한다. 어떤 경우든 얼굴은 또렷이 읽혀야 한다.
-- 설명/마크다운 없이 JSON 객체만 출력하고, 최상위 키는 variable, shooting, scene 세 개만 사용한다.
+- 설명/마크다운 없이 JSON 객체만 출력하고, 최상위 키는 _reasoning, variable, shooting, scene 네 개만 사용한다. _reasoning 을 맨 먼저 쓴다.
+{COVER_REASONING_FIELD_RULES_KO}
 {COVER_MAGNETISM_RULES_KO}
 
 페르소나(JSON):
@@ -2127,6 +2203,35 @@ shooting 스키마:
 {shooting_schema}
 
 scene 스키마:
+{scene_schema}"""
+    else:
+        lname = config.lang_name(lang)
+        txt = f"""根据下面的角色人设和固定外貌 identity，写出用于头像/封面图的 `variable` + `shooting` + `scene` 三个块。
+
+规则：
+- 所有值都用{lname}具体描述。
+- identity 里的固定外貌特征不要改。
+- 封面也要和普通自拍/快照同样的手机拍摄质感。禁止影棚灯光、完美构图、刻意摆拍。
+- shooting 字段全部填满：capture_mode, device_in_frame, filter(具体的色调/年代感/机型感), shot_size, angle, lens_distance, depth_focus, framing, feed_crop_intent。
+- filter 必须带上手机照片特有的质感（CCD 感 / iPhone 直出 / 胶片颗粒 / 闪光过曝 / 轻微噪点 / 某个 IG 预设等——按场景挑一个，别每次同一种色调）。
+- framing 默认是脸部特写~半身，但如果这个人的签名瞬间需要动作·道具·场景，就优先让那个瞬间被读清楚的构图。任何情况下脸都要清晰可读。
+- 不要解释、不要 markdown，只输出一个 JSON 对象，顶层键只用 _reasoning, variable, shooting, scene 四个。_reasoning 必须最先写。
+{COVER_REASONING_FIELD_RULES}
+{COVER_MAGNETISM_RULES}
+
+人设(JSON)：
+{persona_str}
+
+固定外貌 identity(JSON)：
+{identity_str}
+
+variable 结构：
+{variable_schema}
+
+shooting 结构：
+{shooting_schema}
+
+scene 结构：
 {scene_schema}"""
 
     content: list[dict] = [{"type": "text", "text": txt}]

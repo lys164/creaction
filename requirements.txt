@@ -6,4 +6,5 @@ python-multipart==0.0.20
 pydantic==2.10.4
 PyJWT==2.10.1
 oss2>=2.18,<3
+numpy>=1.26
 pytest==8.3.4

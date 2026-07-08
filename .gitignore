@@ -6,8 +6,9 @@ __pycache__/
 venv/
 .Python
 
-# 运行时数据（用户生成的人设/图片/上传，不入库）
-data/
+# 运行时数据（用户生成的人设/图片/上传，不入库）。
+# 只忽略项目根下的 data/（运行时数据卷），不误伤 app/data/（随代码发布的数据文件）。
+/data/
 
 # 环境变量与密钥
 .env
@@ -30,3 +31,12 @@ nohup.out
 # 临时脚本
 _fix*.py
 .claude/
+
+# 灵感库派生产物（从 decompositions.json 预处理，体积大；随 Docker 镜像发布，不入 git）
+app/data/inspiration_vectors.npy
+app/data/inspiration_vectors.ckpt.npy
+app/data/inspiration_vectors.done.npy
+
+# 备份文件
+app/data/*.bak
+app/data/ig_topic_seeds.json.bak

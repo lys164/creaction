@@ -17,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-from . import api_client, config, landing, library, prompts, storage, styles, voices
+from . import api_client, config, inspiration, landing, library, prompts, storage, styles, voices
 
 
 # 按角色的进程内互斥锁：所有对同一 record 的读-改-写都应持锁，
@@ -272,6 +272,9 @@ def _postprocess_persona(persona: dict, archetype: str | None = None) -> dict:
     # used_seeds 是灵感手牌的生产台账（real track），不属于人设内容；
     # 正常路径在生成处已取走，这里防御性剥离，保证任何路径都不落进 persona。
     persona.pop("used_seeds", None)
+    # _reasoning 是"先推理出这个人是谁"的强制思考区（real track 人设 prompt 要求
+    # 作为第一个字段输出），只用于引导模型先想清人再写卖点，不属于人设内容，剥离。
+    persona.pop("_reasoning", None)
     if _is_plain_human(persona):
         persona.pop("situational_reactions", None)
     if archetype == "plain":
@@ -995,13 +998,20 @@ def build_cover_spec(char_id: str) -> dict:
         build_identity(char_id)
         record = load_character(char_id)
 
-    # 原图作为神似/气质参考传给规划（real track 的 prompt 里明确：只参考长相与
-    # 气质，不要复刻原图的场景/构图/道具，要从人设重新设计一个体现特质的签名瞬间）。
+    # real track：规划封面时【不喂原图】。实测原图信号太强，会把封面场景/构图/道具
+    # 拉回原始快照（如"在洗手间刷牙"），压过 prompt 里"从人设重新设计签名瞬间"的要求。
+    # "神似"已由 identity 文本承载（identity 照旧从原图提取），封面渲染阶段 real track
+    # 也不拼原图（use_reference=False），所以规划阶段完全靠人设设计签名瞬间即可。
+    # light/adult 仍按原逻辑把原图作为气质参考传入。
     track = record.get("track", "real")
     cover_ref = _first_source_image(record)
-    cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
+    if track == "real":
+        cover_ref_uri = None
+    else:
+        cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
     messages = prompts.build_cover_spec_messages(
-        record["persona"], record["identity"], cover_ref_uri, track=track)
+        record["persona"], record["identity"], cover_ref_uri, track=track,
+        lang=record.get("lang", "ko"))
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
         "variable": spec.get("variable", {}),
@@ -1009,7 +1019,7 @@ def build_cover_spec(char_id: str) -> dict:
         "scene": spec.get("scene", {}),
         "version": COVER_SPEC_VERSION,
     }
-    if cover_ref:
+    if cover_ref_uri and cover_ref:
         record["cover_spec"]["reference_image"] = cover_ref
     save_character(record)
     return record
@@ -1516,6 +1526,53 @@ def _sibling_used_photo_kinds(record: dict, sample_k: int = 4) -> list[str]:
     return kinds
 
 
+def _refine_ig_image_specs(persona: dict, posts: list, lang: str) -> None:
+    """real 链路阶段2：检索真实拍摄范例作灵感，重生成图文帖的图像 spec（就地更新）。
+
+    整段尽量隔离：库缺失、检索为空或 LLM 失败都静默跳过，保留阶段1 的草稿 spec，
+    绝不影响帖子 content 或阻断出图。
+    """
+    if not inspiration.available():
+        return
+    image_posts = [p for p in posts if p.get("format") != "text_only"]
+    if not image_posts:
+        return
+    vibe = persona.get("personality") or persona.get("vibe") or []
+    refs_by_index = {}
+    for i, p in enumerate(posts):
+        if p.get("format") == "text_only":
+            continue
+        items = inspiration.retrieve(vibe, content=p.get("content") or "", k=3)
+        refs = inspiration.format_refs(items)
+        if refs:
+            refs_by_index[i] = refs
+    if not refs_by_index:
+        return
+    try:
+        specs = api_client.chat_json(
+            prompts.build_ig_image_spec_messages_real(persona, posts, lang, refs_by_index),
+            temperature=0.9,
+        )
+    except Exception:  # noqa: BLE001 阶段2 失败不影响主流程
+        return
+    if isinstance(specs, dict):
+        specs = [specs]
+    if not isinstance(specs, list):
+        return
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        idx = spec.get("index")
+        if not isinstance(idx, int) or not (0 <= idx < len(posts)):
+            continue
+        post = posts[idx]
+        if post.get("format") == "text_only":
+            continue
+        for key in ("image_type", "selfie", "photo_kind", "photo_prompt", "photo_schema"):
+            if key in spec and spec.get(key) is not None:
+                post[key] = spec[key]
+
+
 @_locked
 def generate_instagram_posts(
     char_id: str,
@@ -1574,6 +1631,10 @@ def generate_instagram_posts(
             "topic_seed": item.get("topic_seed"),
             "image": None,
         })
+
+    # 1.5) real 链路：content 已生成，用真实拍摄范例检索灵感，再重跑图像 spec
+    if record.get("track", "real") == "real":
+        _refine_ig_image_specs(persona, posts, record.get("lang", config.LANGUAGES[0]))
 
     def _render(post: dict) -> dict:
         if not with_images or post.get("format") == "text_only":
