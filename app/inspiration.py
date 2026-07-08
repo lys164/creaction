@@ -25,10 +25,11 @@ from . import config
 _LIB_PATH = config.DATA_DIR.parent / "app" / "data" / "inspiration_library.json"
 _VEC_PATH = config.DATA_DIR.parent / "app" / "data" / "inspiration_vectors.npy"
 
-# 拼进 prompt 的生图灵感字段（对齐 SELFIE_SCHEMA 维度）
+# 拼进 prompt 的灵感字段：只留【纯氛围】维度——画面风格/拍摄手法/构图手法。
+# 刻意去掉 action/expression/makeup/clothes：那些绑定到某个人的具体造型，
+# 会把整组帖子往同一个姿势/穿搭带偏、冲淡角色人设，正是质量坍缩的来源。
 _INSPO_FIELDS = (
-    "action", "expression", "makeup", "clothes",
-    "framing", "visual_style", "shooting_style",
+    "visual_style", "shooting_style", "framing",
 )
 
 
