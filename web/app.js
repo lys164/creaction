@@ -796,6 +796,7 @@ async function showCharDetail(charId) {
     ["appearance", "外貌穿搭"],
     ["hometown", "出身地"], ["residence", "居住地"],
     ["social_status", "职业/阶级"], ["speech_style", "语言习惯"],
+    ["perception", "看世界的角度"],
     ["relationship_with_user", "和用户的关系"], ["relationship_mode", "社交模式"],
     ["love_style", "表达爱的方式"], ["situational_reactions", "情境反应"],
     ["hidden_side", "反差萌"], ["life_details", "生活习惯"],
@@ -842,6 +843,8 @@ async function showCharDetail(charId) {
         ${fieldHtml}
         <details><summary class="muted">查看完整人设 JSON</summary>
           <pre class="kv">${escapeHtml(JSON.stringify(p, null, 2))}</pre></details>
+        ${rec.reasoning ? `<details><summary class="muted">查看生成推理 reasoning</summary>
+          <pre class="kv">${escapeHtml(JSON.stringify(rec.reasoning, null, 2))}</pre></details>` : ""}
         ${rec.identity ? `<details><summary class="muted">查看外貌 identity</summary>
           <pre class="kv">${escapeHtml(JSON.stringify(rec.identity, null, 2))}</pre></details>` : ""}
         ${rec.cover && rec.cover.spec ? `<details><summary class="muted">查看封面 variable / scene</summary>
@@ -1136,7 +1139,7 @@ async function loadLatestIg(charId = IG_ACTIVE_CHAR) {
     if (myGen !== IG_LOAD_GEN || charId !== IG_ACTIVE_CHAR) return; // 过期响应，丢弃
     if (b && b.posts && b.posts.length) {
       $("#igStatus").innerHTML = `已加载上次生成的 ${b.posts.length} 条（${new Date((b.created || 0) * 1000).toLocaleString()}）。重新生成会覆盖。`;
-      renderIgPosts(b.posts);
+      renderIgPosts(b.posts, b.persona_read);
     } else {
       $("#igStatus").innerHTML = "";
     }
@@ -1198,9 +1201,16 @@ $("#btnIg").addEventListener("click", async () => {
   }
 });
 
-function renderIgPosts(posts) {
+function renderIgPosts(posts, personaRead) {
   const box = $("#igResults");
   box.innerHTML = "";
+  if (personaRead) {
+    const pr = document.createElement("details");
+    pr.className = "ig-reasoning";
+    pr.innerHTML = `<summary class="muted">查看生成推理 reasoning（这个人凭什么有意思）</summary>
+      <pre class="kv">${escapeHtml(JSON.stringify(personaRead, null, 2))}</pre>`;
+    box.appendChild(pr);
+  }
   posts.forEach((p) => {
     const card = document.createElement("div");
     card.className = "post-card";
@@ -1282,7 +1292,7 @@ async function rerenderIgPostImage(btn) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ style_id: null }),
     });
-    renderIgPosts(r.batch.posts);
+    renderIgPosts(r.batch.posts, r.batch.persona_read);
     toast("图片已重新生成", "ok");
   } catch (e) {
     toast("重绘失败：" + e.message, "err");
@@ -1300,7 +1310,7 @@ async function deleteIgPost(btn) {
     const r = await api(`/api/ig_posts/${IG_ACTIVE_CHAR}/${btn.dataset.postId}`, {
       method: "DELETE",
     });
-    renderIgPosts(r.batch.posts);
+    renderIgPosts(r.batch.posts, r.batch.persona_read);
     toast("帖子已删除", "ok");
   } catch (e) {
     toast("删除失败：" + e.message, "err");

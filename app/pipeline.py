@@ -318,7 +318,7 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
     uris = [api_client.file_to_data_uri(p) for p in image_paths]
     names, jobs, tags = _recent_persona_traits(lang)
     diversity_block = prompts.build_persona_diversity_block(
-        lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
+        lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags, track=track)
     # real track：发一手灵感牌（性格/职业库，冷却过滤后随机），
     # 模型自主决定用不用，用了哪条通过 used_seeds 回报，编排层据此销账。
     # kdrama 不发牌：人设从韩剧主角推理（主动性/反差/user_role/opening_scene）+图片长出来，
@@ -430,9 +430,10 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         uris = [api_client.file_to_data_uri(p) for p in ref_images]
         names, jobs, tags = _recent_persona_traits(lang, exclude_char_id=char_id)
         diversity_block = prompts.build_persona_diversity_block(
-            lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
+            lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags, track=track)
         # real track：发灵感手牌 + 冷读验收，与 create_persona_one_lang 同构。
-        if track in ("real", "kdrama"):
+        # kdrama 同 light/adult 不发牌、不验收（见 create 路径注释）。
+        if track == "real":
             hand = library.checkout()
             hand_block = library.hand_block(hand, lang)
             if hand_block:
@@ -440,7 +441,7 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         persona, used_seeds, reasoning = _generate_persona_real(
             uris, lang, user_hint, diversity_block, track)
         audits: list[dict] = []
-        if track in ("real", "kdrama"):
+        if track == "real":
             audit = _charm_audit(persona, lang)
             audits.append(audit)
             if audit["verdict"] == "fail":

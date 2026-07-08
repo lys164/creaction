@@ -36,7 +36,3 @@ _fix*.py
 app/data/inspiration_vectors.npy
 app/data/inspiration_vectors.ckpt.npy
 app/data/inspiration_vectors.done.npy
-
-# 备份文件
-app/data/*.bak
-app/data/ig_topic_seeds.json.bak

@@ -7,14 +7,6 @@ cd "$(dirname "$0")"
 PORT="${PORT:-8077}"
 HOST="${HOST:-127.0.0.1}"
 
-# 加载本地 .env（若存在）：API/embedding 等运行时凭证。已被 .gitignore 忽略。
-if [ -f .env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . ./.env
-  set +a
-fi
-
 # 选一个 3.10+ 解释器：优先项目 venv，其次任意较新的 python3。
 _is_py310() { "$1" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)' 2>/dev/null; }
 
