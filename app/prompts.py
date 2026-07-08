@@ -358,6 +358,119 @@ _reasoning은 객체이며 순서대로(쉬운 말, 짧게, 너만 보고 시스
 쓴 뒤 variable/shooting/scene은 위 signature_moment와 signals를 【따라】 채워, 커버 전체가 그 하나의 셀링포인트로 향하게 한다."""
 
 
+# ── 改法1（adjust 模式）：重新喂原图 i2i + 只输出"相对原图的轻量调整指令" ──
+# cover_spec 不再重排一整套 variable/shooting/scene，而是保留原图构图，只给出
+# 把画面往人设特质上微调的少量指令 + 核心气质。渲染时把原图拼进去做 i2i。
+COVER_ADJUST_SCHEMA = {
+    "core_vibe": "一句话概括这个人最该被第一眼读到的核心气质/卖点（从人设来，不是复述照片内容）",
+    "keep": "原图里必须保留的东西（长相、神态、大致构图/景别）——一句话",
+    "adjustments": [
+        "相对原图的具体微调指令（每条一句、可执行）。只微调，不重构场景：可动的是"
+        "表情/眼神、光线与色调氛围、可自然加入或移除的小道具、背景细节的强调或弱化、"
+        "穿搭的小调整——让画面更能体现 core_vibe。不要求换地点、换机位、换姿势这种大改。"
+    ],
+    "avoid": "要弱化或去掉的、会稀释卖点或显得通用/摆拍的元素（没有就写'无'）",
+}
+
+COVER_ADJUST_RULES = """
+# 🧲 封面调整原则（adjust 模式：在原图基础上微调，不重构）
+- 目标：保留这张原图的真实感与长相一致性，只把画面【往这个人的核心气质/卖点上推一把】，不是重新设计一张照片。
+- 【先定卖点】先想清这个角色最该被第一眼读到的一点（关系幻想／情绪价值／气质魅力／反差，不一定是职业，也不要照搬照片里正好有的道具当卖点），写进 core_vibe。
+- 【只做轻量增量】adjustments 每条都是相对原图的小调整：表情/眼神微调、光线色调氛围、能自然加/减的小道具、背景细节强调或弱化、穿搭小改。不要求换地点/换机位/换大姿势——那属于重构，不在这个模式里做。
+- 【keep 锚住原图】明确写出必须保留的：长相神态、大致构图景别，避免模型把人脸或场景改飞。
+- 【avoid 去通用感】指出会让画面显得"谁都能拍的通用美照"或摆拍感的元素，让它弱化或去掉。
+- 输出只用 core_vibe / keep / adjustments / avoid 四个键，全部用该角色语言写，具体、可执行、简短。"""
+
+
+def build_cover_adjust_messages(persona: dict, identity: dict,
+                                ref_image_uri: str | None = None,
+                                lang: str = "ko") -> list[dict]:
+    """改法1：生成"相对原图的轻量调整指令"（core_vibe/keep/adjustments/avoid）。
+
+    需要把原图作为参考传入（ref_image_uri）；渲染阶段同样拼原图做 i2i。
+    """
+    persona_str = json.dumps(persona, ensure_ascii=False)
+    identity_str = json.dumps(identity, ensure_ascii=False)
+    schema_str = json.dumps(COVER_ADJUST_SCHEMA, ensure_ascii=False)
+    lname = config.lang_name(lang)
+
+    sys = (
+        "You plan a LIGHT adjustment to an existing reference photo so it becomes a "
+        "profile cover that reads this specific character's core vibe in half a second. "
+        "You do NOT redesign the shot: keep the reference photo's face, framing and "
+        "composition; only output small, executable tweaks (expression, lighting/tone, "
+        "minor props, background emphasis, wardrobe nudges) that push the image toward "
+        "the character's selling point. Output the adjustment spec only."
+    )
+    txt = f"""下面有这个角色的人设、固定外貌 identity，以及一张【原始参考照片】。
+请基于人设，只输出【相对这张原图的轻量调整指令】，让它更像"这个人的封面"。
+不要重新设计一张照片：保留原图的长相、神态、大致构图，只做能体现人设核心气质的小微调。
+
+规则：
+- 所有值用{lname}写，具体、可执行、简短。
+- 只输出一个 JSON 对象，顶层键只用：core_vibe, keep, adjustments, avoid。
+- 不要 markdown、不要解释。
+{COVER_ADJUST_RULES}
+
+人设(JSON)：
+{persona_str}
+
+固定外貌 identity(JSON)：
+{identity_str}
+
+输出结构（键名照用，值替换成实际内容）：
+{schema_str}"""
+
+    content: list[dict] = [{"type": "text", "text": txt}]
+    if ref_image_uri:
+        content.append(
+            {"type": "image_url", "image_url": {"url": ref_image_uri}})
+    return [
+        {"role": "system", "content": sys},
+        {"role": "user", "content": content},
+    ]
+
+
+def cover_adjust_prompt(identity: dict, adjust: dict, style_prompt: str,
+                        persona_mood: str = "") -> str:
+    """改法1 渲染 prompt：原图做 i2i 底，只按 adjust 指令做轻量调整。
+
+    与 redesign 的 cover_image_prompt 不同：不铺一整套 variable/shooting/scene，
+    也【不加 I2I_OVERRIDE_GUARD】（那条会要求无视原图构图，与本模式冲突）。
+    """
+    id_body = ", ".join(_flatten_section(identity))
+    core = str(adjust.get("core_vibe", "")).strip()
+    keep = str(adjust.get("keep", "")).strip()
+    adjustments = adjust.get("adjustments") or []
+    avoid = str(adjust.get("avoid", "")).strip()
+    adj_lines = "\n".join(f"- {str(a).strip()}" for a in adjustments if str(a).strip())
+    mood_hint = f" Overall vibe to convey: {persona_mood}." if persona_mood else ""
+    photographic = is_photographic_style(style_prompt)
+    style_line = (
+        f"[ART STYLE] {style_prompt}\n" if not photographic else ""
+    )
+    return (
+        "Start from the ATTACHED reference photo and apply only LIGHT adjustments to it. "
+        "Keep the reference photo's face, likeness, pose and overall composition intact — "
+        "this is the same person in the same shot, lightly edited, NOT a new scene.\n"
+        f"[IDENTITY] {id_body}\n"
+        f"[CORE VIBE] {core}\n"
+        f"[KEEP FROM REFERENCE] {keep}\n"
+        f"[ADJUSTMENTS]\n{adj_lines}\n"
+        f"[AVOID] {avoid}\n"
+        f"{style_line}"
+        "Only change what the ADJUSTMENTS list specifies (expression, lighting/tone, minor "
+        "props, background emphasis, wardrobe nudges). Do NOT move the camera, change the "
+        "location, or restage the pose. The result must still read as a real phone photo of "
+        "this person, now tuned to express the CORE VIBE and suitable as a profile cover: "
+        "clear face, natural expression, immediate curiosity."
+        f"{mood_hint}\n\n"
+        f"{HAND_OBJECT_GUARD}\n\n"
+        f"{TATTOO_GUARD}\n\n"
+        f"{NO_TEXT_GUARD}"
+    )
+
+
 # real track：图片只是参考、不是人设内容本身（仅注入 real track 人设 prompt，且仅在有图时）。
 REAL_IMAGE_SPRINGBOARD_RULES = """
 # 📷 图片是推理起点，不是要复述的内容（非常重要）
@@ -390,13 +503,14 @@ REAL_STRANGER_RELATION_RULES = """
 # 🤝 和用户的关系（覆盖上面 schema 里相关字段的通用说明）
 - 角色和用户【默认就是在 dating app 上刚匹配到的陌生人】——彼此不认识、没有前情、没有旧交。不要编"多年老友／欠一句道歉的人／曾一起经历过某事"这类关系厚度。
 - relationship_with_user【可以直接不输出】（留空字符串或省略该键）：因为默认关系就是"App 上刚划到彼此的陌生人"，无需特意交代。relationship_mode 里涉及用户的部分同理，按"刚认识的陌生人"处理即可。
-- opening（开场白）就写成【和陌生人搭话】的口吻：像 dating app 上第一次发消息——礼貌又带点好奇/试探/开场白式的自然搭讪，符合角色自己的性格与说话风格。不要写成已经很熟的人之间的对话，不要预设用户是谁、和 TA 什么交情。opening.note 通常可留空（关系就是"App 上刚匹配"，没有额外前情要交代）。"""
+- 【"刚匹配"是背景语境，不是开场白的内容】角色知道对面是刚匹配到的人，这个语境决定了它是第一次说话、语气上是初识的分寸。但开场白要说的【不是"我们匹配了"这件事本身】——匹配只是"为什么此刻能对 TA 说话"的前提。理想的第一句：跳过这个前提，直接从这个角色【自己】身上长出来（TA 的性格、说话方式、最勾人的那一点），让陌生用户一眼觉得"这人有点意思、我想接话"，而不是收到一句换谁都能发、也能发给任何人的客气话。开场和结尾的话头都应该只有【这一个人】会说得出来。
+- opening.note 通常可留空（关系就是"App 上刚匹配"，没有额外前情要交代）。"""
 
 REAL_STRANGER_RELATION_RULES_KO = """
 # 🤝 유저와의 관계(위 schema 관련 필드의 일반 설명을 덮어씀)
 - 캐릭터와 유저는 【기본적으로 데이팅 앱에서 막 매칭된 낯선 사이】다 — 서로 모르고, 전사(前史)도 없고, 옛 인연도 없다. "몇 년째 친구／사과 빚진 사이／같이 겪은 일" 같은 관계의 두께를 지어내지 말 것.
 - relationship_with_user는 【그냥 출력하지 않아도 된다】(빈 문자열이나 키 생략): 기본 관계가 "앱에서 막 서로를 발견한 낯선 사이"라 굳이 설명할 필요가 없다. relationship_mode의 유저 관련 부분도 마찬가지로 "막 알게 된 낯선 사이"로 처리하면 된다.
-- opening(오프닝)은 【낯선 사람에게 말 거는】 톤으로 쓴다: 데이팅 앱에서 처음 메시지 보내듯 — 예의 있으면서 약간의 호기심/탐색/자연스러운 첫 인사, 캐릭터 자신의 성격과 말투에 맞게. 이미 친한 사이의 대화처럼 쓰지 말고, 유저가 누구인지·무슨 사이인지 전제하지 말 것. opening.note는 대체로 비워도 된다(관계가 "앱에서 막 매칭"이라 따로 전할 전사가 없다)."""
+- 【"막 매칭"은 배경 맥락이지 오프닝의 내용이 아니다】캐릭터는 상대가 막 매칭된 사람인 걸 안다 — 이 맥락이 '처음 말 거는 것', '초면다운 거리감'을 정한다. 하지만 오프닝이 말할 것은 【"우리 매칭됐네"라는 사실 자체가 아니다】 — 매칭은 '지금 왜 이 사람에게 말을 걸 수 있는가'의 전제일 뿐이다. 이상적인 첫 마디: 그 전제는 건너뛰고, 이 캐릭터 【자신】에게서 바로 자라 나온다(성격, 말투, 가장 끌리는 한 가지). 낯선 유저가 한눈에 "이 사람 좀 흥미로운데, 답하고 싶다"고 느끼게 — 누구에게나 보낼 수 있고 아무나 보낼 수 있는 인사말 말고. 첫 마디도 끝맺음의 말도 【이 한 사람만】 할 수 있는 것이어야 한다. 이미 친한 사이의 대화처럼 쓰지 말고, 유저가 누구인지·무슨 사이인지 전제하지 말 것. opening.note는 대체로 비워도 된다(관계가 "앱에서 막 매칭"이라 따로 전할 전사가 없다)."""
 
 # real track：帖子=封面那个卖点的延续（仅注入 real track 的发帖/feed prompt）。
 # 与 cover 规则同一条底线：先定"用户为什么想靠近这个人"，整组帖子都为这一条卖点服务；
@@ -494,11 +608,12 @@ def _lang_clause() -> str:
 
 
 # ==========================================================================
-# 人设多样性：角色类型骰子 + 职业种子池 + 已用元素避让
+# 人设多样性：职业种子池 + 已用元素避让
 #
-# 可选字段"写不写"由编排层掷骰子决定后注入指令，而不是让模型自选——
-# 模型面对 schema 永远倾向填满（实测 62 个角色 hidden_side/decisive_event
-# 100% 非空、"반전 매력"标签占 60%、职业塌缩到自由职业创意人）。
+# 说明：早期用"角色类型骰子（drama/plain/passion）"强制注入指令 + 后处理清空字段，
+# 来对抗"模型总把 schema 填满、总往创伤模板塌缩"。但强制写法会误伤——把本该丰满的
+# 角色按骰子结果削成只剩 summary。现已移除该强制逻辑，personality 的正/负/只写
+# summary 全部交给 PERSONALITY_RULES 引导模型按这张图这个人自主决定（见该规则）。
 # ==========================================================================
 def _load_persona_seeds() -> dict:
     p = config.DATA_DIR.parent / "app" / "data" / "persona_seeds.json"
@@ -511,54 +626,6 @@ def _load_persona_seeds() -> dict:
 
 _PERSONA_SEED_DATA = _load_persona_seeds()
 
-PERSONA_ARCHETYPES = ("drama", "plain", "passion")
-_ARCHETYPE_WEIGHTS = (0.35, 0.35, 0.30)
-
-_ARCHETYPE_DIRECTIVES = {
-    "zh": {
-        "drama": (
-            "反差解密型：这个角色有真正的 hidden_side 和完整的 personality 因果链"
-            "（decisive_event → response → cost → desire_outer ↔ desire_inner），"
-            "按反差分层铁律写出『聊出来才解锁』的反转。"
-        ),
-        "plain": (
-            "平实日常型：personality 只写 summary，decisive_event 及之后的字段全部输出空字符串；"
-            "hidden_side 也输出空字符串 \"\"；不要写任何创伤、秘密或反转。"
-            "角色靠具体的生活质感、鲜明的行为习惯和说话方式立住——"
-            "『真实、松弛、有生活』本身就是魅力，不需要反转来撑。"
-        ),
-        "passion": (
-            "热爱驱动型：性格源头是正面的（长期沉浸的热爱/一个榜样/被好好爱过给的底气），"
-            "decisive_event 写正面经历，cost 写这种底色的盲区（如笃定→听不进劝、慷慨→不设防）；"
-            "hidden_side 至多写很轻的一层（不轻易示人的笨拙面/软肋），也可以留空——不要写黑暗秘密。"
-        ),
-    },
-    "ko": {
-        "drama": (
-            "반전 해금형: 진짜 hidden_side와 완전한 personality 인과 사슬"
-            "(decisive_event → response → cost → desire_outer ↔ desire_inner)을 갖춘다. "
-            "반전 레이어 원칙대로 '대화로 해금되는' 반전을 설계한다."
-        ),
-        "plain": (
-            "담백한 일상형: personality는 summary만 쓰고 decisive_event 이하 필드는 전부 빈 문자열로 출력한다; "
-            "hidden_side도 빈 문자열 \"\"; 트라우마·비밀·반전을 일절 쓰지 않는다. "
-            "구체적인 생활 질감, 선명한 행동 습관과 말투로 캐릭터를 세운다 — "
-            "'진짜 같고 느슨하고 생활감 있는' 것 자체가 매력이라 반전이 필요 없다."
-        ),
-        "passion": (
-            "열정 구동형: 성격의 뿌리가 긍정적이다(오래 빠져든 무언가/롤모델/충분히 사랑받은 든든함). "
-            "decisive_event는 긍정적 경험으로, cost는 그 바탕색의 사각지대로(확신→조언 안 들음, 너그러움→무방비 등); "
-            "hidden_side는 아주 가벼운 층(쉽게 안 보여주는 어설픈 면)까지만, 비워도 된다 — 어두운 비밀 금지."
-        ),
-    },
-}
-
-
-def sample_archetype() -> str:
-    """编排层掷骰子决定本次角色类型，调用方应把结果存进角色 record。"""
-    return random.choices(
-        PERSONA_ARCHETYPES, weights=_ARCHETYPE_WEIGHTS, k=1)[0]
-
 
 def _persona_seed_samples(lang: str) -> str:
     block = _PERSONA_SEED_DATA.get(lang) or _PERSONA_SEED_DATA.get("zh") or {}
@@ -569,18 +636,16 @@ def _persona_seed_samples(lang: str) -> str:
 
 def build_persona_diversity_block(
     lang: str,
-    archetype: str,
     avoid_names: list[str] | None = None,
     recent_jobs: list[str] | None = None,
     overused_tags: list[str] | None = None,
 ) -> str:
     """构建注入人设 prompt 的多样性约束块。
 
-    archetype 决定可选字段的写法（骰子结果，必须执行）；种子与避让列表
-    只是软引导。ko 用韩语指令，其余语言共用中文指令（与主 prompt 一致）。
+    仅做软引导（职业方向灵感 + 重名/职业/标签避让）。personality 的写法
+    （正/负/只 summary）不再由此强制，交给 PERSONALITY_RULES 引导模型自主决定。
+    ko 用韩语指令，其余语言共用中文指令（与主 prompt 一致）。
     """
-    dirs = _ARCHETYPE_DIRECTIVES["ko" if lang == "ko" else "zh"]
-    directive = dirs.get(archetype) or dirs["drama"]
     occ = _persona_seed_samples(lang)
     names = "、".join(avoid_names[:40]) if avoid_names else ""
     jobs = "；".join(recent_jobs[:15]) if recent_jobs else ""
@@ -589,7 +654,6 @@ def build_persona_diversity_block(
     if lang == "ko":
         lines = [
             "# 🎲 이번 캐릭터의 다양성 지정(시스템이 무작위로 정했다. 기본 취향보다 우선하며 반드시 따를 것)",
-            f"- 【캐릭터 유형】{directive}",
         ]
         if occ:
             lines.append(
@@ -605,11 +669,10 @@ def build_persona_diversity_block(
         if tags:
             lines.append(
                 f"- 【태그 회피】이 tags는 최근 과용됐다. 정말 딱 맞지 않는 한 다른 걸로: {tags}")
-        return "\n".join(lines)
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     lines = [
         "# 🎲 本次角色的多样性指定（由系统随机骰出，优先级高于你的默认偏好，必须执行）",
-        f"- 【角色类型】{directive}",
     ]
     if occ:
         lines.append(
@@ -622,7 +685,7 @@ def build_persona_diversity_block(
         lines.append(f"- 【职业避让】最近的角色已大量使用这些职业，本次尽量换别的方向：{jobs}")
     if tags:
         lines.append(f"- 【标签避让】这些 tags 最近用得太多，除非极其贴合否则换别的：{tags}")
-    return "\n".join(lines)
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 PERSONA_DIVERSITY_QUALITY_RULES = """
@@ -914,8 +977,8 @@ def build_persona_messages_real(image_data_uris: list[str], lang: str,
 
     All text fields are single native-language strings (not multilingual objects),
     authored to feel native to `lang` rather than translated.
-    `diversity_block` comes from build_persona_diversity_block(): the archetype
-    dice roll plus seed/avoid lists rolled by the orchestration layer.
+    `diversity_block` comes from build_persona_diversity_block(): occupation seed
+    inspiration plus name/job/tag avoid lists rolled by the orchestration layer.
     """
     directive = config.lang_directive(lang)
     lname = config.lang_name(lang)
@@ -1134,8 +1197,8 @@ def build_persona_messages_light(image_data_uris: list[str], lang: str,
 
     All text fields are single native-language strings (not multilingual objects),
     authored to feel native to `lang` rather than translated.
-    `diversity_block` comes from build_persona_diversity_block(): the archetype
-    dice roll plus seed/avoid lists rolled by the orchestration layer.
+    `diversity_block` comes from build_persona_diversity_block(): occupation seed
+    inspiration plus name/job/tag avoid lists rolled by the orchestration layer.
     """
     directive = config.lang_directive(lang)
     lname = config.lang_name(lang)
@@ -1332,8 +1395,8 @@ def build_persona_messages_adult(image_data_uris: list[str], lang: str,
 
     All text fields are single native-language strings (not multilingual objects),
     authored to feel native to `lang` rather than translated.
-    `diversity_block` comes from build_persona_diversity_block(): the archetype
-    dice roll plus seed/avoid lists rolled by the orchestration layer.
+    `diversity_block` comes from build_persona_diversity_block(): occupation seed
+    inspiration plus name/job/tag avoid lists rolled by the orchestration layer.
     """
     directive = config.lang_directive(lang)
     lname = config.lang_name(lang)
@@ -3627,10 +3690,21 @@ _IMAGE_SPEC_TXT = """为下面每条【已定稿】的帖子设计配图 spec。
 # 待配图的帖子（content 已定，禁止修改；只为每条产出图像 spec）
 {posts_block}
 
+# ⭐最高优先级：整组像真人相册，每条【明显不同】
+你是在为【同一个人的一组帖子】统一策展配图，不是孤立地一条条配。把这几条放在一起看：
+- 【必须拉开差异】同组内每条的 shot_size（脸部特写/半身/全身/局部/人在环境里很小）、
+  angle（平视/俯拍/仰拍/镜子/车窗）、capture_mode（前置自拍/后置/镜子/定时器/朋友拍/桌面POV）、
+  景别与构图【必须逐条明显不同】。绝不允许出现两条都是"怼脸半身自拍""同一顶帽子同一角度"这类雷同。
+- 【先做全局分工，再逐条细化】先看这一组里 selfie 有几条，给它们各分一个【不同的角色】：
+  一条近脸、一条全身OOTD、一条 candid/侧背、一条局部/环境大景……然后才落每条的具体 spec。
+- 服装/发型/配饰也别每条都一样；真人不会一组九张都戴同一顶帽子、同一件白T。
+
 # 配图原则
 - 图必须呼应这条的 content 与角色人设；发帖人视角要成立（自拍/镜子/定时器/朋友拍/桌面 POV/截图/拼贴），不要第三者偷拍。
-- 若给了"真实拍摄范例"：只借它的构图、机位、表情、光影、版式【手法】，绝不照抄它写死的具体衣服/物件/文字/品牌；穿搭与场景一律从角色人设长出来。
-- 同一批帖子之间 capture_mode/filter/shot_size/angle 要明显不同，别一个味。
+- 【真实拍摄范例只是弱灵感】给了范例只为帮你打开某条的思路，借它的某一点手法即可，
+  绝不逐字照搬、更不能让多条帖子被范例带成同一个样子；范例之间、帖子之间都要保持差异。
+  绝不照抄范例写死的具体衣服/物件/文字/品牌；穿搭与场景一律从角色人设长出来。
+- 如果某条范例和"整组要拉开差异"冲突，优先服从差异——宁可不用范例，也不要拍雷同。
 
 # photo_kind 选择（image_type=photo/composite 时）
 {photo_kind_guide}

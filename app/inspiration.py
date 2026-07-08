@@ -132,23 +132,33 @@ def _scored_indices(query: str, pool_size: int) -> list:
     return _scored_indices_lexical(query, pool_size)
 
 
-def retrieve(vibe, content: str = "", k: int = 3, pool: int = 60) -> list:
+def retrieve(vibe, content: str = "", k: int = 3, pool: int = 80,
+             exclude: set | None = None) -> "tuple[list, list]":
     """检索 k 条灵感 item。
 
     vibe: 角色气质（list 或 str），配 persona；
     content: 这条帖子的文案，配 event/mood；
-    先用 (vibe + content) 匹配缩小到 pool 候选，再随机抽 k 条。
-    库缺失时返回 []。
+    query 以 content 为主（content 决定这条帖子拍什么），vibe 只轻度带入，
+    避免不同帖子因共享同一 vibe 而召回高度雷同的候选池。
+    exclude: 跨帖子已用过的 src 集合，命中则跳过，保证多样。
+    返回 (items, srcs)，srcs 供调用方累加进 exclude 做跨帖去重。
+    库缺失时返回 ([], [])。
     """
     if not _ITEMS:
-        return []
+        return [], []
+    exclude = exclude or set()
     vibe_str = " ".join(vibe) if isinstance(vibe, (list, tuple)) else str(vibe or "")
-    query = f"{vibe_str} {content}".strip()
+    # content 为主、vibe 只带一次，弱化共享气质对候选池的支配
+    query = f"{content} {content} {vibe_str}".strip() if content else vibe_str
     cand = _scored_indices(query, pool) if query else []
     if not cand:
         cand = list(range(len(_ITEMS)))
-    picked = random.sample(cand, min(k, len(cand)))
-    return [_ITEMS[i] for i in picked]
+    cand = [i for i in cand if _ITEMS[i].get("src") not in exclude] or cand
+    random.shuffle(cand)
+    picked = cand[:min(k, len(cand))]
+    items = [_ITEMS[i] for i in picked]
+    srcs = [_ITEMS[i].get("src") for i in picked]
+    return items, srcs
 
 
 _FIELD_LABELS = {
