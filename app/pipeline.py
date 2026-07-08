@@ -995,11 +995,13 @@ def build_cover_spec(char_id: str) -> dict:
         build_identity(char_id)
         record = load_character(char_id)
 
+    # 原图作为神似/气质参考传给规划（real track 的 prompt 里明确：只参考长相与
+    # 气质，不要复刻原图的场景/构图/道具，要从人设重新设计一个体现特质的签名瞬间）。
+    track = record.get("track", "real")
     cover_ref = _first_source_image(record)
     cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
     messages = prompts.build_cover_spec_messages(
-        record["persona"], record["identity"], cover_ref_uri,
-        track=record.get("track", "real"))
+        record["persona"], record["identity"], cover_ref_uri, track=track)
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
         "variable": spec.get("variable", {}),
