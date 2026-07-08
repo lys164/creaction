@@ -17,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-from . import api_client, config, landing, prompts, storage, styles, voices
+from . import api_client, config, landing, library, prompts, storage, styles, voices
 
 
 # 按角色的进程内互斥锁：所有对同一 record 的读-改-写都应持锁，
@@ -269,6 +269,9 @@ def _postprocess_persona(persona: dict, archetype: str | None = None) -> dict:
     """
     if not isinstance(persona, dict):
         return persona
+    # used_seeds 是灵感手牌的生产台账（real track），不属于人设内容；
+    # 正常路径在生成处已取走，这里防御性剥离，保证任何路径都不落进 persona。
+    persona.pop("used_seeds", None)
     if _is_plain_human(persona):
         persona.pop("situational_reactions", None)
     if archetype == "plain":
@@ -282,6 +285,50 @@ def _postprocess_persona(persona: dict, archetype: str | None = None) -> dict:
     return persona
 
 
+def _charm_audit(persona: dict, lang: str) -> dict:
+    """real track 冷读验收（转述测试）。API 异常时返回 skip，绝不阻塞生产。"""
+    try:
+        messages = prompts.build_persona_audit_messages(persona, lang)
+        res = api_client.chat_json(messages, temperature=0.2)
+        if isinstance(res, dict) and res.get("verdict") in ("pass", "fail"):
+            return {
+                "verdict": res["verdict"],
+                "retell": str(res.get("retell", "")),
+                "reason": str(res.get("reason", "")),
+            }
+    except Exception:
+        pass
+    return {"verdict": "skip", "retell": "", "reason": "audit unavailable"}
+
+
+def _audit_retry_hint(user_hint: str, audit: dict) -> str:
+    """把冷读验收的失败意见拼回创作补充要求，用于打回重写。"""
+    feedback = (
+        "# 上一版未通过冷读验收（转述测试）\n"
+        f"陌生读者只能转述出：「{audit.get('retell', '')}」；判定理由：{audit.get('reason', '')}。\n"
+        "重写时修正：给出更具体、带画面、只属于这个人的行为与反差，"
+        "让粉丝能用一句独一无二的话转述 TA；禁止退回泛用形容词。"
+    )
+    base = user_hint.strip()
+    return f"{base}\n\n{feedback}" if base else feedback
+
+
+def _generate_persona_real(uris: list[str], lang: str, user_hint: str,
+                           diversity_block: str, archetype: str,
+                           track: str) -> tuple[dict, list[str]]:
+    """一次人设生成调用：返回 (persona, 模型回报的 used_seeds)。"""
+    messages = prompts.build_persona_messages(
+        uris, lang, user_hint=user_hint, diversity_block=diversity_block,
+        track=track)
+    persona = api_client.chat_json(messages, temperature=0.85)
+    used: list = []
+    if isinstance(persona, dict):
+        raw = persona.pop("used_seeds", [])
+        if isinstance(raw, list):
+            used = raw
+    return _postprocess_persona(persona, archetype), used
+
+
 def create_persona_one_lang(image_paths: list[str], lang: str,
                             user_hint: str = "", group_id: str | None = None,
                             track: str = "real", source: str = "") -> dict:
@@ -291,11 +338,30 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
     names, jobs, tags = _recent_persona_traits(lang)
     diversity_block = prompts.build_persona_diversity_block(
         lang, archetype, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
-    messages = prompts.build_persona_messages(
-        uris, lang, user_hint=user_hint, diversity_block=diversity_block,
-        track=track)
-    persona = api_client.chat_json(messages, temperature=0.85)
-    persona = _postprocess_persona(persona, archetype)
+    # real track：发一手灵感牌（性格/职业库，冷却过滤后随机），
+    # 模型自主决定用不用，用了哪条通过 used_seeds 回报，编排层据此销账。
+    if track == "real":
+        hand = library.checkout()
+        hand_block = library.hand_block(hand, lang)
+        if hand_block:
+            diversity_block = f"{diversity_block}\n\n{hand_block}"
+
+    persona, used_seeds = _generate_persona_real(
+        uris, lang, user_hint, diversity_block, archetype, track)
+
+    # real track：冷读验收（转述测试），fail 则带意见打回重写一次。
+    audits: list[dict] = []
+    if track == "real":
+        audit = _charm_audit(persona, lang)
+        audits.append(audit)
+        if audit["verdict"] == "fail":
+            persona, used_seeds = _generate_persona_real(
+                uris, lang, _audit_retry_hint(user_hint, audit),
+                diversity_block, archetype, track)
+            audits.append(_charm_audit(persona, lang))
+        used_seeds = library.commit(used_seeds)
+    else:
+        used_seeds = []
     _randomize_voice(persona, lang)
 
     char_id = _new_id("char")
@@ -309,6 +375,8 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         "archetype": archetype,
         "track": track,
         "source": source,
+        "used_seeds": used_seeds,
+        "charm_audit": audits or None,
         "persona": persona,
         "identity": None,
         "cover": None,
@@ -381,11 +449,26 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         diversity_block = prompts.build_persona_diversity_block(
             lang, archetype, avoid_names=names, recent_jobs=jobs,
             overused_tags=tags)
-        messages = prompts.build_persona_messages(
-            uris, lang, user_hint=user_hint, diversity_block=diversity_block,
-            track=track)
-        persona = api_client.chat_json(messages, temperature=0.85)
-        record["persona"] = _postprocess_persona(persona, archetype)
+        # real track：发灵感手牌 + 冷读验收，与 create_persona_one_lang 同构。
+        if track == "real":
+            hand = library.checkout()
+            hand_block = library.hand_block(hand, lang)
+            if hand_block:
+                diversity_block = f"{diversity_block}\n\n{hand_block}"
+        persona, used_seeds = _generate_persona_real(
+            uris, lang, user_hint, diversity_block, archetype, track)
+        audits: list[dict] = []
+        if track == "real":
+            audit = _charm_audit(persona, lang)
+            audits.append(audit)
+            if audit["verdict"] == "fail":
+                persona, used_seeds = _generate_persona_real(
+                    uris, lang, _audit_retry_hint(user_hint, audit),
+                    diversity_block, archetype, track)
+                audits.append(_charm_audit(persona, lang))
+            record["used_seeds"] = library.commit(used_seeds)
+            record["charm_audit"] = audits
+        record["persona"] = persona
         _randomize_voice(record["persona"], lang)
         record["archetype"] = archetype
     record.pop("cover_spec", None)
@@ -915,7 +998,8 @@ def build_cover_spec(char_id: str) -> dict:
     cover_ref = _first_source_image(record)
     cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
     messages = prompts.build_cover_spec_messages(
-        record["persona"], record["identity"], cover_ref_uri)
+        record["persona"], record["identity"], cover_ref_uri,
+        track=record.get("track", "real"))
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
         "variable": spec.get("variable", {}),
@@ -990,7 +1074,15 @@ def generate_cover(
     )
 
     if use_reference is None:
-        use_reference = prompts.is_photographic_style(style["prompt"])
+        # real track：封面不拼原图——断开与真人原图的"形似"（肖像风险），
+        # 也让封面真正服从 cover_spec 设计的签名瞬间而不被参考图构图拉回。
+        # "神似"仍由 identity 文本承载（identity 照旧从原图提取）。
+        # 后续帖子 i2i 锚定的是封面，脸部一致性链不受影响。
+        # 显式传 use_reference=True 可覆盖（用于 A/B 对比）。
+        if record.get("track", "real") == "real":
+            use_reference = False
+        else:
+            use_reference = prompts.is_photographic_style(style["prompt"])
     image_urls = None
     if use_reference:
         src = _first_source_image(record)
@@ -1036,9 +1128,11 @@ def _render_post_image(record: dict, post: dict, style: dict) -> dict:
     save_path = config.IMAGE_DIR / f"{char_id}_{post['post_id']}.png"
     image_urls = None
     if prompts.is_photographic_style(style["prompt"]):
-        src = _first_source_image(record)
-        if src:
-            image_urls = [api_client.file_to_data_uri(src)]
+        # 统一取参：real track 走封面锚（绝不直连原图，避免形似泄漏），
+        # 其他 track 维持原行为（封面优先、原图兜底）。
+        ref = _ref_image_uri_for_selfie(record)
+        if ref:
+            image_urls = [ref]
     res = api_client.generate_image(
         prompt,
         size=config.IMAGE_SIZE_POST,
@@ -1324,12 +1418,18 @@ def list_batches(char_id: str) -> list[dict]:
 # Instagram feed: infer recent N posts, render selfie(i2i)/photo(t2i) images
 # --------------------------------------------------------------------------
 def _ref_image_uri_for_selfie(record: dict) -> str | None:
-    """Prefer the redrawn cover as the i2i reference; fall back to source image."""
+    """Prefer the redrawn cover as the i2i reference; fall back to source image.
+
+    real track 不做原图兜底：封面已与真人原图解耦（形似只能来自封面），
+    没封面时宁可无参考生成，也不把真人的脸直接带进帖子图。
+    """
     cover = record.get("cover") or {}
     if cover.get("local_path") and storage.ensure_file(Path(cover["local_path"])):
         return api_client.file_to_data_uri(cover["local_path"])
     if cover.get("url"):
         return cover["url"]
+    if record.get("track", "real") == "real":
+        return None
     src = _first_source_image(record)
     if src:
         return api_client.file_to_data_uri(src)
