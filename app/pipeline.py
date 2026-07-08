@@ -17,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-from . import api_client, config, inspiration, landing, library, prompts, storage, styles, voices
+from . import api_client, config, landing, library, prompts, storage, styles, voices
 
 
 # 按角色的进程内互斥锁：所有对同一 record 的读-改-写都应持锁，
@@ -188,7 +188,6 @@ def list_characters() -> list[dict]:
 # --------------------------------------------------------------------------
 # Step 1: image -> persona  (one separate character PER language)
 # --------------------------------------------------------------------------
-_HUMAN_SPECIES_MARKERS = ("人类", "인간", "human", "人間")
 
 
 def _job_snippet(social_status) -> str:
@@ -244,25 +243,12 @@ def _recent_persona_traits(lang: str, exclude_char_id: str | None = None,
     return names, jobs, overused[:8]
 
 
-def _is_plain_human(persona: dict) -> bool:
-    """True when the character is an ordinary human with no special premise."""
-    species = persona.get("species")
-    if isinstance(species, str) and species.strip():
-        s = species.strip().lower()
-        if not any(m in s for m in _HUMAN_SPECIES_MARKERS):
-            return False
-    premise = persona.get("premise")
-    return not (isinstance(premise, str) and premise.strip())
-
-
 def _postprocess_persona(persona: dict) -> dict:
-    """Enforce conditional-field rules the model tends to ignore.
+    """Strip production-only scratch keys that must never land in the persona.
 
-    - situational_reactions is only for non-human / special-premise characters;
-      strip it from ordinary humans (observed 61/62 filled despite the rule).
-
-    personality 的写法（正/负/只写 summary）不再在这里强制，交给 PERSONALITY_RULES
-    引导模型按角色自主决定；本函数只做与角色形态无关的清理。
+    situational_reactions 现在【所有角色都写】（不同情绪下的表现差异，尤其线上聊天），
+    不再按"是否普通人"剥离；personality 的写法也交给 PERSONALITY_RULES 引导，本函数只
+    清理与人设内容无关的生产台账字段。
     """
     if not isinstance(persona, dict):
         return persona
@@ -272,8 +258,6 @@ def _postprocess_persona(persona: dict) -> dict:
     # _reasoning 是"先推理出这个人是谁"的思考区（real track 人设 prompt 要求作为第一个
     # 字段输出），只用于引导模型先想清人再写卖点，不属于人设内容，剥离。
     persona.pop("_reasoning", None)
-    if _is_plain_human(persona):
-        persona.pop("situational_reactions", None)
     return persona
 
 
@@ -337,7 +321,9 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
     # real track：发一手灵感牌（性格/职业库，冷却过滤后随机），
     # 模型自主决定用不用，用了哪条通过 used_seeds 回报，编排层据此销账。
-    if track in ("real", "kdrama"):
+    # kdrama 不发牌：人设从韩剧主角推理（主动性/反差/user_role/opening_scene）+图片长出来，
+    # 随机职业/性格卡会干扰这条方法论。kdrama 同 light/adult 走无牌路径。
+    if track == "real":
         hand = library.checkout()
         hand_block = library.hand_block(hand, lang)
         if hand_block:
@@ -347,8 +333,10 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         uris, lang, user_hint, diversity_block, track)
 
     # real track：冷读验收（转述测试），fail 则带意见打回重写一次。
+    # kdrama 不走此验收：它是 real track 的"粉丝转述测试"，retry 意见也是 real 方法论
+    # （让粉丝能一句转述 TA），与韩剧主角/对手戏方法论冲突——kdrama 同 light/adult 不发牌不验收。
     audits: list[dict] = []
-    if track in ("real", "kdrama"):
+    if track == "real":
         audit = _charm_audit(persona, lang)
         audits.append(audit)
         if audit["verdict"] == "fail":
@@ -612,6 +600,7 @@ def regenerate_opening(char_id: str, user_hint: str = "") -> dict:
     persona = record.get("persona", {})
     messages = prompts.build_opening_messages(
         persona, record.get("lang", config.LANGUAGES[0]), user_hint=user_hint,
+        track=record.get("track", "real"),
     )
     result = api_client.chat_json(messages, temperature=0.9)
     opening = result.get("opening", result) if isinstance(result, dict) else {}
@@ -1078,6 +1067,7 @@ def generate_cover(
         variable=cover_spec.get("variable"),
         scene=cover_spec.get("scene"),
         shooting=cover_spec.get("shooting"),
+        track=record.get("track", "real"),
     )
     if use_reference is None:
         # 拼入原图做 i2i——原图只锁"神似"（脸/发型/气质），场景/距离/构图/入口由 cover_spec
@@ -1544,23 +1534,25 @@ def generate_instagram_posts(
 
     # 1) infer the feed (single LLM call, native language)
     avoid_kinds = _sibling_used_photo_kinds(record)
-    # real 链路：按角色 vibe 检索几条真实拍摄范例，作【整组共享的氛围灵感】
-    # （不绑定到具体帖子；单次调用里模型自己发散，保住策展多样性）
-    feed_inspo = ""
-    if record.get("track", "real") == "real":
-        vibe = persona.get("personality") or persona.get("vibe") or []
-        items, _ = inspiration.retrieve(vibe, content="", k=4)
-        feed_inspo = inspiration.format_refs(items)
+    # 注：vibe 氛围灵感已下线（SELFIE_SCHEMA 的 filter/shot_size/angle/framing 本就覆盖
+    # 色调·景深·构图，且给的是发散选项清单，再塞检索到的具体调子反而收敛）。
+    # 拼贴范例（collage）仍在 prompts 内注入。若要重开氛围灵感，见 app/inspiration.py。
     feed = api_client.chat_json(
         prompts.build_ig_feed_messages(
             persona, record.get("lang", config.LANGUAGES[0]), n=n,
             avoid_kinds=avoid_kinds, track=record.get("track", "real"),
-            feed_inspo=feed_inspo,
         ),
         temperature=0.95,
     )
+    # real 链路先输出 {persona_read, posts}：persona_read 是"这个人凭什么有意思"的
+    # 自我判断（reasoning），posts 才是帖子。其它链路仍直接返回数组。
+    persona_read = None
     if isinstance(feed, dict):
-        feed = [feed]
+        if isinstance(feed.get("posts"), list):
+            persona_read = feed.get("persona_read")
+            feed = feed["posts"]
+        else:
+            feed = [feed]
     max_posts = n if n else 9
 
     posts = []
@@ -1607,6 +1599,7 @@ def generate_instagram_posts(
         "requested_n": n,
         "n": len(posts),
         "with_images": with_images,
+        "persona_read": persona_read,
         "posts": posts,
     }
     # 单角色只保留最新一份，重新生成直接覆盖
