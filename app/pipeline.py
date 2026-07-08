@@ -307,18 +307,24 @@ def _audit_retry_hint(user_hint: str, audit: dict) -> str:
 
 def _generate_persona_real(uris: list[str], lang: str, user_hint: str,
                            diversity_block: str,
-                           track: str) -> tuple[dict, list[str]]:
-    """一次人设生成调用：返回 (persona, 模型回报的 used_seeds)。"""
+                           track: str) -> tuple[dict, list[str], object]:
+    """一次人设生成调用：返回 (persona, used_seeds, reasoning)。
+
+    reasoning 是模型在 _reasoning 字段里做的"先推理出这个人"的思考，从 persona 里
+    剥出来单独保存（不进下游 prompt），仅用于在前端"完整人设 JSON"里展示。
+    """
     messages = prompts.build_persona_messages(
         uris, lang, user_hint=user_hint, diversity_block=diversity_block,
         track=track)
     persona = api_client.chat_json(messages, temperature=0.85)
     used: list = []
+    reasoning = None
     if isinstance(persona, dict):
         raw = persona.pop("used_seeds", [])
         if isinstance(raw, list):
             used = raw
-    return _postprocess_persona(persona), used
+        reasoning = persona.get("_reasoning")
+    return _postprocess_persona(persona), used, reasoning
 
 
 def create_persona_one_lang(image_paths: list[str], lang: str,
@@ -331,22 +337,22 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
     # real track：发一手灵感牌（性格/职业库，冷却过滤后随机），
     # 模型自主决定用不用，用了哪条通过 used_seeds 回报，编排层据此销账。
-    if track == "real":
+    if track in ("real", "kdrama"):
         hand = library.checkout()
         hand_block = library.hand_block(hand, lang)
         if hand_block:
             diversity_block = f"{diversity_block}\n\n{hand_block}"
 
-    persona, used_seeds = _generate_persona_real(
+    persona, used_seeds, reasoning = _generate_persona_real(
         uris, lang, user_hint, diversity_block, track)
 
     # real track：冷读验收（转述测试），fail 则带意见打回重写一次。
     audits: list[dict] = []
-    if track == "real":
+    if track in ("real", "kdrama"):
         audit = _charm_audit(persona, lang)
         audits.append(audit)
         if audit["verdict"] == "fail":
-            persona, used_seeds = _generate_persona_real(
+            persona, used_seeds, reasoning = _generate_persona_real(
                 uris, lang, _audit_retry_hint(user_hint, audit),
                 diversity_block, track)
             audits.append(_charm_audit(persona, lang))
@@ -367,6 +373,7 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         "source": source,
         "used_seeds": used_seeds,
         "charm_audit": audits or None,
+        "reasoning": reasoning,
         "persona": persona,
         "identity": None,
         "cover": None,
@@ -437,26 +444,29 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         diversity_block = prompts.build_persona_diversity_block(
             lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags)
         # real track：发灵感手牌 + 冷读验收，与 create_persona_one_lang 同构。
-        if track == "real":
+        if track in ("real", "kdrama"):
             hand = library.checkout()
             hand_block = library.hand_block(hand, lang)
             if hand_block:
                 diversity_block = f"{diversity_block}\n\n{hand_block}"
-        persona, used_seeds = _generate_persona_real(
+        persona, used_seeds, reasoning = _generate_persona_real(
             uris, lang, user_hint, diversity_block, track)
         audits: list[dict] = []
-        if track == "real":
+        if track in ("real", "kdrama"):
             audit = _charm_audit(persona, lang)
             audits.append(audit)
             if audit["verdict"] == "fail":
-                persona, used_seeds = _generate_persona_real(
+                persona, used_seeds, reasoning = _generate_persona_real(
                     uris, lang, _audit_retry_hint(user_hint, audit),
                     diversity_block, track)
                 audits.append(_charm_audit(persona, lang))
             record["used_seeds"] = library.commit(used_seeds)
             record["charm_audit"] = audits
         record["persona"] = persona
+        record["reasoning"] = reasoning
         _randomize_voice(record["persona"], lang)
+        # 早期"角色类型骰子"已移除；这里剥掉旧存档里遗留的 archetype 键（迁移清理），
+        # 新记录本就不含该键。
         record.pop("archetype", None)
     record.pop("cover_spec", None)
     save_character(record)
@@ -986,29 +996,11 @@ def build_cover_spec(char_id: str) -> dict:
     cover_ref = _first_source_image(record)
     lang = record.get("lang", "ko")
 
-    # real track + adjust 模式（改法1）：重新喂原图，只规划"相对原图的轻量调整指令"。
-    if track == "real" and config.COVER_MODE == "adjust":
-        cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
-        messages = prompts.build_cover_adjust_messages(
-            record["persona"], record["identity"], cover_ref_uri, lang=lang)
-        adjust = api_client.chat_json(messages, temperature=0.6)
-        record["cover_spec"] = {
-            "mode": "adjust",
-            "core_vibe": adjust.get("core_vibe", ""),
-            "keep": adjust.get("keep", ""),
-            "adjustments": adjust.get("adjustments", []),
-            "avoid": adjust.get("avoid", ""),
-            "version": COVER_SPEC_VERSION,
-        }
-        if cover_ref:
-            record["cover_spec"]["reference_image"] = cover_ref
-        save_character(record)
-        return record
-
-    # redesign 模式（默认）：real track 规划封面时【不喂原图】。实测原图信号太强，会把封面
-    # 场景/构图/道具拉回原始快照（如"在洗手间刷牙"），压过"从人设重新设计签名瞬间"的要求。
-    # "神似"由 identity 文本承载；light/adult 仍按原逻辑把原图作为气质参考传入。
-    if track == "real":
+    # real track 规划封面时【不喂原图】——实测规划阶段喂原图会把场景/构图/道具拉回原始
+    # 快照（如"在洗手间刷牙"），压过"从人设重新设计签名瞬间"。所以规划纯文本、只从人设
+    # 设计签名瞬间；到渲染阶段(generate_cover)才拼入原图，让原图只负责锁脸/神似、不影响
+    # 构图。light/adult 仍按原逻辑把原图作为气质参考传入。
+    if track in ("real", "kdrama"):
         cover_ref_uri = None
     else:
         cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
@@ -1017,7 +1009,6 @@ def build_cover_spec(char_id: str) -> dict:
         lang=lang)
     spec = api_client.chat_json(messages, temperature=0.65)
     record["cover_spec"] = {
-        "mode": "redesign",
         "variable": spec.get("variable", {}),
         "shooting": spec.get("shooting", {}),
         "scene": spec.get("scene", {}),
@@ -1067,14 +1058,8 @@ def generate_cover(
         record = load_character(char_id)
 
     cover_spec = record.get("cover_spec") or {}
-    # real track：期望的 spec 形态由 COVER_MODE 决定；若已存的 spec 形态不符（切换了
-    # A/B 模式），也要在 fill_missing 下重建，避免拿旧模式的 spec 去渲染。
-    expected_mode = config.COVER_MODE if record.get("track", "real") == "real" else "redesign"
-    stale_mode = bool(cover_spec) and cover_spec.get("mode", "redesign") != expected_mode
     if mode == "fill_missing" and (
-        not cover_spec
-        or cover_spec.get("version") != COVER_SPEC_VERSION
-        or stale_mode
+        not cover_spec or cover_spec.get("version") != COVER_SPEC_VERSION
     ):
         build_cover_spec(char_id)
         record = load_character(char_id)
@@ -1086,32 +1071,19 @@ def generate_cover(
     identity = record["identity"]
     cover_spec = record.get("cover_spec", {})
     mood = identity.get("persona_mood", "")
-    spec_mode = cover_spec.get("mode") or (
-        "adjust" if cover_spec.get("adjustments") else "redesign")
-
-    if spec_mode == "adjust":
-        # 改法1：原图做 i2i 底，只按轻量调整指令微调（务必拼原图，否则调整无参照）。
-        prompt = prompts.cover_adjust_prompt(
-            identity, cover_spec, style["prompt"], persona_mood=mood)
-        if use_reference is None:
-            use_reference = True
-    else:
-        prompt = prompts.cover_image_prompt(
-            identity,
-            style["prompt"],
-            persona_mood=mood,
-            variable=cover_spec.get("variable"),
-            scene=cover_spec.get("scene"),
-            shooting=cover_spec.get("shooting"),
-        )
-        if use_reference is None:
-            # redesign：real track 封面不拼原图——断开与真人原图的"形似"（肖像风险），
-            # 让封面服从 cover_spec 设计的签名瞬间而不被参考图构图拉回。"神似"由 identity
-            # 文本承载。显式传 use_reference=True 可覆盖（用于 A/B 对比）。
-            if record.get("track", "real") == "real":
-                use_reference = False
-            else:
-                use_reference = prompts.is_photographic_style(style["prompt"])
+    prompt = prompts.cover_image_prompt(
+        identity,
+        style["prompt"],
+        persona_mood=mood,
+        variable=cover_spec.get("variable"),
+        scene=cover_spec.get("scene"),
+        shooting=cover_spec.get("shooting"),
+    )
+    if use_reference is None:
+        # 拼入原图做 i2i——原图只锁"神似"（脸/发型/气质），场景/距离/构图/入口由 cover_spec
+        # 文本重新设计（compose_selfie_prompt 里的 I2I_OVERRIDE_GUARD 明确要求不要复刻原图
+        # 构图）。写实画风且有原图时就用；非写实画风不拼原图。
+        use_reference = prompts.is_photographic_style(style["prompt"])
     image_urls = None
     if use_reference:
         src = _first_source_image(record)
@@ -1457,7 +1429,7 @@ def _ref_image_uri_for_selfie(record: dict) -> str | None:
         return api_client.file_to_data_uri(cover["local_path"])
     if cover.get("url"):
         return cover["url"]
-    if record.get("track", "real") == "real":
+    if record.get("track", "real") in ("real", "kdrama"):
         return None
     src = _first_source_image(record)
     if src:
@@ -1543,56 +1515,6 @@ def _sibling_used_photo_kinds(record: dict, sample_k: int = 4) -> list[str]:
     return kinds
 
 
-def _refine_ig_image_specs(persona: dict, posts: list, lang: str) -> None:
-    """real 链路阶段2：检索真实拍摄范例作灵感，重生成图文帖的图像 spec（就地更新）。
-
-    整段尽量隔离：库缺失、检索为空或 LLM 失败都静默跳过，保留阶段1 的草稿 spec，
-    绝不影响帖子 content 或阻断出图。
-    """
-    if not inspiration.available():
-        return
-    image_posts = [p for p in posts if p.get("format") != "text_only"]
-    if not image_posts:
-        return
-    vibe = persona.get("personality") or persona.get("vibe") or []
-    refs_by_index = {}
-    _used_srcs: set = set()
-    for i, p in enumerate(posts):
-        if p.get("format") == "text_only":
-            continue
-        items, srcs = inspiration.retrieve(
-            vibe, content=p.get("content") or "", k=3, exclude=_used_srcs)
-        _used_srcs.update(s for s in srcs if s)
-        refs = inspiration.format_refs(items)
-        if refs:
-            refs_by_index[i] = refs
-    if not refs_by_index:
-        return
-    try:
-        specs = api_client.chat_json(
-            prompts.build_ig_image_spec_messages_real(persona, posts, lang, refs_by_index),
-            temperature=0.9,
-        )
-    except Exception:  # noqa: BLE001 阶段2 失败不影响主流程
-        return
-    if isinstance(specs, dict):
-        specs = [specs]
-    if not isinstance(specs, list):
-        return
-    for spec in specs:
-        if not isinstance(spec, dict):
-            continue
-        idx = spec.get("index")
-        if not isinstance(idx, int) or not (0 <= idx < len(posts)):
-            continue
-        post = posts[idx]
-        if post.get("format") == "text_only":
-            continue
-        for key in ("image_type", "selfie", "photo_kind", "photo_prompt", "photo_schema"):
-            if key in spec and spec.get(key) is not None:
-                post[key] = spec[key]
-
-
 @_locked
 def generate_instagram_posts(
     char_id: str,
@@ -1622,10 +1544,18 @@ def generate_instagram_posts(
 
     # 1) infer the feed (single LLM call, native language)
     avoid_kinds = _sibling_used_photo_kinds(record)
+    # real 链路：按角色 vibe 检索几条真实拍摄范例，作【整组共享的氛围灵感】
+    # （不绑定到具体帖子；单次调用里模型自己发散，保住策展多样性）
+    feed_inspo = ""
+    if record.get("track", "real") == "real":
+        vibe = persona.get("personality") or persona.get("vibe") or []
+        items, _ = inspiration.retrieve(vibe, content="", k=4)
+        feed_inspo = inspiration.format_refs(items)
     feed = api_client.chat_json(
         prompts.build_ig_feed_messages(
             persona, record.get("lang", config.LANGUAGES[0]), n=n,
             avoid_kinds=avoid_kinds, track=record.get("track", "real"),
+            feed_inspo=feed_inspo,
         ),
         temperature=0.95,
     )
@@ -1651,10 +1581,6 @@ def generate_instagram_posts(
             "topic_seed": item.get("topic_seed"),
             "image": None,
         })
-
-    # 1.5) real 链路：content 已生成，用真实拍摄范例检索灵感，再重跑图像 spec
-    if record.get("track", "real") == "real":
-        _refine_ig_image_specs(persona, posts, record.get("lang", config.LANGUAGES[0]))
 
     def _render(post: dict) -> dict:
         if not with_images or post.get("format") == "text_only":
