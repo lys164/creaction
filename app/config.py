@@ -37,7 +37,11 @@ def _load_provider_pool(env_name: str, fallback: list[dict]) -> list[dict]:
         base = str(item.get("base", "")).strip().rstrip("/")
         key = str(item.get("key", "")).strip()
         if base and key:
-            out.append({"base": base, "key": key})
+            # 透传 base/key 以外的字段（如 "kind":"kie"），供 api_client 分派协议
+            p = dict(item)
+            p["base"] = base
+            p["key"] = key
+            out.append(p)
     return out or fallback
 
 
@@ -48,6 +52,32 @@ def _load_provider_pool(env_name: str, fallback: list[dict]) -> list[dict]:
 API_PROVIDERS = _load_provider_pool("POPOP_API_PROVIDERS", _DEFAULT_API_PROVIDERS)
 LLM_API_PROVIDERS = _load_provider_pool("POPOP_LLM_API_PROVIDERS", API_PROVIDERS)
 IMAGE_API_PROVIDERS = _load_provider_pool("POPOP_IMAGE_API_PROVIDERS", API_PROVIDERS)
+
+# ---- KIE (kie.ai) 供应商：与 APIMart 协议不同（chat 把模型名放进 URL 路径；
+# 图片走 /api/v1/jobs/createTask + /recordInfo 异步轮询）。api_client 依据
+# provider 的 "kind":"kie" 标记自动切换协议。设置 POPOP_KIE_KEY 即把 KIE
+# 同时挂进 LLM 池与图片池做分流；也可用 POPOP_*_API_PROVIDERS JSON 手动加带
+# "kind":"kie" 的条目。
+KIE_BASE = os.environ.get("POPOP_KIE_BASE", "https://api.kie.ai").rstrip("/")
+KIE_KEY = os.environ.get("POPOP_KIE_KEY", "").strip()
+# KIE 上对应现有 gemini-3.1-pro-preview / gemini-3.5-flash 的模型名（型号齐全）。
+# KIE 的 chat 把模型名放进 URL 路径，且路径段与 body 的 model 可能不同
+# （如 flash：路径 gemini-3-5-flash-openai、body gemini-3-5-flash），故分开配。
+KIE_LLM_MODEL = os.environ.get("POPOP_KIE_LLM_MODEL", "gemini-3.1-pro")
+KIE_LLM_PATH_PRO = os.environ.get("POPOP_KIE_LLM_PATH_PRO", "gemini-3.1-pro")
+KIE_LLM_MODEL_PRO = os.environ.get("POPOP_KIE_LLM_MODEL_PRO", "gemini-3.1-pro")
+KIE_LLM_PATH_FLASH = os.environ.get("POPOP_KIE_LLM_PATH_FLASH", "gemini-3-5-flash-openai")
+KIE_LLM_MODEL_FLASH = os.environ.get("POPOP_KIE_LLM_MODEL_FLASH", "gemini-3-5-flash")
+# 出图与现有 gpt-image-2 同源；按有无参考图切 t2i / i2i（见 api_client）。
+KIE_IMAGE_MODEL_T2I = os.environ.get("POPOP_KIE_IMAGE_MODEL_T2I", "gpt-image-2-text-to-image")
+KIE_IMAGE_MODEL_I2I = os.environ.get("POPOP_KIE_IMAGE_MODEL_I2I", "gpt-image-2-image-to-image")
+
+if KIE_KEY:
+    _kie_provider = {"base": KIE_BASE, "key": KIE_KEY, "kind": "kie"}
+    if not any(p.get("kind") == "kie" for p in LLM_API_PROVIDERS):
+        LLM_API_PROVIDERS = LLM_API_PROVIDERS + [_kie_provider]
+    if not any(p.get("kind") == "kie" for p in IMAGE_API_PROVIDERS):
+        IMAGE_API_PROVIDERS = IMAGE_API_PROVIDERS + [_kie_provider]
 LLM_MODEL = os.environ.get("POPOP_LLM_MODEL", "gemini-3.1-pro-preview")
 CHAT_MODEL = os.environ.get("POPOP_CHAT_MODEL", "gemini-3.5-flash")
 IMAGE_MODEL = os.environ.get("POPOP_IMAGE_MODEL", "gpt-image-2")

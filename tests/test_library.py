@@ -50,7 +50,7 @@ def test_commit_cooldown_cycle(tmp_path):
 
 
 def test_real_track_wiring(monkeypatch, tmp_path):
-    """real track 发牌+used_seeds 回收+冷读验收；light 不发牌不验收。"""
+    """real 发牌+used_seeds 回收+冷读验收；light 只验收不发牌；kdrama 不发牌不验收。"""
     from app import pipeline, config
 
     (tmp_path / "personas").mkdir()
@@ -91,13 +91,24 @@ def test_real_track_wiring(monkeypatch, tmp_path):
     data = json.loads((tmp_path / "library_state.json").read_text("utf-8"))
     assert data["counter"] == 1 and hand_ids[0] in data["entries"]
 
+    # light 对齐 real 的魅力方法论并走冷读验收，但【不发灵感手牌】（用户明确不加职业/性格灵感）
     seen.clear()
     rec2 = pipeline.create_persona_one_lang([], "zh", track="light")
     gen2 = seen[0][1]["content"]
     gen2_text = gen2 if isinstance(gen2, str) else gen2[0]["text"]
     assert "灵感手牌" not in gen2_text
+    assert len(seen) == 2  # 生成 + 验收
+    assert rec2["used_seeds"] == []
+    assert rec2["charm_audit"][0]["verdict"] == "pass"
+
+    # kdrama 仍不发牌不验收
+    seen.clear()
+    rec3 = pipeline.create_persona_one_lang([], "zh", track="kdrama")
+    gen3 = seen[0][1]["content"]
+    gen3_text = gen3 if isinstance(gen3, str) else gen3[0]["text"]
+    assert "灵感手牌" not in gen3_text
     assert len(seen) == 1  # 无验收调用
-    assert rec2["used_seeds"] == [] and rec2["charm_audit"] is None
+    assert rec3["used_seeds"] == [] and rec3["charm_audit"] is None
 
 
 def test_real_track_audit_fail_retries(monkeypatch, tmp_path):
@@ -128,7 +139,7 @@ def test_real_track_audit_fail_retries(monkeypatch, tmp_path):
 
 
 def test_selfie_ref_decoupled_from_source_for_real(tmp_path):
-    """real track：没封面时不回退原图（防形似泄漏）；其他 track 保持原图兜底。"""
+    """real/kdrama/light：没封面时不回退原图（防形似泄漏）；adult 保持原图兜底。"""
     from app import pipeline
 
     src = tmp_path / "s.png"
@@ -136,7 +147,9 @@ def test_selfie_ref_decoupled_from_source_for_real(tmp_path):
     rec_real = {"track": "real", "source_images": [str(src)], "cover": {}}
     assert pipeline._ref_image_uri_for_selfie(rec_real) is None
     rec_light = {"track": "light", "source_images": [str(src)], "cover": {}}
-    assert pipeline._ref_image_uri_for_selfie(rec_light) is not None
+    assert pipeline._ref_image_uri_for_selfie(rec_light) is None
+    rec_adult = {"track": "adult", "source_images": [str(src)], "cover": {}}
+    assert pipeline._ref_image_uri_for_selfie(rec_adult) is not None
     # 有封面时两个 track 都锚封面
     cover = tmp_path / "c.png"
     cover.write_bytes(b"fake")

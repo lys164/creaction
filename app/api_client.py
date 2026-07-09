@@ -62,6 +62,45 @@ def _headers(provider: dict) -> dict:
     }
 
 
+def _is_kie(provider: dict) -> bool:
+    return provider.get("kind") == "kie"
+
+
+def _kie_chat_route(model: str) -> tuple[str, str]:
+    """把内部 model 名映射到 KIE 的 (URL 路径段, body model 名)。
+
+    KIE 的 chat 是 OpenAI 兼容但把模型放进路径：POST {base}/{path}/v1/chat/completions。
+    未识别的 model 一律回退到 pro 路径（保证可用），避免静默 404。
+    """
+    m = (model or "").lower()
+    if "flash" in m:
+        return config.KIE_LLM_PATH_FLASH, config.KIE_LLM_MODEL_FLASH
+    return config.KIE_LLM_PATH_PRO, config.KIE_LLM_MODEL_PRO
+
+
+def _kie_chat(provider: dict, messages: list[dict], model: str,
+              temperature: float, max_tokens: int | None, timeout: int) -> str:
+    """KIE chat 适配：路径带模型名，响应体与 OpenAI 一致（choices[0].message.content）。"""
+    path, body_model = _kie_chat_route(model)
+    url = f"{provider['base']}/{path}/v1/chat/completions"
+    payload: dict[str, Any] = {
+        "model": body_model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": False,
+    }
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    r = requests.post(url, headers=_headers(provider), json=payload, timeout=timeout)
+    data = r.json()
+    # KIE 统一错误体：{"code":401,"msg":"..."}；OpenAI 兼容错误：{"error":{...}}
+    if isinstance(data, dict) and "error" in data:
+        raise APIError(data["error"].get("message", "kie chat error"))
+    if isinstance(data, dict) and data.get("code") not in (None, 200):
+        raise APIError(f"kie chat code={data.get('code')}: {data.get('msg')}")
+    return data["choices"][0]["message"]["content"]
+
+
 def file_to_data_uri(path: str | Path) -> str:
     p = Path(path)
     mime, _ = mimetypes.guess_type(str(p))
@@ -95,6 +134,23 @@ def chat(
     last_err = None
     for provider in _ordered_providers("chat"):
         base = provider["base"]
+        if _is_kie(provider):
+            for attempt in range(max_retries):
+                try:
+                    return _kie_chat(provider, messages, model,
+                                     temperature, max_tokens, timeout)
+                except APIError as e:
+                    msg = str(e).lower()
+                    if "429" in msg or "rate" in msg or "wait" in msg or "500" in msg:
+                        last_err = e
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    last_err = e
+                    break
+                except (requests.RequestException, KeyError, ValueError) as e:
+                    last_err = e
+                    time.sleep(2 * (attempt + 1))
+            continue
         for attempt in range(max_retries):
             try:
                 r = requests.post(
@@ -264,6 +320,84 @@ def vision_message(text: str, image_data_uris: list[str]) -> dict:
 # --------------------------------------------------------------------------
 # Image generation (async, poll task)
 # --------------------------------------------------------------------------
+def _kie_aspect_ratio(size: str | None) -> str:
+    """把内部 size（如 '3:4'）映射到 KIE 支持的 aspect_ratio，未知回退 auto。"""
+    allowed = {"1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5",
+               "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"}
+    s = (size or "").strip()
+    return s if s in allowed else "auto"
+
+
+def _submit_image_kie(provider: dict, prompt: str, size: str | None,
+                      resolution: str | None, image_urls: list[str] | None,
+                      timeout: int) -> str:
+    """KIE 出图提交：按有无参考图切 t2i / i2i，返回 taskId。
+
+    KIE 的 i2i 要求 input_urls 是【可公网访问的 URL 数组】，不接受 data: URI。
+    现有 pipeline 传的参考图可能是 data URI（file_to_data_uri），此时降级为 t2i，
+    避免提交必然失败——KIE 仅用作分流，参考图强一致的活仍可交回原供应商。
+    """
+    ar = _kie_aspect_ratio(size)
+    # KIE：aspect_ratio=auto 只能出 1K；要 2K/4K 必须指定具体比例
+    res = (resolution or "").upper().replace("K", "K")
+    if res in ("2K", "4K") and ar == "auto":
+        res = "1K"
+    http_urls = [u for u in (image_urls or []) if isinstance(u, str)
+                 and u.startswith("http")]
+    if http_urls:
+        model = config.KIE_IMAGE_MODEL_I2I
+        payload_input: dict[str, Any] = {"prompt": prompt, "input_urls": http_urls[:16]}
+    else:
+        model = config.KIE_IMAGE_MODEL_T2I
+        payload_input = {"prompt": prompt}
+    if ar != "auto":
+        payload_input["aspect_ratio"] = ar
+    if res in ("1K", "2K", "4K"):
+        payload_input["resolution"] = res
+    payload = {"model": model, "input": payload_input}
+    url = f"{provider['base']}/api/v1/jobs/createTask"
+    r = requests.post(url, headers=_headers(provider), json=payload, timeout=timeout)
+    data = r.json()
+    code = data.get("code")
+    if code not in (200, None):
+        raise APIError(f"kie createTask code={code}: {data.get('msg')}")
+    task_id = (data.get("data") or {}).get("taskId")
+    if not task_id:
+        raise APIError(f"kie createTask no taskId: {data}")
+    return task_id
+
+
+def _poll_task_kie(provider: dict, task_id: str, interval: int,
+                   timeout: int) -> dict:
+    """KIE 轮询：GET /api/v1/jobs/recordInfo?taskId=，解析 resultJson.resultUrls。
+
+    归一化成与 APIMart poll_task 相同的返回：{"result":{"images":[{"url":...}]}}，
+    让上层 generate_image 无需区分供应商。
+    """
+    url = f"{provider['base']}/api/v1/jobs/recordInfo"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = requests.get(url, headers=_headers(provider),
+                         params={"taskId": task_id}, timeout=30)
+        data = r.json()
+        dd = data.get("data") or {}
+        state = dd.get("state")
+        if state == "success":
+            result_json = dd.get("resultJson") or "{}"
+            try:
+                parsed = json.loads(result_json)
+            except (json.JSONDecodeError, TypeError) as e:
+                raise APIError(f"kie resultJson parse failed: {result_json!r}") from e
+            urls = parsed.get("resultUrls") or []
+            if not urls:
+                raise APIError(f"kie task {task_id} success but no resultUrls: {parsed}")
+            return {"result": {"images": [{"url": urls[0]}]}}
+        if state == "fail":
+            raise APIError(f"kie task failed: {dd.get('failMsg') or dd.get('failCode')}")
+        time.sleep(interval)
+    raise APIError(f"kie image task {task_id} timed out after {timeout}s")
+
+
 def submit_image(
     prompt: str,
     size: str | None = None,
@@ -286,6 +420,24 @@ def submit_image(
     last_err = None
     for provider in _ordered_providers("image"):
         base = provider["base"]
+        if _is_kie(provider):
+            for attempt in range(4):
+                try:
+                    tid = _submit_image_kie(provider, prompt, size,
+                                            resolution, image_urls, timeout)
+                    return tid, provider
+                except APIError as e:
+                    msg = str(e).lower()
+                    if "429" in msg or "rate" in msg or "500" in msg or "455" in msg:
+                        last_err = e
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    last_err = e
+                    break
+                except (requests.RequestException, KeyError, ValueError) as e:
+                    last_err = e
+                    time.sleep(2 * (attempt + 1))
+            continue
         for attempt in range(4):
             try:
                 r = requests.post(
@@ -336,6 +488,8 @@ def poll_task(
     base = provider["base"]
     interval = interval or config.TASK_POLL_INTERVAL
     timeout = timeout or config.TASK_POLL_TIMEOUT
+    if _is_kie(provider):
+        return _poll_task_kie(provider, task_id, interval, timeout)
     deadline = time.time() + timeout
     while time.time() < deadline:
         r = requests.get(

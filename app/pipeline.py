@@ -321,8 +321,8 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags, track=track)
     # real track：发一手灵感牌（性格/职业库，冷却过滤后随机），
     # 模型自主决定用不用，用了哪条通过 used_seeds 回报，编排层据此销账。
-    # kdrama 不发牌：人设从韩剧主角推理（主动性/反差/user_role/opening_scene）+图片长出来，
-    # 随机职业/性格卡会干扰这条方法论。kdrama 同 light/adult 走无牌路径。
+    # 只有 real 发牌：light 保留自己的关系引擎、kdrama 走韩剧主角推理，随机职业/性格卡
+    # 都会干扰。light 虽已对齐 real 的魅力方法论，但用户明确不加职业/性格灵感（只留冷读验收）。
     if track == "real":
         hand = library.checkout()
         hand_block = library.hand_block(hand, lang)
@@ -332,11 +332,13 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
     persona, used_seeds, reasoning = _generate_persona_real(
         uris, lang, user_hint, diversity_block, track)
 
-    # real track：冷读验收（转述测试），fail 则带意见打回重写一次。
+    # real/light/nonhuman track：冷读验收（转述测试），fail 则带意见打回重写一次。
+    # nonhuman = real 方法论（要求"一句能转述这只 TA"），故同样验收；但它【不发灵感手牌】
+    # （职业/性格库是人向的，会把角色拽回"人"），手牌仍只发给 real（见上）。
     # kdrama 不走此验收：它是 real track 的"粉丝转述测试"，retry 意见也是 real 方法论
-    # （让粉丝能一句转述 TA），与韩剧主角/对手戏方法论冲突——kdrama 同 light/adult 不发牌不验收。
+    # （让粉丝能一句转述 TA），与韩剧主角/对手戏方法论冲突——kdrama 同 adult 不发牌不验收。
     audits: list[dict] = []
-    if track == "real":
+    if track in ("real", "light", "flirt", "nonhuman"):
         audit = _charm_audit(persona, lang)
         audits.append(audit)
         if audit["verdict"] == "fail":
@@ -431,8 +433,7 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         names, jobs, tags = _recent_persona_traits(lang, exclude_char_id=char_id)
         diversity_block = prompts.build_persona_diversity_block(
             lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags, track=track)
-        # real track：发灵感手牌 + 冷读验收，与 create_persona_one_lang 同构。
-        # kdrama 同 light/adult 不发牌、不验收（见 create 路径注释）。
+        # 只有 real 发灵感手牌；light/nonhuman 走冷读验收但不发牌（见 create 路径注释）。
         if track == "real":
             hand = library.checkout()
             hand_block = library.hand_block(hand, lang)
@@ -441,7 +442,7 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         persona, used_seeds, reasoning = _generate_persona_real(
             uris, lang, user_hint, diversity_block, track)
         audits: list[dict] = []
-        if track == "real":
+        if track in ("real", "light", "flirt", "nonhuman"):
             audit = _charm_audit(persona, lang)
             audits.append(audit)
             if audit["verdict"] == "fail":
@@ -986,11 +987,10 @@ def build_cover_spec(char_id: str) -> dict:
     cover_ref = _first_source_image(record)
     lang = record.get("lang", "ko")
 
-    # real track 规划封面时【不喂原图】——实测规划阶段喂原图会把场景/构图/道具拉回原始
-    # 快照（如"在洗手间刷牙"），压过"从人设重新设计签名瞬间"。所以规划纯文本、只从人设
-    # 设计签名瞬间；到渲染阶段(generate_cover)才拼入原图，让原图只负责锁脸/神似、不影响
-    # 构图。light/adult 仍按原逻辑把原图作为气质参考传入。
-    if track in ("real", "kdrama"):
+    # 封面规划【喂原图】：real/light（按用户要求，封面锚定原图，让封面像上传的这个人）
+    # 及 adult/nonhuman 都把原图作为参考传入。只有 kdrama 例外——它是"这部剧的第一帧剧照"，
+    # 从人设重新设计场景，喂原图会把镜头拉回自拍快照，故仍纯文本规划。
+    if track == "kdrama":
         cover_ref_uri = None
     else:
         cover_ref_uri = api_client.file_to_data_uri(cover_ref) if cover_ref else None
@@ -1054,34 +1054,42 @@ def generate_cover(
         build_cover_spec(char_id)
         record = load_character(char_id)
 
-    style = styles.get_style(style_id)
-    if not style:
-        raise ValueError(f"unknown style {style_id}")
+    track = record.get("track", "real")
+    # 非人物（nonhuman）链路：不套画风、不拼画风词，纯按 identity + 原图生成。
+    if track == "nonhuman":
+        style = None
+        eff_style_id = None
+    else:
+        style = styles.get_style(style_id)
+        if not style:
+            raise ValueError(f"unknown style {style_id}")
+        eff_style_id = style_id
+    style_prompt = style["prompt"] if style else None
 
     identity = record["identity"]
     cover_spec = record.get("cover_spec", {})
     mood = identity.get("persona_mood", "")
     prompt = prompts.cover_image_prompt(
         identity,
-        style["prompt"],
+        style_prompt,
         persona_mood=mood,
         variable=cover_spec.get("variable"),
         scene=cover_spec.get("scene"),
         shooting=cover_spec.get("shooting"),
-        track=record.get("track", "real"),
+        track=track,
     )
     if use_reference is None:
         # 拼入原图做 i2i——原图只锁"神似"（脸/发型/气质），场景/距离/构图/入口由 cover_spec
         # 文本重新设计（compose_selfie_prompt 里的 I2I_OVERRIDE_GUARD 明确要求不要复刻原图
-        # 构图）。写实画风且有原图时就用；非写实画风不拼原图。
-        use_reference = prompts.is_photographic_style(style["prompt"])
+        # 构图）。写实画风且有原图时就用；非写实画风不拼原图。nonhuman 无画风=写实底座，会用原图。
+        use_reference = prompts.is_photographic_style(style_prompt)
     image_urls = None
     if use_reference:
         src = _first_source_image(record)
         if src:
             image_urls = [api_client.file_to_data_uri(src)]
 
-    save_path = config.IMAGE_DIR / f"{char_id}_cover_{style_id}.png"
+    save_path = config.IMAGE_DIR / f"{char_id}_cover_{eff_style_id or 'nostyle'}.png"
     result = api_client.generate_image(
         prompt,
         size=config.IMAGE_SIZE_COVER,
@@ -1089,9 +1097,9 @@ def generate_cover(
         image_urls=image_urls,
         save_path=save_path,
     )
-    record["style_id"] = style_id
+    record["style_id"] = eff_style_id
     record["cover"] = {
-        "style_id": style_id,
+        "style_id": eff_style_id,
         "url": result["url"],
         "local_path": result["local_path"],
         "prompt": prompt,
@@ -1110,16 +1118,22 @@ def _posts_dir(char_id: str) -> Path:
     return d
 
 
-def _render_post_image(record: dict, post: dict, style: dict) -> dict:
-    """Render or re-render one regular post image in-place."""
+def _render_post_image(record: dict, post: dict, style: dict | None) -> dict:
+    """Render or re-render one regular post image in-place.
+
+    style 可为 None（nonhuman 非人物链路不套画风），此时 style_prompt=None，
+    compose_image_prompt 不拼画风词。
+    """
     char_id = record["char_id"]
     identity = record["identity"]
+    style_prompt = style["prompt"] if style else None
     prompt = prompts.compose_image_prompt(
-        identity, post["variable"], post["scene"], style["prompt"]
+        identity, post["variable"], post["scene"], style_prompt,
+        track=record.get("track", "real"),
     )
     save_path = config.IMAGE_DIR / f"{char_id}_{post['post_id']}.png"
     image_urls = None
-    if prompts.is_photographic_style(style["prompt"]):
+    if prompts.is_photographic_style(style_prompt):
         # 统一取参：real track 走封面锚（绝不直连原图，避免形似泄漏），
         # 其他 track 维持原行为（封面优先、原图兜底）。
         ref = _ref_image_uri_for_selfie(record)
@@ -1161,8 +1175,11 @@ def generate_posts(
 
     persona = record["persona"]
     identity = record["identity"]
+    track = record.get("track", "real")
     style_id = style_id or record.get("style_id")
     style = styles.get_style(style_id) if style_id else None
+    if track == "nonhuman":
+        style = None  # 非人物链路：不套画风、不拼画风词
 
     # 1) generate all post text + variable/scene (parallel across types)
     posts: list[dict] = []
@@ -1197,7 +1214,8 @@ def generate_posts(
             posts.extend(fut.result())
 
     # 2) render images (parallel) using identity + variable + scene + style
-    if with_images and style:
+    # nonhuman 无画风也要出图（style=None，_render_post_image 会不拼画风词）。
+    if with_images and (style is not None or track == "nonhuman"):
         def _render(post: dict) -> dict:
             try:
                 _render_post_image(record, post, style)
@@ -1236,7 +1254,9 @@ def rerender_post_image(char_id: str, batch_id: str, post_id: str,
     batch = load_batch(char_id, batch_id)
     style_id = style_id or batch.get("style_id") or record.get("style_id")
     style = styles.get_style(style_id) if style_id else None
-    if not style:
+    if record.get("track") == "nonhuman":
+        style = None  # 非人物链路：不套画风
+    elif not style:
         raise ValueError("style is required to re-render post image")
     for post in batch.get("posts", []):
         if post.get("post_id") == post_id:
@@ -1412,15 +1432,16 @@ def list_batches(char_id: str) -> list[dict]:
 def _ref_image_uri_for_selfie(record: dict) -> str | None:
     """Prefer the redrawn cover as the i2i reference; fall back to source image.
 
-    real track 不做原图兜底：封面已与真人原图解耦（形似只能来自封面），
+    real/kdrama/light track 不做原图兜底：封面已与真人原图解耦（形似只能来自封面），
     没封面时宁可无参考生成，也不把真人的脸直接带进帖子图。
+    adult/flirt 仍保留原图兜底：flirt 的参考图本身自带氛围/张力，允许直接引用。
     """
     cover = record.get("cover") or {}
     if cover.get("local_path") and storage.ensure_file(Path(cover["local_path"])):
         return api_client.file_to_data_uri(cover["local_path"])
     if cover.get("url"):
         return cover["url"]
-    if record.get("track", "real") in ("real", "kdrama"):
+    if record.get("track", "real") in ("real", "kdrama", "light"):
         return None
     src = _first_source_image(record)
     if src:
@@ -1442,7 +1463,8 @@ def _render_ig_post_image(record: dict, post: dict, identity: dict,
 
     if itype == "selfie":
         prompt = prompts.compose_selfie_prompt(
-            identity, post.get("selfie") or {}, style_prompt
+            identity, post.get("selfie") or {}, style_prompt,
+            track=record.get("track", "real"),
         )
         image_urls = [selfie_ref] if selfie_ref else None
         res = api_client.generate_image(
@@ -1532,6 +1554,8 @@ def generate_instagram_posts(
     style_id = style_id or record.get("style_id")
     style = styles.get_style(style_id) if style_id else None
     style_prompt = style["prompt"] if style else None
+    if record.get("track") == "nonhuman":
+        style_prompt = None  # 非人物链路：不套画风、不拼画风词
 
     # 1) infer the feed (single LLM call, native language)
     avoid_kinds = _sibling_used_photo_kinds(record)
@@ -1628,6 +1652,8 @@ def rerender_ig_post_image(char_id: str, post_id: str,
     style_id = style_id or batch.get("style_id") or record.get("style_id")
     style = styles.get_style(style_id) if style_id else None
     style_prompt = style["prompt"] if style else None
+    if record.get("track") == "nonhuman":
+        style_prompt = None  # 非人物链路：不套画风
     for post in batch.get("posts", []):
         if post.get("post_id") == post_id:
             _render_ig_post_image(

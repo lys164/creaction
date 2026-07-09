@@ -53,7 +53,7 @@
             <input type="checkbox" id="withCoverOnCreate" checked />
             同时生成封面图
           </label>
-          <label class="field small">
+          <label class="field small" id="createCoverStyleField">
             <span>封面画风</span>
             <select id="createCoverStyle"></select>
           </label>
@@ -64,8 +64,10 @@
         <select id="createTrack" class="track-sel">
           <option value="real">链路一：真实人设</option>
           <option value="light">链路二：轻剧情</option>
+          <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
           <option value="adult">链路三：成人向</option>
           <option value="kdrama">链路四：韩剧</option>
+          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
         </select>
       </label>
       <label class="field track-field">
@@ -86,12 +88,14 @@
       <button id="btnSelAll" class="ghost">全选</button>
       <button id="btnSelNone" class="ghost">取消选择</button>
       <button id="btnBatchPersona" class="ghost">↻ 批量重生人设</button>
-      <select id="regenTrack" class="track-sel" title="重生链路">
+        <select id="regenTrack" class="track-sel" title="重生链路">
         <option value="">链路：沿用角色原链路</option>
         <option value="real">链路一：真实人设</option>
         <option value="light">链路二：轻剧情</option>
+        <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
         <option value="adult">链路三：成人向</option>
           <option value="kdrama">链路四：韩剧</option>
+          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
       </select>
       <button id="btnBatchOpening" class="ghost">💬 批量重写开场白</button>
       <div class="char-cover-batch">
@@ -143,8 +147,10 @@
             <option value="">沿用角色原链路</option>
             <option value="real">链路一：真实人设</option>
             <option value="light">链路二：轻剧情</option>
+            <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
             <option value="adult">链路三：成人向</option>
           <option value="kdrama">链路四：韩剧</option>
+          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
           </select>
         </label>
       <button id="btnIg" class="primary">为勾选角色生成 INS 帖子</button>
@@ -300,8 +306,10 @@
           <option value="">沿用角色原链路</option>
           <option value="real">链路一：真实人设</option>
           <option value="light">链路二：轻剧情</option>
+          <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
           <option value="adult">链路三：成人向</option>
           <option value="kdrama">链路四：韩剧</option>
+          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
         </select>
       </label>
       <button id="btnPosts" class="primary">批量生成帖子</button>

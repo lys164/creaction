@@ -293,6 +293,17 @@ async function initCreateCoverStyle() {
 }
 initCreateCoverStyle();
 
+// 非人物（nonhuman）链路不套画风：隐藏封面画风选择（后端也会忽略画风词）。
+function syncCreateTrackStyleUI() {
+  const track = $("#createTrack") && $("#createTrack").value;
+  const field = $("#createCoverStyleField");
+  if (field) field.style.display = track === "nonhuman" ? "none" : "";
+}
+if ($("#createTrack")) {
+  $("#createTrack").addEventListener("change", syncCreateTrackStyleUI);
+  syncCreateTrackStyleUI();
+}
+
 function refreshStyleSelects() {
   initCreateCoverStyle();
   const bs = $("#batchStyle");
@@ -825,7 +836,7 @@ async function showCharDetail(charId) {
     <div class="detail-grid">
       <div class="cover">
         ${coverImg}
-        <label class="field"><span>画风</span>
+        <label class="field"${rec.track === "nonhuman" ? ' style="display:none"' : ""}><span>画风</span>
           <select id="detailStyle">${styleOpts}</select></label>
         <label class="field"><span>生成模式</span>
           <select id="detailCoverMode">

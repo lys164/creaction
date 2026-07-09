@@ -48,7 +48,8 @@ class PostsReq(BaseModel):
     count_per_type: int = 2
     style_id: str | None = None
     with_images: bool = True
-    # 链路：real=真实人设 / light=轻剧情 / adult=成人向；None=沿用角色已存 track
+    # 链路：real=真实人设 / light=轻剧情 / flirt=轻剧情+荷尔蒙张力 / adult=成人向；
+    # None=沿用角色已存 track
     track: str | None = None
 
 
@@ -232,7 +233,8 @@ def create_personas(
             tasks.bump(tid)
 
         cover_errors = {}
-        if with_cover and cover_style_id:
+        # nonhuman 非人物链路不选画风：也允许自动生成封面（generate_cover 内部会不套画风）
+        if with_cover and (cover_style_id or track == "nonhuman"):
             def _cover(rec: dict):
                 cid = rec.get("char_id")
                 try:
@@ -334,7 +336,8 @@ def import_personas_from_json(
                   for i, r in enumerate(results) if r.get("error")}
 
         cover_errors = {}
-        if with_cover and cover_style_id:
+        # nonhuman 非人物链路不选画风：也允许自动生成封面（generate_cover 内部会不套画风）
+        if with_cover and (cover_style_id or track == "nonhuman"):
             def _cover(rec: dict):
                 cid = rec.get("char_id")
                 try:
