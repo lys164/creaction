@@ -78,9 +78,96 @@ if KIE_KEY:
         LLM_API_PROVIDERS = LLM_API_PROVIDERS + [_kie_provider]
     if not any(p.get("kind") == "kie" for p in IMAGE_API_PROVIDERS):
         IMAGE_API_PROVIDERS = IMAGE_API_PROVIDERS + [_kie_provider]
+
+# ---- bbww (api.bbww.top) 优先供应商 ----
+# 全 OpenAI 兼容：chat 走 /v1/chat/completions（与现有链路一致）；出图走同步
+# /v1/images/generations、改图走 /v1/images/edits（区别于 APIMart 的异步 submit+
+# poll，见 api_client 的 "kind":"bbww" 分支）。设置 POPOP_BBWW_KEY 即把 bbww
+# 以【最高优先级】挂进 LLM 池与图片池：每次请求先打 bbww（更快），失败再回退
+# 到其余供应商。图片模型默认 gpt-image-2（bbww 上支持、最高 4K）；注意该模型需
+# token 所在【分组】已开通对应通道，否则 New API 会返回 "No available channel for
+# model ... under group ..."（分组未配通道，而非模型不存在），此时会自动回退到池中
+# 其它供应商。可用 POPOP_BBWW_IMAGE_MODEL 覆盖为该分组实际可达的型号。
+BBWW_BASE = os.environ.get("POPOP_BBWW_BASE", "https://api.bbww.top/v1").rstrip("/")
+BBWW_IMAGE_MODEL = os.environ.get("POPOP_BBWW_IMAGE_MODEL", "gpt-image-2")
+# 支持多个 bbww key 分摊限流：POPOP_BBWW_KEYS（逗号分隔）优先，其次单个 POPOP_BBWW_KEY。
+# 多个 key 都以最高优先级挂入，且在优先层内部 round-robin（见 api_client._ordered_providers），
+# 让请求把额度分摊到不同 key 上，减少 429。
+_bbww_keys = [
+    k.strip() for k in
+    (os.environ.get("POPOP_BBWW_KEYS", "") or os.environ.get("POPOP_BBWW_KEY", "")).split(",")
+    if k.strip()
+]
+# bbww 是否挂进 LLM 池：默认开；设 POPOP_BBWW_LLM=0 关闭。
+# 当 bbww 分组没有开通 gemini 通道时，它对每次 LLM 调用都返回 503（约 2.5s/次），
+# 排在最高优先级反而使每次 chat 白白多等数秒 → 关掉可显著加速文本/视觉调用。
+_BBWW_IN_LLM = os.environ.get("POPOP_BBWW_LLM", "1").strip().lower() not in ("0", "false", "no")
+if _BBWW_IN_LLM and _bbww_keys and not any(p.get("kind") == "bbww" for p in LLM_API_PROVIDERS):
+    _bbww_llms = [{"base": BBWW_BASE, "key": k, "kind": "bbww", "priority": True}
+                  for k in _bbww_keys]
+    LLM_API_PROVIDERS = _bbww_llms + LLM_API_PROVIDERS
+# bbww 是否参与【出图】：默认关（设 POPOP_BBWW_IMAGE=1 才挂进图片池）。
+# 出图改由 OpenAI 直连 + lk888（见 POPOP_EXTRA_IMAGE_PROVIDERS）承担，bbww 只出文本。
+_BBWW_IN_IMAGE = os.environ.get("POPOP_BBWW_IMAGE", "0").strip().lower() not in ("0", "false", "no")
+if _BBWW_IN_IMAGE and _bbww_keys and not any(p.get("kind") == "bbww" for p in IMAGE_API_PROVIDERS):
+    _bbww_imgs = [{"base": BBWW_BASE, "key": k, "kind": "bbww", "priority": True,
+                   "image_model": BBWW_IMAGE_MODEL} for k in _bbww_keys]
+    IMAGE_API_PROVIDERS = _bbww_imgs + IMAGE_API_PROVIDERS
+
+# ---- bbww 出【文本】：走 Gemini 原生协议扩容 LLM 池 ----
+# bbww 的分组没开 OpenAI 兼容的 gemini 通道（/v1/chat/completions 报 503），
+# 但 gemini 挂在【原生协议】下可用：POST {root}/v1beta/models/{model}:generateContent
+# + header x-goog-api-key（实测 gemini-3.1-pro-preview ~3s 出文）。故以 kind=gemini
+# 原生方式把这些 key 以【最高优先级】挂进 LLM 池，与 gemini 池一起分摊生文、提吞吐。
+# 用 POPOP_BBWW_GEMINI_KEYS（逗号分隔）指定；留空则回退用 _bbww_keys。设
+# POPOP_BBWW_GEMINI=0 可关闭。base 取根域（去掉 /v1，原生路径在根下）。
+_BBWW_GEMINI_ON = os.environ.get("POPOP_BBWW_GEMINI", "1").strip().lower() not in ("0", "false", "no")
+_bbww_gemini_keys = [
+    k.strip() for k in os.environ.get("POPOP_BBWW_GEMINI_KEYS", "").split(",") if k.strip()
+] or _bbww_keys
+_bbww_root = BBWW_BASE[:-3].rstrip("/") if BBWW_BASE.endswith("/v1") else BBWW_BASE.rstrip("/")
+if _BBWW_GEMINI_ON and _bbww_gemini_keys and not any(
+        p.get("kind") == "gemini" for p in LLM_API_PROVIDERS):
+    _bbww_gemini = [{"base": _bbww_root, "key": k, "kind": "gemini", "priority": True}
+                    for k in _bbww_gemini_keys]
+    LLM_API_PROVIDERS = _bbww_gemini + LLM_API_PROVIDERS
+# 向后兼容：保留 BBWW_KEY 名（取第一个），个别地方可能直接引用。
+BBWW_KEY = _bbww_keys[0] if _bbww_keys else ""
 LLM_MODEL = os.environ.get("POPOP_LLM_MODEL", "gemini-3.1-pro-preview")
 CHAT_MODEL = os.environ.get("POPOP_CHAT_MODEL", "gemini-3.5-flash")
 IMAGE_MODEL = os.environ.get("POPOP_IMAGE_MODEL", "gpt-image-2")
+
+# 出图「全平摊」round-robin：把全部出图渠道（openai/lk888 同步 + apimart×4/kie 异步）
+# 当成一个环均匀轮转分发，而非高优先层先命中、兜底层闲置。默认开；设 0 回退分层优先。
+IMAGE_FLAT_ROUND_ROBIN = os.environ.get(
+    "POPOP_IMAGE_FLAT_RR", "1").strip().lower() not in ("0", "false", "no")
+
+# ---- 额外同步出图供应商（OpenAI 兼容 /images/generations，返回 b64/url）----
+# 通过 POPOP_EXTRA_IMAGE_PROVIDERS（JSON 数组）注入，复用 bbww 同步出图分支
+# （kind=bbww），以最高优先级挂进图片池并与其它同步供应商 round-robin 分摊，
+# 用于给出图扩容/提速。每个元素：{"base":".../v1","key":"sk-...","image_model":"gpt-image-1"}。
+# 例：[{"base":"https://api.openai.com/v1","key":"sk-...","image_model":"gpt-image-1"},
+#      {"base":"https://api.lk888.ai/v1","key":"sk-...","image_model":"gpt-image-2"}]
+_extra_imgs_raw = os.environ.get("POPOP_EXTRA_IMAGE_PROVIDERS", "").strip()
+if _extra_imgs_raw:
+    try:
+        _extra = json.loads(_extra_imgs_raw)
+    except json.JSONDecodeError as e:
+        raise ValueError("POPOP_EXTRA_IMAGE_PROVIDERS must be valid JSON") from e
+    _extra_providers = []
+    for it in (_extra or []):
+        if not isinstance(it, dict):
+            continue
+        base = str(it.get("base", "")).strip().rstrip("/")
+        key = str(it.get("key", "")).strip()
+        if not (base and key):
+            continue
+        _extra_providers.append({
+            "base": base, "key": key, "kind": "bbww", "priority": True,
+            "image_model": str(it.get("image_model") or IMAGE_MODEL).strip(),
+        })
+    if _extra_providers:
+        IMAGE_API_PROVIDERS = _extra_providers + IMAGE_API_PROVIDERS
 
 # ---- Embeddings (火山方舟 Ark，用于灵感库语义检索) ----
 # Ark 的向量模型走 /embeddings/multimodal 端点、返回 data.embedding、不支持真批量，
@@ -98,8 +185,9 @@ IMAGE_SIZE_POST = "3:4"
 TASK_POLL_INTERVAL = 5        # seconds between task polls
 TASK_POLL_TIMEOUT = 360       # max seconds to wait for one image
 
-# Concurrency for batch operations
-MAX_WORKERS = int(os.environ.get("POPOP_MAX_WORKERS", "4"))
+# Concurrency for batch operations. bbww 优先链路更快、可承受更高并发，
+# 默认拉到 90（可用 POPOP_MAX_WORKERS 覆盖）。
+MAX_WORKERS = int(os.environ.get("POPOP_MAX_WORKERS", "90"))
 
 # ---- Paths ----
 ROOT = Path(__file__).resolve().parent.parent

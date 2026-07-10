@@ -42,17 +42,41 @@ _RR_INDEX = {"chat": 0, "image": 0}
 
 
 def _ordered_providers(kind: str) -> list[dict]:
-    """Round-robin ordered providers for this request kind."""
+    """Providers to try for this request kind, priority-first then round-robin.
+
+    带 "priority": True 的供应商（如 bbww）永远排在最前、且不参与轮询，保证
+    每次请求都先打最快的站点；其余供应商在内部做 round-robin 分流，前者失败时
+    自动回退到后者，维持既有故障切换语义。
+    """
     providers = (
         config.IMAGE_API_PROVIDERS if kind == "image"
         else config.LLM_API_PROVIDERS
     )
     if not providers:
         raise APIError(f"no API providers configured for {kind}")
-    with _RR_LOCK:
-        start = _RR_INDEX[kind] % len(providers)
-        _RR_INDEX[kind] = (_RR_INDEX[kind] + 1) % len(providers)
-    return providers[start:] + providers[:start]
+    # 出图「全平摊」模式：把所有渠道（同步 openai/lk888 + 异步 apimart/kie）当成
+    # 一个环做单一 round-robin，每次请求换头，让 4 类渠道均匀分摊、吞吐最大化，而非
+    # 让高优先层永远先命中、兜底层闲置。POPOP_IMAGE_FLAT_RR=0 可回退到分层优先模式。
+    if kind == "image" and config.IMAGE_FLAT_ROUND_ROBIN and len(providers) > 1:
+        with _RR_LOCK:
+            start = _RR_INDEX["image"] % len(providers)
+            _RR_INDEX["image"] = (_RR_INDEX["image"] + 1) % len(providers)
+        return providers[start:] + providers[:start]
+    priority = [p for p in providers if p.get("priority")]
+    rest = [p for p in providers if not p.get("priority")]
+    # 多个优先供应商（如两个 bbww key）之间也做 round-robin，让额度真正分摊；
+    # 单个时行为不变（始终先打它）。
+    if len(priority) > 1:
+        with _RR_LOCK:
+            pstart = _RR_INDEX.setdefault("priority", 0) % len(priority)
+            _RR_INDEX["priority"] = (_RR_INDEX["priority"] + 1) % len(priority)
+        priority = priority[pstart:] + priority[:pstart]
+    if rest:
+        with _RR_LOCK:
+            start = _RR_INDEX[kind] % len(rest)
+            _RR_INDEX[kind] = (_RR_INDEX[kind] + 1) % len(rest)
+        rest = rest[start:] + rest[:start]
+    return priority + rest
 
 
 def _headers(provider: dict) -> dict:
@@ -64,6 +88,18 @@ def _headers(provider: dict) -> dict:
 
 def _is_kie(provider: dict) -> bool:
     return provider.get("kind") == "kie"
+
+
+def _is_bbww(provider: dict) -> bool:
+    return provider.get("kind") == "bbww"
+
+
+def _is_gemini_native(provider: dict) -> bool:
+    """走 Gemini 原生协议（/v1beta/models/{model}:generateContent）的供应商。
+
+    某些中转站（如 bbww）的 gemini 通道只挂在原生协议下，OpenAI 兼容的
+    /chat/completions 会 503 No available channel；此类 provider 标 kind=gemini。"""
+    return provider.get("kind") == "gemini"
 
 
 def _kie_chat_route(model: str) -> tuple[str, str]:
@@ -101,6 +137,74 @@ def _kie_chat(provider: dict, messages: list[dict], model: str,
     return data["choices"][0]["message"]["content"]
 
 
+def _to_gemini_parts(content: Any) -> list[dict]:
+    """把 OpenAI 风格 content（str 或 [{type:text|image_url}]）转成 Gemini parts。"""
+    if isinstance(content, str):
+        return [{"text": content}]
+    parts: list[dict] = []
+    for item in content or []:
+        if not isinstance(item, dict):
+            parts.append({"text": str(item)})
+            continue
+        if item.get("type") == "text":
+            parts.append({"text": item.get("text", "")})
+        elif item.get("type") == "image_url":
+            url = (item.get("image_url") or {}).get("url", "")
+            if url.startswith("data:"):
+                head, _, b64 = url.partition(",")
+                mime = head[5:].split(";")[0] or "image/png"
+                parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+    return parts
+
+
+def _to_gemini_payload(messages: list[dict]) -> tuple[dict, list[dict]]:
+    """拆出 systemInstruction 与 contents（Gemini 用 role=user/model，无 system role）。"""
+    sys_parts: list[dict] = []
+    contents: list[dict] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            sys_parts += _to_gemini_parts(m.get("content"))
+            continue
+        contents.append({
+            "role": "model" if role == "assistant" else "user",
+            "parts": _to_gemini_parts(m.get("content")),
+        })
+    sys_instr = {"parts": sys_parts} if sys_parts else None
+    return sys_instr, contents
+
+
+def _gemini_chat(provider: dict, messages: list[dict], model: str,
+                 temperature: float, max_tokens: int | None, timeout: int) -> str:
+    """Gemini 原生 generateContent 适配：header x-goog-api-key 最快（实测 ~3s）。"""
+    sys_instr, contents = _to_gemini_payload(messages)
+    url = f"{provider['base'].rstrip('/')}/v1beta/models/{model}:generateContent"
+    payload: dict[str, Any] = {"contents": contents}
+    if sys_instr:
+        payload["systemInstruction"] = sys_instr
+    gen_cfg: dict[str, Any] = {"temperature": temperature}
+    if max_tokens:
+        gen_cfg["maxOutputTokens"] = max_tokens
+    payload["generationConfig"] = gen_cfg
+    headers = {"x-goog-api-key": provider["key"], "Content-Type": "application/json"}
+    r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    data = r.json()
+    if isinstance(data, dict) and data.get("error"):
+        err = data["error"]
+        raise APIError(err.get("message", "gemini chat error") if isinstance(err, dict) else str(err))
+    cands = (data or {}).get("candidates") or []
+    if not cands:
+        raise APIError(f"gemini chat empty response: {str(data)[:200]}")
+    parts = (cands[0].get("content") or {}).get("parts") or []
+    text = "".join(p.get("text", "") for p in parts)
+    if not text:
+        # 无正文（如 thinking 模型把 token 全用在 thoughts、MAX_TOKENS 截断）：
+        # 抛错触发池内 fallback，而非静默返回空串导致下游生成空页。
+        reason = cands[0].get("finishReason", "")
+        raise APIError(f"gemini chat no text (finishReason={reason})")
+    return text
+
+
 def file_to_data_uri(path: str | Path) -> str:
     p = Path(path)
     mime, _ = mimetypes.guess_type(str(p))
@@ -134,6 +238,24 @@ def chat(
     last_err = None
     for provider in _ordered_providers("chat"):
         base = provider["base"]
+        if _is_gemini_native(provider):
+            g_model = provider.get("chat_model") or model
+            for attempt in range(max_retries):
+                try:
+                    return _gemini_chat(provider, messages, g_model,
+                                        temperature, max_tokens, timeout)
+                except APIError as e:
+                    msg = str(e).lower()
+                    if any(x in msg for x in ("429", "rate", "wait", "500", "503", "overload")):
+                        last_err = e
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    last_err = e
+                    break
+                except (requests.RequestException, KeyError, ValueError) as e:
+                    last_err = e
+                    time.sleep(2 * (attempt + 1))
+            continue
         if _is_kie(provider):
             for attempt in range(max_retries):
                 try:
@@ -318,6 +440,99 @@ def vision_message(text: str, image_data_uris: list[str]) -> dict:
 
 
 # --------------------------------------------------------------------------
+# bbww (api.bbww.top) synchronous OpenAI image protocol
+# --------------------------------------------------------------------------
+_BBWW_SIZE_MAP = {
+    "1:1": "1024x1024",
+    "3:4": "1024x1536",
+    "4:3": "1536x1024",
+    "2:3": "1024x1536",
+    "3:2": "1536x1024",
+    "9:16": "1024x1536",
+    "16:9": "1536x1024",
+}
+
+
+def _bbww_size(size: str | None) -> str:
+    """把内部 aspect ratio（如 '3:4'）映射到 gpt-image 支持的像素 size。
+
+    gpt-image-1.5 仅接受 1024x1024 / 1024x1536 / 1536x1024 / auto，故按比例就近
+    归一到竖/横/方三档；已经是 WxH 像素串则原样透传；未知回退 auto。
+    """
+    s = (size or "").strip()
+    if not s:
+        return "auto"
+    if "x" in s and s.replace("x", "").isdigit():
+        return s
+    return _BBWW_SIZE_MAP.get(s, "auto")
+
+
+def _bbww_image_bytes(uri: str) -> tuple[bytes, str, str]:
+    """把 data: URI 或 http(s) URL 取成 (bytes, filename, mime)，供 edits 上传。"""
+    if uri.startswith("data:"):
+        header, _, b64 = uri.partition(",")
+        mime = header[5:].split(";")[0] or "image/png"
+        ext = mimetypes.guess_extension(mime) or ".png"
+        return base64.b64decode(b64), f"image{ext}", mime
+    resp = requests.get(uri, timeout=120)
+    if not resp.ok:
+        raise APIError(f"bbww edits ref download failed: HTTP {resp.status_code}")
+    mime = resp.headers.get("Content-Type", "image/png").split(";")[0]
+    ext = mimetypes.guess_extension(mime) or ".png"
+    return resp.content, f"image{ext}", mime
+
+
+def _bbww_extract_image(data: dict) -> tuple[str | None, bytes | None]:
+    """从 OpenAI 兼容响应里取出图片：返回 (url, raw_bytes)，二者取其一。"""
+    if isinstance(data, dict) and "error" in data:
+        raise APIError(data["error"].get("message", "bbww image error"))
+    items = (data or {}).get("data") or []
+    if not items:
+        raise APIError(f"bbww image: empty data in {data}")
+    first = items[0]
+    if first.get("b64_json"):
+        return None, base64.b64decode(first["b64_json"])
+    if first.get("url"):
+        return first["url"], None
+    raise APIError(f"bbww image: no url/b64_json in {first}")
+
+
+def _bbww_generate(provider: dict, prompt: str, size: str | None,
+                   image_urls: list[str] | None, timeout: int) -> tuple[str | None, bytes | None]:
+    """bbww 同步出图/改图：有参考图走 /images/edits(multipart)，否则 /images/generations。
+
+    返回 (url, raw_bytes)——由上层统一落盘。
+    """
+    model = provider.get("image_model") or config.BBWW_IMAGE_MODEL
+    px = _bbww_size(size)
+    refs = [u for u in (image_urls or []) if isinstance(u, str) and u]
+    auth = {"Authorization": f"Bearer {provider['key']}"}
+    if refs:
+        url = f"{provider['base']}/images/edits"
+        files = []
+        for u in refs[:16]:
+            b, fn, mime = _bbww_image_bytes(u)
+            files.append(("image[]", (fn, b, mime)))
+        form = {"model": model, "prompt": prompt}
+        if px != "auto":
+            form["size"] = px
+        r = requests.post(url, headers=auth, data=form, files=files, timeout=timeout)
+    else:
+        url = f"{provider['base']}/images/generations"
+        payload: dict[str, Any] = {"model": model, "prompt": prompt, "n": 1}
+        if px != "auto":
+            payload["size"] = px
+        headers = dict(auth)
+        headers["Content-Type"] = "application/json"
+        r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    try:
+        data = r.json()
+    except ValueError as e:
+        raise APIError(f"bbww image non-JSON response (HTTP {r.status_code})") from e
+    return _bbww_extract_image(data)
+
+
+# --------------------------------------------------------------------------
 # Image generation (async, poll task)
 # --------------------------------------------------------------------------
 def _kie_aspect_ratio(size: str | None) -> str:
@@ -398,6 +613,61 @@ def _poll_task_kie(provider: dict, task_id: str, interval: int,
     raise APIError(f"kie image task {task_id} timed out after {timeout}s")
 
 
+def _submit_one_provider(provider: dict, prompt: str, size: str | None,
+                         resolution: str | None, image_urls: list[str] | None,
+                         model: str, timeout: int) -> str:
+    """对【单个】异步 provider 提交出图任务，返回 task_id（不遍历、不回退）。
+
+    供 generate_image 的统一轮转分发使用：由上层决定渠道顺序，这里只负责一个渠道。
+    """
+    if _is_kie(provider):
+        return _submit_image_kie(provider, prompt, size, resolution, image_urls, timeout)
+    payload: dict[str, Any] = {"model": model, "prompt": prompt, "n": 1}
+    if size:
+        payload["size"] = size
+    if resolution:
+        payload["resolution"] = resolution
+    if image_urls:
+        payload["image_urls"] = image_urls
+    r = requests.post(f"{provider['base']}/images/generations",
+                      headers=_headers(provider), json=payload, timeout=timeout)
+    data = r.json()
+    if "error" in data:
+        raise APIError(data["error"].get("message", "submit error"))
+    try:
+        return data["data"][0]["task_id"]
+    except (KeyError, IndexError) as e:
+        raise APIError(f"submit_image unexpected response: {data}") from e
+
+
+def _generate_via_provider(provider: dict, prompt: str, size: str | None,
+                           resolution: str | None, image_urls: list[str] | None,
+                           save_path: str | Path | None, model: str) -> dict:
+    """单渠道端到端出图：bbww/openai/lk888 同步直返；apimart/kie 异步 submit+poll+下载。
+
+    返回统一结构 {task_id, url, local_path, provider_base}。任一步失败抛 APIError，
+    由 generate_image 捕获后换下一个渠道。
+    """
+    if _is_bbww(provider):
+        return _generate_image_bbww(provider, prompt, size, image_urls, save_path, timeout=180)
+    # 异步渠道（apimart / kie）：submit -> poll -> download。
+    task_id = _submit_one_provider(provider, prompt, size, resolution, image_urls, model, 60)
+    dd = poll_task(task_id, provider=provider)
+    images = dd.get("result", {}).get("images", [])
+    if not images:
+        raise APIError(f"no images in task result: {dd}")
+    url_field = images[0]["url"]
+    url = url_field[0] if isinstance(url_field, list) else url_field
+    local_path = None
+    if save_path:
+        local_path = str(save_path)
+        img_data = _download_image_bytes(url)
+        from . import storage as _storage
+        _storage.save_file(Path(local_path), img_data, content_type="image/png")
+    return {"task_id": task_id, "url": url, "local_path": local_path,
+            "provider_base": provider["base"]}
+
+
 def submit_image(
     prompt: str,
     size: str | None = None,
@@ -420,6 +690,9 @@ def submit_image(
     last_err = None
     for provider in _ordered_providers("image"):
         base = provider["base"]
+        # bbww 是同步出图（无 task_id），由 generate_image 直接处理，submit 跳过。
+        if _is_bbww(provider):
+            continue
         if _is_kie(provider):
             for attempt in range(4):
                 try:
@@ -509,6 +782,56 @@ def poll_task(
     raise APIError(f"image task {task_id} timed out after {timeout}s")
 
 
+def _download_image_bytes(url: str) -> bytes:
+    """下载出图 URL 为字节，带 3 次重试并拦截错误页，避免把 html/json 当 PNG 落盘。"""
+    last_download_err = None
+    for dl_attempt in range(3):
+        try:
+            resp = requests.get(url, timeout=120)
+            # 签名 URL 过期或 CDN 瞬时 4xx/5xx 时不能把错误页字节当 PNG 落盘/上传，
+            # 否则会静默损坏本地缓存与 OSS 私有桶
+            if not resp.ok:
+                raise APIError(
+                    f"generate_image download failed: HTTP {resp.status_code} for {url}"
+                )
+            # 只拦明确的错误页（html/json/xml/text），不拦 octet-stream 等对象存储
+            # 常见头，否则会误杀本可成功的下载。
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if content_type.startswith(("text/", "application/json", "application/xml")):
+                raise APIError(
+                    f"generate_image download failed: unexpected Content-Type "
+                    f"{content_type!r} for {url}"
+                )
+            return resp.content
+        except (requests.RequestException, APIError) as e:
+            last_download_err = e
+            if dl_attempt == 2:
+                raise APIError(
+                    f"image download failed after 3 attempts: {last_download_err}"
+                ) from e
+            time.sleep(3)
+    raise APIError(f"image download failed: {last_download_err}")
+
+
+def _generate_image_bbww(provider: dict, prompt: str, size: str | None,
+                         image_urls: list[str] | None,
+                         save_path: str | Path | None, timeout: int) -> dict:
+    """bbww 同步出图 + 落盘。返回与 legacy 一致的 {url, local_path, ...}。"""
+    url, raw = _bbww_generate(provider, prompt, size, image_urls, timeout)
+    local_path = None
+    if save_path:
+        img_data = raw if raw is not None else _download_image_bytes(url)
+        local_path = str(save_path)
+        from . import storage as _storage
+        _storage.save_file(Path(local_path), img_data, content_type="image/png")
+    return {
+        "task_id": None,
+        "url": url,
+        "local_path": local_path,
+        "provider_base": provider["base"],
+    }
+
+
 def generate_image(
     prompt: str,
     size: str | None = None,
@@ -516,53 +839,23 @@ def generate_image(
     image_urls: list[str] | None = None,
     save_path: str | Path | None = None,
 ) -> dict:
-    """End-to-end: submit -> poll -> download. Returns {url, local_path}."""
-    prompt = _sanitize_image_prompt(prompt)
-    task_id, provider = submit_image(
-        prompt, size=size, resolution=resolution, image_urls=image_urls
-    )
-    dd = poll_task(task_id, provider=provider)
-    images = dd.get("result", {}).get("images", [])
-    if not images:
-        raise APIError(f"no images in task result: {dd}")
-    url_field = images[0]["url"]
-    url = url_field[0] if isinstance(url_field, list) else url_field
+    """End-to-end 出图，priority-first：先打 bbww(同步)，失败回退到异步 submit+poll。
 
-    local_path = None
-    if save_path:
-        local_path = str(save_path)
-        last_download_err = None
-        for dl_attempt in range(3):
-            try:
-                resp = requests.get(url, timeout=120)
-                # 签名 URL 过期或 CDN 瞬时 4xx/5xx 时不能把错误页字节当 PNG 落盘/上传，
-                # 否则会静默损坏本地缓存与 OSS 私有桶
-                if not resp.ok:
-                    raise APIError(
-                        f"generate_image download failed: HTTP {resp.status_code} for {url}"
-                    )
-                # 只拦明确的错误页（html/json/xml/text），不拦 octet-stream 等对象存储
-                # 常见头，否则会误杀本可成功的下载。
-                content_type = resp.headers.get("Content-Type", "").lower()
-                if content_type.startswith(("text/", "application/json", "application/xml")):
-                    raise APIError(
-                        f"generate_image download failed: unexpected Content-Type "
-                        f"{content_type!r} for {url}"
-                    )
-                img_data = resp.content
-                break
-            except (requests.RequestException, APIError) as e:
-                last_download_err = e
-                if dl_attempt == 2:
-                    raise APIError(
-                        f"image download failed after 3 attempts: {last_download_err}"
-                    ) from e
-                time.sleep(3)
-        from . import storage as _storage
-        _storage.save_file(Path(local_path), img_data, content_type="image/png")
-    return {
-        "task_id": task_id,
-        "url": url,
-        "local_path": local_path,
-        "provider_base": provider["base"],
-    }
+    Returns {url, local_path, provider_base, task_id}.
+    """
+    prompt = _sanitize_image_prompt(prompt)
+    model = config.IMAGE_MODEL
+
+    # 统一 round-robin 分发：_ordered_providers 已把全部渠道（openai/lk888 同步 +
+    # apimart×4/kie 异步）排成一个每次换头的轮转序列。每张图从不同渠道起头、成功即
+    # 返回，让 4 类渠道真正分摊出图吞吐；当前渠道失败（限流/超时/错误）自动换下一个。
+    last_err = None
+    for provider in _ordered_providers("image"):
+        try:
+            return _generate_via_provider(
+                provider, prompt, size, resolution, image_urls, save_path, model
+            )
+        except (APIError, requests.RequestException, KeyError, ValueError) as e:
+            last_err = e
+            continue
+    raise APIError(f"generate_image failed on all providers: {last_err}")
