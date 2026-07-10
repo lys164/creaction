@@ -2022,3 +2022,118 @@ async function loadLandingHistory() {
 }
 
 // 卡片点击切换角色时已处理预览与历史加载，无需额外的 select change 监听。
+
+// ========== 角色库 MINIMAP（VS Code 风格页面缩略图） ==========
+// 角色库视图下滑时，右侧浮出整页缩略预览；滑块=当前视口，可拖拽/点击/滚轮快速定位。
+(() => {
+  const MM_WIDTH = 110; // 与 .minimap 的 CSS 宽度一致
+  const box = $("#minimap");
+  const content = $("#minimapContent");
+  const slider = $("#minimapSlider");
+  const section = $("#view-characters");
+  const mainEl = $("main");
+  if (!box || !section || !mainEl) return;
+
+  let scale = 0.1;
+  let dragging = false;
+
+  // 滚动位置 s → 缩略图坐标的线性映射参数。
+  // 文档缩略总高超过 minimap 可视高时，缩略内容随滚动平移（VS Code 的 slider 行为），
+  // 此时滑块屏幕位移斜率 = scale - c。
+  function metrics() {
+    const docH = document.documentElement.scrollHeight;
+    const winH = window.innerHeight;
+    const mmH = box.clientHeight;
+    const maxS = Math.max(1, docH - winH);
+    const c = docH * scale > mmH ? (docH * scale - mmH) / maxS : 0;
+    return { docH, winH, mmH, maxS, c, slope: scale - c };
+  }
+
+  // 重建缩略 DOM：克隆 main，剥掉所有 id（避免 #charList 等选择器串扰），同步表单状态。
+  function rebuild() {
+    if (!section.classList.contains("active")) { update(); return; }
+    const w = mainEl.getBoundingClientRect().width || 1080;
+    scale = MM_WIDTH / w;
+    const clone = mainEl.cloneNode(true);
+    const src = $$("input, textarea, select", mainEl);
+    $$("input, textarea, select", clone).forEach((el, i) => {
+      if (!src[i]) return;
+      if (el.type === "checkbox" || el.type === "radio") el.checked = src[i].checked;
+      else el.value = src[i].value;
+    });
+    clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+    clone.style.width = w + "px";
+    clone.style.maxWidth = "none";
+    clone.style.margin = "0";
+    content.replaceChildren(clone);
+    update();
+  }
+
+  function update() {
+    const { docH, winH, mmH, c, slope } = metrics();
+    const s = window.scrollY;
+    const show = section.classList.contains("active") &&
+      docH - winH > 200 && (s > 80 || dragging);
+    box.classList.toggle("on", show);
+    if (!show) return;
+    const ty = mainEl.offsetTop * scale - c * s;
+    content.style.transform = `translateY(${ty}px) scale(${scale})`;
+    const sliderH = Math.max(winH * scale, 18);
+    const y = Math.max(0, Math.min(s * slope, mmH - sliderH));
+    slider.style.height = sliderH + "px";
+    slider.style.transform = `translateY(${y}px)`;
+  }
+
+  function scrollDoc(s) {
+    window.scrollTo({ top: Math.max(0, Math.min(s, metrics().maxS)) });
+  }
+
+  let dragStartY = 0, dragStartScroll = 0, dragSlope = 0.1;
+
+  box.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const m = metrics();
+    if (e.target !== slider) {
+      // 点击空白轨道：滑块中心跳到点击处（VS Code 行为），随后可继续拖拽
+      const sliderH = Math.max(m.winH * scale, 18);
+      const targetY = e.clientY - box.getBoundingClientRect().top - sliderH / 2;
+      scrollDoc(targetY / m.slope);
+    }
+    dragging = true;
+    box.classList.add("dragging");
+    dragStartY = e.clientY;
+    dragStartScroll = window.scrollY;
+    dragSlope = m.slope;
+    try { box.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  box.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    scrollDoc(dragStartScroll + (e.clientY - dragStartY) / dragSlope);
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    box.classList.remove("dragging");
+    update();
+  };
+  box.addEventListener("pointerup", endDrag);
+  box.addEventListener("pointercancel", endDrag);
+  box.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    window.scrollBy({ top: e.deltaY });
+  }, { passive: false });
+
+  let timer = null;
+  const scheduleRebuild = () => {
+    clearTimeout(timer);
+    timer = setTimeout(rebuild, 120);
+  };
+  window.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", scheduleRebuild);
+  // 视图切换、列表/详情重渲染、封面图加载都会触发这里，防抖后整体重建
+  new MutationObserver(scheduleRebuild).observe(mainEl, {
+    subtree: true, childList: true, characterData: true,
+    attributes: true, attributeFilter: ["class", "style", "src"],
+  });
+  mainEl.addEventListener("change", scheduleRebuild, true); // 勾选状态同步进缩略图
+})();
