@@ -27,6 +27,28 @@ _PROMPT_PACKS: dict[str, dict] = _PROMPTS.get("PROMPT_PACKS") or {
     }
 }
 
+# 可切换的落地页 prompt 变体：default = 原长图叙事页；其余变体（如
+# interactive 互动卡片版）自带完整 SYSTEM_PROMPT，输出整份 HTML 文档。
+_VARIANTS: dict[str, dict] = _PROMPTS.get("PROMPT_VARIANTS") or {}
+_DEFAULT_VARIANT = "default"
+
+
+def _variant(variant: str | None) -> dict:
+    return _VARIANTS.get(variant or "") or _VARIANTS.get(_DEFAULT_VARIANT) or {}
+
+
+def landing_variants() -> list[dict]:
+    """落地页 prompt 变体清单，供前端做选项切换。"""
+    out = []
+    for vid, v in _VARIANTS.items():
+        out.append({
+            "id": vid,
+            "label": v.get("label") or vid,
+            "desc": v.get("desc") or "",
+        })
+    return out
+
+
 _LANG_TO_PROMPT_LANG = {
     "zh": "zh-CN",
     "zh-CN": "zh-CN",
@@ -35,19 +57,6 @@ _LANG_TO_PROMPT_LANG = {
     "ko": "ko",
     "en": "en",
 }
-_DEFAULT_LOCALE_BY_LANG = {
-    "zh": "CN",
-    "zh-CN": "CN",
-    "zh-TW": "TW",
-    "ja": "JP",
-    "ko": "KR",
-    "en": "US",
-}
-_LOCALE_FIELDS = (
-    "im", "social", "id_docs", "photo", "fonts",
-    "idol", "money", "aesthetic", "manners",
-)
-
 SP_TEMPLATE: str = _PROMPT_PACKS["zh-CN"].get("SP_TEMPLATE", "")
 STYLE_MAP: dict = _PROMPT_PACKS["zh-CN"].get("STYLE_MAP", {})
 DEFAULT_DESIGN_DIRECTIVE: str = _PROMPT_PACKS["zh-CN"].get(
@@ -63,14 +72,6 @@ def _prompt_lang(lang: str | None) -> str:
 
 def _prompt_pack(lang: str | None) -> dict:
     return _PROMPT_PACKS.get(_prompt_lang(lang)) or _PROMPT_PACKS["zh-CN"]
-
-
-def _locale_code(lang: str | None, locale: str | None = None) -> str:
-    locale_map = _PROMPTS.get("LOCALE_MAP") or {}
-    code = (locale or "").strip().upper()
-    if code in locale_map:
-        return code
-    return _DEFAULT_LOCALE_BY_LANG.get(lang or "", "CN")
 
 
 def landing_styles(lang: str | None = None) -> list[str]:
@@ -115,50 +116,23 @@ def _style_content(style_text: str | None, pack: dict) -> str:
     return style or pack.get("FALLBACK") or FALLBACK
 
 
-def _locale_directive(lang: str | None, locale: str | None = None) -> str:
-    locale_map = _PROMPTS.get("LOCALE_MAP") or {}
-    locale_dirs = _PROMPTS.get("LOCALE_DIR_I18N") or {}
-    if not locale_map or not locale_dirs:
-        return ""
-
-    prompt_lang = _prompt_lang(lang)
-    loc = locale_map.get(_locale_code(lang, locale)) or locale_map.get("CN")
-    directive = locale_dirs.get(prompt_lang) or locale_dirs.get("zh-CN")
-    if not loc or not directive:
-        return ""
-
-    sep = directive.get("sep", ": ")
-    out = [
-        "---",
-        "",
-        directive.get("title", "## Cultural localization"),
-        "",
-        directive.get("intro", ""),
-        "",
-        f"**{directive.get('targetLabel', 'Target region')}{sep}"
-        f"{loc.get('label') or loc.get('name') or ''}**",
-    ]
-    bullets = directive.get("bullets") or []
-    values = [loc.get(field, "") for field in _LOCALE_FIELDS]
-    for idx, label in enumerate(bullets):
-        if idx < len(values) and values[idx]:
-            out.append(f"- {label}{sep}{values[idx]}")
-    if directive.get("eg"):
-        out.extend(["", directive["eg"]])
-    return "\n\n" + "\n".join(out)
-
-
 def build_system_prompt(
     style_text: str | None,
     lang: str | None = "zh",
     locale: str | None = None,
+    variant: str | None = None,
 ) -> str:
-    """Inject style + language/locale prompt pack into the system prompt."""
+    """Inject style into the language-specific system prompt.
+
+    非默认变体（如互动卡片版）自带完整、自包含的 SYSTEM_PROMPT，直接返回，
+    不注入 style（其母版已内置全套约束）。"""
+    v = _variant(variant)
+    if v.get("SYSTEM_PROMPT"):
+        return v["SYSTEM_PROMPT"]
+
     pack = _prompt_pack(lang)
     template = pack.get("SP_TEMPLATE") or SP_TEMPLATE
-    return template.replace("{{style}}", _style_content(style_text, pack)) + _locale_directive(
-        lang, locale
-    )
+    return template.replace("{{style}}", _style_content(style_text, pack))
 
 
 def _default_design_directive(lang: str | None) -> str:
@@ -248,28 +222,37 @@ def _msg(lang: str | None) -> dict:
     return _MSG_I18N.get(lang or "") or _MSG_I18N["zh"]
 
 
+# 新旧 schema 键并存（同一角色只带其中一套）：identity/dislikes/worldview/
+# online_chat_style/behavior_patterns/inner_structure/value 为新键，其余旧键兼容存量。
 _FIELD_LABELS = {
     "profile": "profile",
     "tags": "tags",
     "species": "species",
     "gender": "gender",
+    "value": "value",
     "personality": "personality",
+    "inner_structure": "inner_structure",
     "hometown": "hometown",
     "residence": "residence",
+    "identity": "identity",
     "social_status": "social_status",
     "speech_style": "speech_style",
+    "online_chat_style": "online_chat_style",
     "relationship_with_user": "relationship_with_user",
     "relationship_mode": "relationship_mode",
     "love_style": "love_style",
+    "behavior_patterns": "behavior_patterns",
     "situational_reactions": "situational_reactions",
     "hidden_side": "hidden_side",
     "life_details": "life_details",
     "likes": "likes",
+    "dislikes": "dislikes",
     "fears": "fears",
     "wishlist": "wishlist",
     "backstory": "backstory",
     "family": "family",
     "social_network": "social_network",
+    "worldview": "worldview",
     "premise": "premise",
 }
 
@@ -286,18 +269,21 @@ def _stringify(value) -> str:
             if isinstance(it, str):
                 parts.append(it.strip())
             elif isinstance(it, dict):
-                # backstory {stage,detail} / family|social {name,relation,info,dynamic}
+                # backstory {stage,detail} / 旧 social {name,relation,info,dynamic}
+                # / 新 social {name,relationship,description}
                 if it.get("stage") or it.get("detail"):
                     head = it.get("stage", "")
                     parts.append(f"{head}：{it.get('detail', '')}".strip("："))
-                elif it.get("content") and not it.get("relation"):
+                elif it.get("content") and not (it.get("relation") or it.get("relationship")):
                     parts.append(it.get("content", ""))
                 else:
                     head = " · ".join(
-                        x for x in (it.get("name"), it.get("relation")) if x
+                        x for x in (it.get("name"), it.get("relation"),
+                                    it.get("relationship")) if x
                     )
                     tail = "；".join(
-                        x for x in (it.get("info"), it.get("dynamic")) if x
+                        x for x in (it.get("info"), it.get("dynamic"),
+                                    it.get("description")) if x
                     )
                     parts.append(f"{head}：{tail}" if tail else head)
             else:
@@ -411,15 +397,72 @@ def _opening_text(persona: dict, lang: str | None = "zh") -> str:
     return "\n".join(lines)
 
 
+def _cover_note_for_variant(v: dict, has_cover: bool, labels: dict) -> str:
+    """按变体的封面承载方式给出封面说明。
+
+    - cover_placeholder（如互动版 __IMG_BASE64__）：只作有/无声明，勿改占位符。
+    - cover_slot（如 narrative_pro 用 oc-cover）：沿用通用槽位说明，渲染器注入。
+    """
+    if v.get("cover_placeholder"):
+        ph = v["cover_placeholder"]
+        return (f"cover: 有封面图（原样保留母版里的封面占位符 {ph}，"
+                f"后处理会填成公网图片 URL，勿自行生成 base64）"
+                if has_cover else f"cover: 无封面图（按母版占位符 {ph} 处理）")
+    # 默认走 oc-cover 槽位说明（与默认变体一致）。
+    return labels["cover_yes"] if has_cover else labels["cover_no"]
+
+
+def _build_self_contained_message(
+    persona: dict, lang: str, has_cover: bool, labels: dict,
+    name: str, profile: str, detail: str,
+    request: str, style_text: str | None, current_html: str | None,
+    variant_cfg: dict,
+) -> str:
+    """自包含变体的用户消息：输入只有角色 json + 封面图，
+    不拼接 moments/帖子内容，也不追加品牌/语言/设计指令等额外内容。"""
+    info = labels["char_info"] + "\n" + name + "\n"
+    info += f"lang: {lang}\n"
+    if profile:
+        info += "profile: " + profile + "\n"
+    if detail:
+        info += detail + "\n"
+    opening = _opening_text(persona, lang)
+    if opening:
+        info += "\n" + labels["opening_title"] + "\n" + opening + "\n"
+    info += _cover_note_for_variant(variant_cfg, has_cover, labels) + "\n"
+    parts = [info]
+
+    command = (request or "").strip()
+    if style_text:
+        command = (
+            command + "\n" if command else ""
+        ) + labels["style_prefix"] + style_text
+    if current_html and current_html.strip():
+        html = current_html.strip()
+        command += (labels["current_html"] + html
+                    if len(html) < 6000 else labels["current_html_long"])
+    if command:
+        parts.append(labels["request"] + command)
+    return "\n\n".join(parts)
+
+
 def build_user_message(persona: dict, lang: str, has_cover: bool,
                        request: str = "", style_text: str | None = None,
                        current_html: str | None = None,
-                       moments: list[dict] | None = None) -> str:
+                       moments: list[dict] | None = None,
+                       variant: str | None = None) -> str:
     """Assemble the structured user turn (character info + directive + request)."""
     labels = _msg(lang)
     name = _stringify(persona.get("name")) or labels["unnamed"]
     profile = _stringify(persona.get("profile"))
     detail = persona_to_profile_text(persona)
+
+    vcfg = _variant(variant)
+    if vcfg.get("SYSTEM_PROMPT"):
+        return _build_self_contained_message(
+            persona, lang, has_cover, labels, name, profile, detail,
+            request, style_text, current_html, vcfg,
+        )
 
     parts = []
     info = labels["char_info"] + "\n" + name + "\n"
@@ -518,6 +561,12 @@ def inject_cover(html: str, cover_url: str | None) -> str:
         return html
     url = cover_url
 
+    # 互动卡片版母版用占位符承载封面（<img src>）。新版占位符是 __IMG_URL__
+    # （填公网/相对 URL，不内联 base64）；老页面里仍是 __IMG_BASE64__，一并兼容。
+    for placeholder in ("__IMG_URL__", "__IMG_BASE64__"):
+        if placeholder in html:
+            html = html.replace(placeholder, url)
+
     def _img_src(m):
         return _set_img_src(m.group(0), url)
 
@@ -582,4 +631,42 @@ def inject_post_images(html: str, post_urls: list[str] | None) -> str:
             rf'<div\b[^>]*\bclass=["\'][^"\']*{cls}(?![\w-])[^"\']*["\'][^>]*>',
             _div_bg, html,
         )
+    return html
+
+
+# 站内相对资源前缀（img/上传/缩略图），改写成绝对 URL 时匹配这些根路径。
+_REL_ASSET_PREFIXES = ("/img/", "/upload/", "/thumbs/")
+
+
+def absolutize_urls(html: str, base_url: str | None) -> str:
+    """把落地页里 src/url() 引用的站内相对资源改写成带域名的绝对 URL。
+
+    只改以 /img/、/upload/、/thumbs/ 开头的相对路径（站内静态资源），
+    形如 src="/img/x.png" / url('/img/x.png') → base_url + 路径。
+    已是 http(s)/data: 的绝对地址、以及其它相对路径一律不动。base_url
+    为空时原样返回（保持相对路径的历史行为）。"""
+    if not base_url or not html:
+        return html
+    base = base_url.rstrip("/")
+
+    def _abs(m: "re.Match") -> str:
+        quote, path = m.group("q"), m.group("p")
+        return f'{m.group("attr")}={quote}{base}{path}{quote}'
+
+    prefix_alt = "|".join(re.escape(p) for p in _REL_ASSET_PREFIXES)
+    # src="/img/..." 或 href="/img/..."（引号内以受支持前缀开头的相对路径）
+    html = re.sub(
+        rf'(?P<attr>\b(?:src|href))\s*=\s*(?P<q>["\'])(?P<p>(?:{prefix_alt})[^"\']*)(?P=q)',
+        _abs, html,
+    )
+
+    def _abs_css(m: "re.Match") -> str:
+        quote, path = m.group("q") or "", m.group("p")
+        return f'url({quote}{base}{path}{quote})'
+
+    # CSS url(/img/...) —— 引号可有可无
+    html = re.sub(
+        rf'url\(\s*(?P<q>["\']?)(?P<p>(?:{prefix_alt})[^"\')]*)(?P=q)\s*\)',
+        _abs_css, html,
+    )
     return html

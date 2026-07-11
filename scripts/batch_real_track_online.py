@@ -50,7 +50,7 @@ STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "batch_real_onlin
 
 # 轮询：人设(含封面)较慢，帖子配图更慢，给足超时
 POLL_INTERVAL = 8
-PERSONA_TIMEOUT = 1200      # 单组人设+封面(4语言并发)
+PERSONA_TIMEOUT = 2400      # 单组人设+封面(4语言)；服务器被他人占用时留足排队时间
 POSTS_TIMEOUT = 2400        # 单组帖子配图(4角色×~9图)
 DEFAULT_CONCURRENCY = 4     # 同时并行的组数（--concurrency 覆盖）
 

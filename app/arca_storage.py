@@ -11,14 +11,48 @@
 集合名须 ^[a-z0-9_]{1,64}$；不走 JWT / 签名 / X-Language 等业务头。
 """
 import json
+import logging
+import time
 
 import requests
 
 from . import config
 
+log = logging.getLogger("arca_storage")
+
+# 瞬时故障重试：网络抖动 / 5xx / 429 会重试，业务性 4xx（400/401/404）立即抛。
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+
 
 class StorageError(Exception):
     pass
+
+
+def _request(method: str, path: str, *, retry: bool = True, **kwargs):
+    """带指数退避重试的 HTTP 调用。仅对网络异常/5xx/429 重试；业务错误直接返回。"""
+    attempts = _MAX_RETRIES if retry else 1
+    last_exc: Exception | None = None
+    caller = getattr(requests, method.lower())  # requests.get / requests.post
+    for i in range(attempts):
+        try:
+            resp = caller(_url(path), headers=_headers(), **kwargs)
+        except requests.RequestException as e:  # 连接/读超时/DNS 等瞬时故障
+            last_exc = e
+            if i + 1 >= attempts:
+                raise StorageError(f"storage 网络失败 {method} {path}: {e}") from e
+            time.sleep(0.5 * (2 ** i))
+            log.warning("storage %s %s 网络失败，重试 %d/%d: %s",
+                        method, path, i + 1, attempts, e)
+            continue
+        if resp.status_code in _RETRY_STATUS and i + 1 < attempts:
+            time.sleep(0.5 * (2 ** i))
+            log.warning("storage %s %s HTTP %d，重试 %d/%d",
+                        method, path, resp.status_code, i + 1, attempts)
+            continue
+        return resp
+    # 理论不可达：循环要么 return 要么 raise
+    raise StorageError(f"storage 调用失败 {method} {path}: {last_exc}")
 
 
 def enabled() -> bool:
@@ -47,24 +81,22 @@ def _check(resp, allow_404: bool = False):
 
 def ensure_collection(name: str, description: str = "") -> None:
     """注册集合（幂等）。put 之前集合必须存在，否则 404「集合不存在」。"""
-    r = requests.post(_url("/storage/collections/create"),
-                      json={"name": name, "description": description},
-                      headers=_headers(), timeout=15)
+    r = _request("POST", "/storage/collections/create",
+                 json={"name": name, "description": description}, timeout=15)
     _check(r)
 
 
 def put_record(collection: str, key: str, data: dict) -> None:
-    r = requests.post(_url("/storage/records/put"),
-                      json={"collection": collection, "key": key, "data": data},
-                      headers=_headers(), timeout=30)
+    r = _request("POST", "/storage/records/put",
+                 json={"collection": collection, "key": key, "data": data},
+                 timeout=30)
     _check(r)
 
 
 def get_record(collection: str, key: str) -> dict | None:
     """返回 data 对象；记录不存在返回 None。"""
-    r = requests.get(_url("/storage/records/get"),
-                     params={"collection": collection, "key": key},
-                     headers=_headers(), timeout=30)
+    r = _request("GET", "/storage/records/get",
+                 params={"collection": collection, "key": key}, timeout=30)
     body = _check(r, allow_404=True)
     if body is None:
         return None
@@ -87,8 +119,7 @@ def query_records(collection: str, match: dict | None = None,
         payload["match"] = match
     if order_by:
         payload["order_by"] = order_by
-    r = requests.post(_url("/storage/records/query"), json=payload,
-                      headers=_headers(), timeout=30)
+    r = _request("POST", "/storage/records/query", json=payload, timeout=30)
     body = _check(r, allow_404=True)
     if body is None:
         return []
@@ -108,8 +139,7 @@ def query_records(collection: str, match: dict | None = None,
 
 
 def delete_record(collection: str, key: str) -> None:
-    """删除记录；记录/集合不存在视为已删（幂等）。"""
-    r = requests.post(_url("/storage/records/delete"),
-                      json={"collection": collection, "key": key},
-                      headers=_headers(), timeout=30)
+    """删除记录；记录/集合不存在视为已删（幂等）。瞬时故障自动重试。"""
+    r = _request("POST", "/storage/records/delete",
+                 json={"collection": collection, "key": key}, timeout=30)
     _check(r, allow_404=True)

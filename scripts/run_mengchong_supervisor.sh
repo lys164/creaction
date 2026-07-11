@@ -19,7 +19,7 @@ for i in $(seq 1 100); do
     break
   fi
   caffeinate -i "$PY" -u scripts/batch_nonhuman_online.py \
-    --image-dir "$IMG_DIR" --state "$STATE" --concurrency 4
+    --image-dir "$IMG_DIR" --state "$STATE" --concurrency 2
   echo "----- 批处理本轮结束(exit=$?)，2s 后检查是否需要续跑 -----"
   sleep 2
 done

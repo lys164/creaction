@@ -1,9 +1,13 @@
 """FastAPI backend for the POPOP production pipeline."""
+import hashlib
+import re
 import shutil
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -40,6 +44,8 @@ class CoverReq(BaseModel):
     # None = auto：写实画风且有源图时自动用 i2i 参考（见 pipeline.generate_cover）
     use_reference: bool | None = None
     mode: str = "fill_missing"
+    # True = 以当前封面而非源图为参考重跑封面链路（source=image 远离原图用）
+    recook_from_cover: bool = False
 
 
 class PostsReq(BaseModel):
@@ -78,17 +84,35 @@ class LandingReq(BaseModel):
     style_text: str | None = None
     request: str = ""
     current_html: str | None = None
+    variant: str | None = None
 
 
 class BatchLandingReq(BaseModel):
     char_ids: list[str]
     style_text: str | None = None
     request: str = ""
+    variant: str | None = None
 
 
 class PersonaUpdateReq(BaseModel):
     char_id: str
     persona: dict
+
+
+class PostContentUpdateReq(BaseModel):
+    # content 可为字符串或多语言 dict，与生成时形态一致，故用宽松类型
+    content: Any = None
+    variable: Any = None
+    scene: Any = None
+
+
+class IgPostContentUpdateReq(BaseModel):
+    content: Any = None
+
+
+class LandingHtmlUpdateReq(BaseModel):
+    char_id: str
+    html: str
 
 
 class CharIdsReq(BaseModel):
@@ -116,6 +140,7 @@ class BatchCoverReq(BaseModel):
     style_id: str
     use_reference: bool | None = None
     mode: str = "fill_missing"
+    recook_from_cover: bool = False
 
 
 class ChatReq(BaseModel):
@@ -150,6 +175,11 @@ def get_post_types():
 @app.get("/api/landing_styles")
 def get_landing_styles():
     return landing.landing_styles()
+
+
+@app.get("/api/landing_variants")
+def get_landing_variants():
+    return landing.landing_variants()
 
 
 @app.get("/api/styles")
@@ -202,7 +232,8 @@ def create_personas(
         if not (f.filename or getattr(f, "size", None)):
             continue  # skip empty multipart placeholder
         ext = Path(f.filename or "img.png").suffix or ".png"
-        dest = config.UPLOAD_DIR / f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{len(saved)}{ext}"
+        dest = config.UPLOAD_DIR / \
+            f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{len(saved)}{ext}"
         data = f.file.read()
         storage.save_file(dest, data)  # 本地 + OSS 双写
         saved.append(str(dest))
@@ -233,8 +264,8 @@ def create_personas(
             tasks.bump(tid)
 
         cover_errors = {}
-        # nonhuman 非人物链路不选画风：也允许自动生成封面（generate_cover 内部会不套画风）
-        if with_cover and (cover_style_id or track == "nonhuman"):
+        # nonhuman/flirt 链路允许不选画风也自动生成封面（generate_cover 内部会不套画风）
+        if with_cover and (cover_style_id or track in ("nonhuman", "flirt")):
             def _cover(rec: dict):
                 cid = rec.get("char_id")
                 try:
@@ -336,8 +367,8 @@ def import_personas_from_json(
                   for i, r in enumerate(results) if r.get("error")}
 
         cover_errors = {}
-        # nonhuman 非人物链路不选画风：也允许自动生成封面（generate_cover 内部会不套画风）
-        if with_cover and (cover_style_id or track == "nonhuman"):
+        # nonhuman/flirt 链路允许不选画风也自动生成封面（generate_cover 内部会不套画风）
+        if with_cover and (cover_style_id or track in ("nonhuman", "flirt")):
             def _cover(rec: dict):
                 cid = rec.get("char_id")
                 try:
@@ -442,29 +473,96 @@ def batch_regenerate_opening(req: BatchOpeningReq):
 
 @app.post("/api/characters/delete")
 def delete_characters(req: CharIdsReq):
-    """批量删除角色。单个失败(如远端存储删除失败)不中断其余，错误逐个返回。"""
-    deleted, errors = [], {}
-    for cid in req.char_ids:
-        try:
-            if pipeline.delete_character(cid):
-                deleted.append(cid)
-        except Exception as e:  # noqa: BLE001 远端删除失败需暴露并允许重试
-            errors[cid] = str(e)
-    return {"deleted": deleted, "errors": errors}
+    """批量删除角色（后台并发任务）。
+
+    删除会联动远端存储/OSS 清理，单个角色可能耗时数秒；同步串行执行整批时极易
+    撞反代读超时(504)，前端误报失败而后台仍在删。改为后台任务：立即返回 task_id，
+    前端轮询进度。单个失败(如远端删除失败)不中断其余，错误逐个返回可重试。"""
+    tid = tasks.create_task("delete_characters", total=len(req.char_ids))
+
+    def _job(tid: str):
+        deleted, errors = [], {}
+
+        def _one(cid: str):
+            try:
+                pipeline.delete_character(cid)
+                return cid, None
+            except Exception as e:  # noqa: BLE001 远端删除失败需暴露并允许重试
+                return cid, str(e)
+
+        if req.char_ids:
+            with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+                for cid, err in ex.map(_one, req.char_ids):
+                    if err is None:
+                        deleted.append(cid)
+                    else:
+                        errors[cid] = err
+                    tasks.bump(tid)
+        return {"deleted": deleted, "errors": errors}
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+_EXPORT_TTL = 6 * 3600  # 导出 zip 落盘保留时长（秒），过期自动清理
+
+
+def _gc_old_exports() -> None:
+    """清理过期的导出 zip，避免磁盘无限增长。"""
+    try:
+        cutoff = time.time() - _EXPORT_TTL
+        for p in config.EXPORT_DIR.glob("*.zip"):
+            try:
+                if p.stat().st_mtime < cutoff:
+                    p.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 @app.post("/api/characters/export")
 def export_characters(req: CharIdsReq):
-    """批量导出角色为 zip：每个角色一个文件夹，含 character.json、cover.png、posts 图片。"""
+    """批量导出角色为 zip（异步）：立刻返回 task_id，后台并行打包并落盘。
+
+    大批量（几百个）同步生成会超过反代读超时导致 504，故改为后台任务：
+    完成后 result 带下载 token，前端凭 token 走 /export/download 拉取 zip。
+    """
     if not req.char_ids:
         raise HTTPException(400, "no characters selected")
-    data = pipeline.export_characters_zip(req.char_ids)
+
+    char_ids = list(req.char_ids)
     stamp = time.strftime("%Y%m%d_%H%M%S")
+    token = uuid.uuid4().hex[:16]
     filename = f"characters_export_{stamp}.zip"
-    return Response(
-        content=data,
+    dst = config.EXPORT_DIR / f"{token}.zip"
+    _gc_old_exports()
+
+    task_id = tasks.create_task("export", total=len(char_ids))
+
+    def _job(tid: str):
+        count = pipeline.export_characters_zip_to_file(
+            char_ids, dst, on_done=lambda _cid: tasks.bump(tid))
+        return {"token": token, "filename": filename, "count": count,
+                "download_url": f"/api/characters/export/download/{token}"}
+
+    tasks.run(task_id, _job)
+    return {"task_id": task_id}
+
+
+@app.get("/api/characters/export/download/{token}")
+def download_export(token: str):
+    """下载异步导出生成的 zip。token 来自导出任务的 result。"""
+    if not re.fullmatch(r"[0-9a-f]{16}", token):
+        raise HTTPException(400, "bad token")
+    path = config.EXPORT_DIR / f"{token}.zip"
+    if not path.is_file():
+        raise HTTPException(404, "export not found or expired")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    return FileResponse(
+        str(path),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        filename=f"characters_export_{stamp}.zip",
     )
 
 
@@ -486,7 +584,8 @@ def make_cover(req: CoverReq):
 
     def _job(tid: str):
         page = pipeline.generate_cover(
-            req.char_id, req.style_id, req.use_reference, req.mode)
+            req.char_id, req.style_id, req.use_reference, req.mode,
+            recook_from_cover=req.recook_from_cover)
         tasks.bump(tid)
         return page
 
@@ -505,7 +604,8 @@ def make_batch_cover(req: BatchCoverReq):
         def _one(cid: str):
             try:
                 pipeline.generate_cover(
-                    cid, req.style_id, req.use_reference, req.mode)
+                    cid, req.style_id, req.use_reference, req.mode,
+                    recook_from_cover=req.recook_from_cover)
                 return cid, None
             except Exception as e:  # noqa: BLE001
                 return cid, str(e)
@@ -555,6 +655,16 @@ def rerender_post_image(char_id: str, batch_id: str, post_id: str,
                         req: RerenderImageReq):
     return pipeline.rerender_post_image(
         char_id, batch_id, post_id, style_id=req.style_id
+    )
+
+
+@app.put("/api/posts/{char_id}/{batch_id}/{post_id}")
+def update_post(char_id: str, batch_id: str, post_id: str,
+                req: PostContentUpdateReq):
+    """编辑保存一条普通帖子的文本（可选 variable/scene），不重新生成。"""
+    return pipeline.update_post_content(
+        char_id, batch_id, post_id,
+        content=req.content, variable=req.variable, scene=req.scene,
     )
 
 
@@ -621,6 +731,12 @@ def rerender_ig_post_image(char_id: str, post_id: str, req: RerenderImageReq):
     return pipeline.rerender_ig_post_image(char_id, post_id, style_id=req.style_id)
 
 
+@app.put("/api/ig_posts/{char_id}/{post_id}")
+def update_ig_post(char_id: str, post_id: str, req: IgPostContentUpdateReq):
+    """编辑保存最新 IG 批次里一条帖子的文本，不重新生成。"""
+    return pipeline.update_ig_post_content(char_id, post_id, content=req.content)
+
+
 @app.delete("/api/ig_posts/{char_id}/{post_id}")
 def delete_ig_post(char_id: str, post_id: str):
     return pipeline.delete_ig_post(char_id, post_id)
@@ -648,6 +764,7 @@ def make_landing(req: LandingReq):
             style_text=req.style_text,
             request=req.request,
             current_html=req.current_html,
+            variant=req.variant,
         )
         tasks.bump(tid)
         return page
@@ -668,7 +785,7 @@ def make_batch_landing(req: BatchLandingReq):
             try:
                 pipeline.generate_landing(
                     cid, style_text=req.style_text, request=req.request,
-                    current_html=None,
+                    current_html=None, variant=req.variant,
                 )
                 return cid, None
             except Exception as e:  # noqa: BLE001
@@ -686,6 +803,12 @@ def make_batch_landing(req: BatchLandingReq):
 
     tasks.run(task_id, _job)
     return {"task_id": task_id}
+
+
+@app.put("/api/landing")
+def update_landing(req: LandingHtmlUpdateReq):
+    """保存平台里手改的落地页 HTML（覆盖最新一份），不重新走 LLM。导出即用这份。"""
+    return pipeline.update_landing_html(req.char_id, req.html)
 
 
 @app.get("/api/landing/{char_id}")
@@ -784,23 +907,75 @@ def replace_styles(new_styles: list[dict]):
 
 
 # ---------- serve generated images ----------
+# 内容寻址缓存：图片一旦生成内容基本不变，重绘会换新文件名/mtime，
+# 因此可安全地长缓存并用 ETag 做协商，避免每次刷新重下几百 MB 原图。
+_THUMB_DIR = config.DATA_DIR / "thumbs"
+_THUMB_DIR.mkdir(parents=True, exist_ok=True)
+_THUMB_WIDTHS = (200, 400, 800)  # 允许的缩略宽度，防止任意尺寸打爆磁盘
+
+
+def _file_etag(p: Path) -> str:
+    st = p.stat()
+    return f'"{int(st.st_mtime)}-{st.st_size}"'
+
+
+def _cached_file_response(p: Path, request: Request, immutable: bool = True) -> Response:
+    """带 ETag 协商 + 长缓存的文件响应；命中则回 304。"""
+    etag = _file_etag(p)
+    cache = "public, max-age=31536000" + (", immutable" if immutable else "")
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cache})
+    return FileResponse(str(p), headers={"ETag": etag, "Cache-Control": cache})
+
+
+def _thumb_path(src: Path, width: int) -> Path:
+    key = f"{src.name}-{int(src.stat().st_mtime)}-w{width}"
+    digest = hashlib.md5(key.encode()).hexdigest()
+    return _THUMB_DIR / f"{digest}.webp"
+
+
+def _make_thumb(src: Path, width: int) -> Path | None:
+    """按需生成 webp 缩略图并落盘缓存；失败返回 None（回退原图）。"""
+    dst = _thumb_path(src, width)
+    if dst.exists():
+        return dst
+    try:
+        from PIL import Image
+
+        with Image.open(src) as im:
+            if im.width <= width:  # 原图already比目标小，不放大
+                return None
+            im = im.convert("RGB")
+            h = round(im.height * width / im.width)
+            im = im.resize((width, h), Image.LANCZOS)
+            im.save(dst, "WEBP", quality=82, method=4)
+        return dst
+    except Exception:
+        return None
+
+
 @app.get("/img/{name}")
-def serve_image(name: str):
+def serve_image(name: str, request: Request, w: int | None = None):
     p = config.IMAGE_DIR / name
     if not storage.ensure_file(p):  # 本地缺失时从 arca OSS 回源
         raise HTTPException(404, "image not found")
-    return FileResponse(
-        str(p),
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
-    )
+    if w and w in _THUMB_WIDTHS:
+        thumb = _make_thumb(p, w)
+        if thumb is not None:
+            return _cached_file_response(thumb, request)
+    return _cached_file_response(p, request)
 
 
 @app.get("/upload/{name}")
-def serve_upload(name: str):
+def serve_upload(name: str, request: Request, w: int | None = None):
     p = config.UPLOAD_DIR / name
     if not storage.ensure_file(p):
         raise HTTPException(404, "not found")
-    return FileResponse(str(p))
+    if w and w in _THUMB_WIDTHS:
+        thumb = _make_thumb(p, w)
+        if thumb is not None:
+            return _cached_file_response(thumb, request)
+    return _cached_file_response(p, request)
 
 
 # ---------- static web (no-cache so UI updates show immediately) ----------

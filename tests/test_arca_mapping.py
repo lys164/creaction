@@ -133,18 +133,30 @@ def test_visibility_and_anonymous_identities_are_form_fields():
     assert "visibility" not in form2
 
 
-def test_disposition_joins_all_personality_values():
+def test_disposition_builds_natural_language_by_lang_and_gender():
     persona = {
         "name": "A",
+        "gender": "女",
         "personality": {
-            "summary": "外柔内刚",
-            "decisive_event": "少年时的一场离别",
-            "response": "",  # 空值跳过
-            "desire_inner": "渴望被无条件接纳",
+            "summary": "外柔内刚。",
+            "decisive_event": "少年时的一场离别。",
+            "response": "学会了先照顾别人。",
+            "cost": "很少表达自己的需要。",
+            "desire_outer": "安稳的生活。",
+            "desire_inner": "被无条件接纳。",
+            "desire_bottom_line": "绝不背叛信任她的人。",
+            "healing": "被人坚定选择。",  # healing 有意丢弃，不进 disposition
         },
     }
-    form = persona_to_character_form(persona)
-    assert form["disposition"] == "外柔内刚\n少年时的一场离别\n渴望被无条件接纳"
+    form = persona_to_character_form(persona, lang="zh")
+    assert form["disposition"] == (
+        "外柔内刚。少年时的一场离别。结果，学会了先照顾别人。因此她很少表达自己的需要。"
+        "她表面上想要安稳的生活，实际上想要被无条件接纳。她的底线是绝不背叛信任她的人。")
+    assert "被人坚定选择" not in form["disposition"]
+    # 缺链条字段时逐段跳过，不硬凑连接词
+    form2 = persona_to_character_form(
+        {"name": "A", "personality": {"summary": "外柔内刚", "response": ""}})
+    assert form2["disposition"] == "外柔内刚。"
 
 
 def test_tags_map_to_form_field_not_customized_settings():
@@ -183,7 +195,7 @@ def test_persona_to_form_core_fields():
     assert form["profile"] == "温柔坚定的魔法少女"
     assert form["gender"] == "female"
     assert form["species"] == "人类"
-    assert form["disposition"] == "外柔内刚"
+    assert form["disposition"] == "外柔内刚。"
     # opening 两句 → opening_prologue，output_type=text
     assert form["opening_prologue"] == [
         {"text": "最近好吗？", "output_type": "text"},

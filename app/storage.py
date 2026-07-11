@@ -307,19 +307,41 @@ def migrate_all(progress=None) -> dict:
     return stats
 
 
-def _oss_bucket():
-    """取 OSS STS 凭证并构造 Bucket 客户端（内部工具，调用方自行捕获异常）。"""
-    import oss2
+_OSS_BUCKET_CACHE: dict = {"bkt": None, "exp": 0.0}
+_OSS_BUCKET_LOCK = threading.Lock()
+# STS 凭证签发有效期 3600s；提前 600s 过期换新，留足时钟偏移/在途请求余量。
+_OSS_CRED_TTL = 3600 - 600
 
-    from . import arca_client
-    r = arca_client._post(  # noqa: SLF001
-        f"{config.ARCA_BASE_URL}/file/tos_credential",
-        {"use_public": False, "expires_in": 3600},
-        headers=arca_client._headers("zh"), timeout=30)
-    cred = arca_client._data(r)
-    auth = oss2.StsAuth(cred["access_key_id"], cred["secret_access_key"],
-                        cred["session_token"])
-    return oss2.Bucket(auth, cred["endpoint"], cred["bucket"])
+
+def _oss_bucket():
+    """取 OSS Bucket 客户端（带 STS 凭证缓存）。
+
+    此前每次调用都取一次 STS 临时凭证——批量删除/批量取图时会放大成几十上百次
+    往返，明显拖慢。凭证有效 3600s，这里按进程缓存 bucket，到期前复用同一个。
+    """
+    import time as _time
+    now = _time.time()
+    bkt = _OSS_BUCKET_CACHE["bkt"]
+    if bkt is not None and now < _OSS_BUCKET_CACHE["exp"]:
+        return bkt
+    with _OSS_BUCKET_LOCK:
+        bkt = _OSS_BUCKET_CACHE["bkt"]
+        if bkt is not None and now < _OSS_BUCKET_CACHE["exp"]:
+            return bkt
+        import oss2
+
+        from . import arca_client
+        r = arca_client._post(  # noqa: SLF001
+            f"{config.ARCA_BASE_URL}/file/tos_credential",
+            {"use_public": False, "expires_in": 3600},
+            headers=arca_client._headers("zh"), timeout=30)
+        cred = arca_client._data(r)
+        auth = oss2.StsAuth(cred["access_key_id"], cred["secret_access_key"],
+                            cred["session_token"])
+        bkt = oss2.Bucket(auth, cred["endpoint"], cred["bucket"])
+        _OSS_BUCKET_CACHE["bkt"] = bkt
+        _OSS_BUCKET_CACHE["exp"] = now + _OSS_CRED_TTL
+        return bkt
 
 
 def delete_oss_prefix(rel_prefix: str) -> int:
@@ -327,18 +349,36 @@ def delete_oss_prefix(rel_prefix: str) -> int:
 
     用于删除角色时清理 OSS 上的图片/上传件，避免永久残留并被 /img 回源复活。
     """
-    if not arca_storage.enabled():
+    return delete_oss_prefixes([rel_prefix])
+
+
+def delete_oss_prefixes(rel_prefixes: list[str]) -> int:
+    """一次性清理多个 data/ 相对前缀下的 OSS 对象（尽力而为，失败只 warn）。
+
+    相比逐前缀调用 delete_oss_prefix：只取一次 STS 凭证、复用同一个 Bucket，并用
+    batch_delete_object 每批最多删 1000 个 key，把删除一个角色的 OSS 往返从
+    “N 前缀 × (取凭证 + 逐对象删)”压到“一次取凭证 + 每 1000 个一次批删”。
+    """
+    if not arca_storage.enabled() or not rel_prefixes:
         return 0
     try:
         import oss2
         bkt = _oss_bucket()
         n = 0
-        for obj in oss2.ObjectIterator(bkt, prefix=f"{_OSS_PREFIX}/{rel_prefix}"):
-            bkt.delete_object(obj.key)
-            n += 1
+        batch: list[str] = []
+        for rel_prefix in rel_prefixes:
+            for obj in oss2.ObjectIterator(bkt, prefix=f"{_OSS_PREFIX}/{rel_prefix}"):
+                batch.append(obj.key)
+                if len(batch) >= 1000:  # OSS DeleteMultipleObjects 单次上限
+                    bkt.batch_delete_objects(batch)
+                    n += len(batch)
+                    batch = []
+        if batch:
+            bkt.batch_delete_objects(batch)
+            n += len(batch)
         return n
     except Exception as e:  # noqa: BLE001
-        log.warning("storage oss 前缀删除 %s 失败: %s", rel_prefix, e)
+        log.warning("storage oss 多前缀删除 %s 失败: %s", rel_prefixes, e)
         return 0
 
 

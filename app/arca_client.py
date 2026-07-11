@@ -1,6 +1,7 @@
 """arca-i18n HTTP 客户端：JWT / TOS 上传 / 建角色(异步) / 发帖。"""
 import json
 import re
+import threading
 import time
 
 import jwt as pyjwt
@@ -310,8 +311,37 @@ def _oss_put_object(endpoint, bucket, key, content, ak, sk, token, content_type)
         print(f"\n--- OSS PUT ---\nPUT {endpoint} bucket={bucket} key={key} "
               f"content-type={content_type} bytes={len(content)}\n")
     auth = oss2.StsAuth(ak, sk, token)
-    oss2.Bucket(auth, endpoint, bucket).put_object(
+    # connect/read 超时兜底：oss2 默认无读超时，网络卡死会永久挂住导出线程。
+    bucket_obj = oss2.Bucket(
+        auth, endpoint, bucket,
+        connect_timeout=config.OSS_PUT_TIMEOUT)
+    bucket_obj.put_object(
         key, content, headers={"Content-Type": content_type})
+
+
+# TOS STS 凭证缓存：凭证 expires_in=3600，批量上传时按 (public,lang) 复用，
+# 避免每传一张图都往 api.popop.dev 要一次凭证（几百次导出会拖垮吞吐）。
+_TOS_CRED_CACHE: dict[tuple, tuple[float, dict]] = {}
+_TOS_CRED_LOCK = threading.Lock()
+_TOS_CRED_TTL = 1800  # 秒；比 3600 保守，留足直传余量
+
+
+def _tos_credential(public: bool, lang: str) -> dict:
+    key = (bool(public), lang or "")
+    now = time.time()
+    with _TOS_CRED_LOCK:
+        hit = _TOS_CRED_CACHE.get(key)
+        if hit and now - hit[0] < _TOS_CRED_TTL:
+            return hit[1]
+    r = _post(
+        f"{config.ARCA_BASE_URL}/file/tos_credential",
+        {"use_public": public, "expires_in": 3600},
+        headers=_headers(lang), timeout=30,
+    )
+    cred = _data(r)
+    with _TOS_CRED_LOCK:
+        _TOS_CRED_CACHE[key] = (now, cred)
+    return cred
 
 
 def tos_upload(data: bytes, object_key: str, content_type: str,
@@ -319,15 +349,11 @@ def tos_upload(data: bytes, object_key: str, content_type: str,
     """拿 /file/tos_credential 的 OSS STS 凭证，直传对象到阿里云 OSS，返回 StorageObject。
 
     public=True 用公有桶(落地页 HTML 等需公网直链)，否则私有桶(角色图片，后端签名读取)。
+    凭证按 (public,lang) 缓存复用，批量上传不再逐张重新签发。
     """
     if not config.ARCA_BASE_URL:
         raise ArcaError("ARCA_BASE_URL 未配置")
-    r = _post(
-        f"{config.ARCA_BASE_URL}/file/tos_credential",
-        {"use_public": public, "expires_in": 3600},
-        headers=_headers(lang), timeout=30,
-    )
-    cred = _data(r)
+    cred = _tos_credential(public, lang)
     bucket = cred.get("bucket")
     endpoint = cred.get("endpoint")  # 形如 https://oss-ap-northeast-1.aliyuncs.com
     _oss_put_object(

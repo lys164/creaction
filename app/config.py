@@ -72,11 +72,13 @@ KIE_LLM_MODEL_FLASH = os.environ.get("POPOP_KIE_LLM_MODEL_FLASH", "gemini-3-5-fl
 KIE_IMAGE_MODEL_T2I = os.environ.get("POPOP_KIE_IMAGE_MODEL_T2I", "gpt-image-2-text-to-image")
 KIE_IMAGE_MODEL_I2I = os.environ.get("POPOP_KIE_IMAGE_MODEL_I2I", "gpt-image-2-image-to-image")
 
+# KIE 是否进【图片池】：默认进；设 POPOP_KIE_IMAGE=0 关闭（如 kie 出图余额不足/不可用时）。
+_KIE_IN_IMAGE = os.environ.get("POPOP_KIE_IMAGE", "1").strip().lower() not in ("0", "false", "no")
 if KIE_KEY:
     _kie_provider = {"base": KIE_BASE, "key": KIE_KEY, "kind": "kie"}
     if not any(p.get("kind") == "kie" for p in LLM_API_PROVIDERS):
         LLM_API_PROVIDERS = LLM_API_PROVIDERS + [_kie_provider]
-    if not any(p.get("kind") == "kie" for p in IMAGE_API_PROVIDERS):
+    if _KIE_IN_IMAGE and not any(p.get("kind") == "kie" for p in IMAGE_API_PROVIDERS):
         IMAGE_API_PROVIDERS = IMAGE_API_PROVIDERS + [_kie_provider]
 
 # ---- bbww (api.bbww.top) 优先供应商 ----
@@ -188,6 +190,12 @@ TASK_POLL_TIMEOUT = 360       # max seconds to wait for one image
 # Concurrency for batch operations. bbww 优先链路更快、可承受更高并发，
 # 默认拉到 90（可用 POPOP_MAX_WORKERS 覆盖）。
 MAX_WORKERS = int(os.environ.get("POPOP_MAX_WORKERS", "90"))
+# 批量导出角色时的【角色级】并发上限（每个角色内部还会为帖图另开线程池，
+# 故此处适度封顶，避免 N×M 连接打爆 OSS/TOS）。可用 POPOP_EXPORT_CONCURRENCY 覆盖。
+EXPORT_CONCURRENCY = int(os.environ.get("POPOP_EXPORT_CONCURRENCY", "16"))
+# OSS 直传（put_object）的连接/读超时（秒）。默认无超时会让网络卡死永久挂住
+# 导出线程，导致进度停滞。可用 POPOP_OSS_PUT_TIMEOUT 覆盖。
+OSS_PUT_TIMEOUT = int(os.environ.get("POPOP_OSS_PUT_TIMEOUT", "60"))
 
 # ---- Paths ----
 ROOT = Path(__file__).resolve().parent.parent
@@ -198,6 +206,7 @@ POST_DIR = DATA_DIR / "posts"
 IMAGE_DIR = DATA_DIR / "images"
 LANDING_DIR = DATA_DIR / "landing"
 CHAT_DIR = DATA_DIR / "chat"
+EXPORT_DIR = DATA_DIR / "exports"  # 异步批量导出生成的 zip 落盘目录（临时文件）
 WEB_DIR = ROOT / "web"
 
 for _d in (UPLOAD_DIR, PERSONA_DIR, POST_DIR, IMAGE_DIR, LANDING_DIR, CHAT_DIR):
@@ -285,6 +294,12 @@ ARCA_APP_VERSION = os.environ.get("ARCA_APP_VERSION", "")
 ARCA_POST_VISIBILITY = int(os.environ.get("ARCA_POST_VISIBILITY", "0"))  # 0=跟随角色可见性(推荐)；1公开2好友3私密=显式覆盖
 ARCA_SYNC_LANDING = os.environ.get("ARCA_SYNC_LANDING", "1") not in ("0", "false", "False", "")
 ARCA_TOS_BUCKET_PUBLIC = os.environ.get("ARCA_TOS_BUCKET_PUBLIC", "bucket-popop-i18n-prod")  # 落地页 HTML 用公有桶（留空则用凭证返回的 bucket）
+# 落地页 html_filled 里相对的 /img/、/upload/ 资源改写成带域名的绝对 URL 时用的站点根地址，
+# 便于把落地页脱离平台单独托管/预览。留空则保持相对路径（历史行为）。
+PUBLIC_BASE_URL = os.environ.get(
+    "POPOP_PUBLIC_BASE_URL",
+    "http://popop-pipeline.internal-app.imaginewithu.com",
+).rstrip("/")
 # 调试：打印 arca 每次 HTTP 原始请求/响应（Authorization 与凭证字段自动脱敏）
 ARCA_DEBUG = os.environ.get("ARCA_DEBUG", "1") not in ("0", "false", "False", "")
 # arca 存储中台（通用 JSONB 集合存储）数据面 API Key（sk_...，在 /admin/storage_hub 开通）。

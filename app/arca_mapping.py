@@ -5,14 +5,19 @@ _MALE = ("男", "male", "남")
 _FEMALE = ("女", "female", "여")
 
 # 已被直接映射的 persona 键，不再重复塞进 customized_settings
+# （inner_structure 并入 disposition，见 persona_to_character_form）
 _MAPPED_KEYS = {"name", "profile", "gender", "species", "personality", "opening",
-                "voice", "tags", "visibility", "anonymous_identities"}
+                "voice", "tags", "visibility", "anonymous_identities",
+                "inner_structure"}
 
 # persona 英文 schema 键 → 平台 setting_options 的 tag_key（简体中文，跨语言稳定主键）。
 # customized_settings 的最终 key 会再经 page_config 换成角色语言的 tag_name。
+# 新旧 schema 键并存：identity/dislikes/worldview 是新键，social_status/fears/premise/
+# family 兼容存量旧数据；同一角色只会带其中一套，不会撞 tag_key。
 _SETTING_KEY_MAP = {
     "hometown": "出生地",
     "residence": "居住地",
+    "identity": "职业",
     "social_status": "职业",
     "appearance": "外貌",
     "speech_style": "语言习惯",
@@ -20,10 +25,12 @@ _SETTING_KEY_MAP = {
     "love_style": "表达爱的方式",
     "life_details": "生活习惯",
     "likes": "爱好",
+    "dislikes": "讨厌的东西",
     "fears": "讨厌的东西",
     "backstory": "成长经历",
     "family": "家庭成员",
     "social_network": "社交关系",
+    "worldview": "特殊背景/世界观",
     "premise": "特殊背景/世界观",
     "wishlist": "愿望清单",
 }
@@ -102,12 +109,14 @@ def _opening_prologue_item(msg) -> dict | None:
 def persona_to_character_form(persona: dict,
                               images: list[dict] | None = None,
                               landing_url: str | None = None,
-                              page_config: dict | None = None) -> dict:
+                              page_config: dict | None = None,
+                              lang: str | None = None) -> dict:
     """persona → CharacterCreateForm。
 
     page_config 为 GET /character/page_config 的 data（可选）：用于把 tags/species
     归一成平台 tag_key（跨语言主键），并把 customized_settings 的 key 换成
     平台 setting_options 在该语言下的 tag_name。传 None 则跳过对齐、原样透传。
+    lang 为角色语言（zh/ja/ko/en），决定 disposition 拼接用哪套连接词；缺省 zh。
     """
     persona = persona or {}
     page_config = page_config or {}
@@ -135,13 +144,20 @@ def persona_to_character_form(persona: dict,
             form["species"] = sp
     pers = persona.get("personality")
     if isinstance(pers, dict):
-        # personality 的全部 value 依序拼接进 disposition（summary/decisive_event/…）
-        parts = [_naturalize(v) for v in pers.values()
-                 if v not in (None, "", [], {})]
-        if parts:
-            form["disposition"] = "\n".join(p for p in parts if p)
+        # 旧 schema：personality 按角色语言+性别拼成自然语言段落（healing 有意丢弃）。
+        # 函数内延迟 import：persona_export 顶层引用本模块的 normalize_gender。
+        from .persona_export import build_personality_text
+        text = build_personality_text(
+            pers, lang or "zh", normalize_gender(persona.get("gender") or ""))
+        if text:
+            form["disposition"] = text
     elif isinstance(pers, str) and pers:
         form["disposition"] = pers
+    # 新 schema 的内在结构并入 disposition：旧 schema 拼出的 disposition 本就含
+    # 欲望/底线这层内在信息，新 schema 靠 inner_structure 补齐等价信息量。
+    inner = persona.get("inner_structure")
+    if isinstance(inner, str) and inner.strip():
+        form["disposition"] = (form.get("disposition", "") + "\n" + inner.strip()).strip()
     # arca 建角色硬校验 voice_id 非空(「请选择音色」)；persona.voice 与 arca 音色表同源
     if persona.get("voice"):
         form["voice_id"] = str(persona["voice"])

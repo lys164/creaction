@@ -108,6 +108,7 @@
         <button id="btnBatchCover" class="ghost">🖼 批量生成封面</button>
       </div>
       <button id="btnBatchDelete" class="ghost danger">🗑 批量删除</button>
+      <button id="btnRetryDelete" class="ghost danger hidden" title="重试上次删除失败的角色">↻ 重试失败项</button>
       <button id="btnBatchExport" class="ghost">📦 批量导出</button>
       <button id="btnArcaSync" class="ghost" title="导出勾选角色到 POPOP：弹窗可选强制重推/同时推送帖子">☁️ 导出到POPOP</button>
       <button id="btnStorageMigrate" class="ghost" title="把本地 data/ 存量数据全量迁移到 arca 通用存储（JSON 记录→存储中台，图片→OSS）。幂等可重跑；需已配置 ARCA_STORAGE_KEY">☁️⇪ 存量迁移到云端</button>
@@ -125,9 +126,12 @@
       <div class="field">
         <span>选择角色（勾选可批量生成；点击头像/卡片查看已生成帖子）</span>
         <div id="igLangFilter" class="lang-filter"></div>
+        <div id="igSourceFilter" class="lang-filter source-filter"></div>
         <div class="ig-toolbar">
           <button id="btnIgSelAll" class="ghost">全选</button>
           <button id="btnIgSelNone" class="ghost">取消选择</button>
+          <button id="btnIgBatchDelete" class="ghost danger">🗑 批量删除</button>
+          <button id="btnIgRetryDelete" class="ghost danger hidden" title="重试上次删除失败的角色">↻ 重试失败项</button>
           <span id="igSelCount" class="muted"></span>
         </div>
         <div id="igCharGrid" class="char-grid ig-char-grid"></div>
@@ -170,6 +174,7 @@
         <label class="field">
           <span>选择角色（勾选可批量生成；点击卡片载入右侧编辑/迭代）</span>
           <div id="ldLangFilter" class="lang-filter"></div>
+          <div id="ldSourceFilter" class="lang-filter source-filter"></div>
           <div class="ig-toolbar">
             <button id="btnLdSelAll" class="ghost">全选</button>
             <button id="btnLdSelNone" class="ghost">取消选择</button>
@@ -177,10 +182,15 @@
           </div>
           <div id="ldCharGrid" class="char-grid ig-char-grid"></div>
         </label>
+        <label class="field">
+          <span>页面模板</span>
+          <select id="ldVariant" class="lstyle-input"></select>
+          <span id="ldVariantDesc" class="muted" style="font-size:11px;margin-top:4px"></span>
+        </label>
         <div class="field">
-          <span>风格（点选预设，或在下方自由输入）</span>
+          <span>风格（选填，默认按 prompt 内置风格生成）</span>
           <div id="ldStyleChips" class="lstyle-chips"></div>
-          <input id="ldStyleInput" class="lstyle-input" placeholder="或自由输入，如「Dossier 档案风」「暗黑学院」…" />
+          <input id="ldStyleInput" class="lstyle-input" placeholder="留空即用默认风格；如需覆盖可输入，如「暗黑学院」…" />
         </div>
         <label class="field">
           <span>要求 / 追加修改（选填）</span>
@@ -200,6 +210,7 @@
             <button data-v="preview" class="on">预览</button>
             <button data-v="code">代码</button>
           </div>
+          <button id="ldSave" class="primary" title="保存当前 HTML（含手改），导出即用这份">保存</button>
           <button id="ldCopy" class="ghost">复制</button>
           <button id="ldOpen" class="ghost">新窗口打开</button>
         </div>
@@ -285,7 +296,11 @@
       <label class="field">
         <span>选择角色</span>
         <div id="postLangFilter" class="lang-filter"></div>
-        <select id="postChar"></select>
+        <div id="postSourceFilter" class="lang-filter source-filter"></div>
+        <div class="row" style="gap:8px;align-items:center">
+          <select id="postChar" style="flex:1"></select>
+          <button id="btnPostDeleteChar" class="ghost danger" title="删除当前选中的角色（连同其封面/帖子/落地页，不可恢复）">🗑 删除该角色</button>
+        </div>
       </label>
       <div class="field">
         <span>勾选帖子类型</span>
@@ -352,6 +367,6 @@
 </dialog>
 
 <div id="toast" class="toast"></div>
-<script src="/app.js?v=22"></script>
+<script src="/app.js?v=26"></script>
 </body>
 </html>

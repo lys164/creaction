@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-"""为「已完成角色(人设+封面)」批量生成落地页 —— 直接打线上服务(HTTP)。
+"""把指定 source 的落地页「刷成」用某个变体（默认 interactive 互动卡片版）重新生成。
 
-覆盖所有【非空 source】(排除无来源 "") 下【人设+封面都有】(has_identity 且
-cover_url) 且【尚无落地页】的角色。用第一个变体 default(默认·长图叙事页)、
-不指定 style_text(自由文本留空)。天然幂等：已有落地页的角色跳过，中断后重跑
-自动续。进度写 data/batch_landing_online_state.json。
+与 batch_landing_online.py 的区别：那个脚本「有落地页就跳过」，只补空缺；
+本脚本是「按变体刷新」——只要角色当前落地页的 variant != 目标变体，就重新生成
+覆盖（generate_landing 天然覆盖单角色最新一份）。已经是目标变体的角色跳过，
+因此可安全续跑/重跑，天然幂等。
+
+默认覆盖 source: chouxiang / feiren / image，目标变体 interactive。
 
 用法：
-  python3 scripts/batch_landing_online.py [--source all_nonempty|具体source]
-  python3 scripts/batch_landing_online.py --dry-run
-  python3 scripts/batch_landing_online.py --concurrency 16 --variant default
+  python3 scripts/reskin_landing_interactive.py --dry-run
+  python3 scripts/reskin_landing_interactive.py --concurrency 8
+  python3 scripts/reskin_landing_interactive.py --source chouxiang --source feiren
+  python3 scripts/reskin_landing_interactive.py --variant interactive
 """
 from __future__ import annotations
 
@@ -26,12 +29,13 @@ _STATE_LOCK = threading.Lock()
 
 BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-STATE_PATH = DATA_DIR / "batch_landing_online_state.json"
+STATE_PATH = DATA_DIR / "reskin_landing_interactive_state.json"
 
 POLL_INTERVAL = 20
 LANDING_TIMEOUT = 900       # 单角色一份落地页 HTML（LLM 可能 1-3 分钟）
 DEFAULT_CONCURRENCY = 4
-DEFAULT_VARIANT = "default"
+DEFAULT_SOURCES = ["chouxiang", "feiren", "image"]
+DEFAULT_VARIANT = "interactive"
 
 
 def load_state() -> dict:
@@ -114,19 +118,16 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
     raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
 
 
-def _has_landing_online(char_id: str) -> bool:
+def _landing_variant_online(char_id: str) -> str | None:
+    """返回该角色线上落地页的 variant；无落地页返回 None。"""
     try:
         r = _req("GET", f"{BASE}/api/landing/{char_id}", timeout=30)
         page = r.json()
     except Exception:  # noqa: BLE001
-        return False
-    return bool(page and page.get("html"))
-
-
-def _all_nonempty_sources() -> list[str]:
-    r = _req("GET", f"{BASE}/api/characters", timeout=120)
-    srcs = {(c.get("source") or "") for c in r.json()}
-    return sorted(s for s in srcs if s)
+        return None
+    if not (page and page.get("html")):
+        return None
+    return page.get("variant") or "default"
 
 
 def _fetch_targets(source: str) -> list[dict]:
@@ -137,7 +138,9 @@ def _fetch_targets(source: str) -> list[dict]:
 
 
 def _gen_landing(char_id: str, variant: str) -> dict:
-    """驱动单角色落地页：POST /api/landing 拿 task_id 后轮询；任务丢失则线上复核。"""
+    """驱动单角色落地页（覆盖生成）：POST /api/landing 拿 task_id 后轮询。
+
+    任务丢失/超时时，用「线上落地页已是目标变体」作为成功判据再复核。"""
     for attempt in range(3):
         r = _req("POST", f"{BASE}/api/landing", timeout=60,
                  json={"char_id": char_id, "variant": variant})
@@ -145,16 +148,16 @@ def _gen_landing(char_id: str, variant: str) -> dict:
         try:
             return _poll(task_id, LANDING_TIMEOUT, f"landing {char_id}")
         except TaskLost:
-            if _has_landing_online(char_id):
-                print(f"      任务丢失但线上已有落地页，视为成功 {char_id}", flush=True)
+            if _landing_variant_online(char_id) == variant:
+                print(f"      任务丢失但线上已是 {variant}，视为成功 {char_id}", flush=True)
                 return {"char_id": char_id}
             print(f"      任务丢失，重试 {char_id} (第 {attempt + 2} 次)", flush=True)
         except TimeoutError:
-            if _has_landing_online(char_id):
-                print(f"      轮询超时但线上已完成，视为成功 {char_id}", flush=True)
+            if _landing_variant_online(char_id) == variant:
+                print(f"      轮询超时但线上已是 {variant}，视为成功 {char_id}", flush=True)
                 return {"char_id": char_id}
             print(f"      轮询超时，重试 {char_id} (第 {attempt + 2} 次)", flush=True)
-    if _has_landing_online(char_id):
+    if _landing_variant_online(char_id) == variant:
         return {"char_id": char_id}
     raise RuntimeError("落地页多次超时/丢失，暂缓（续跑会自动补）")
 
@@ -162,25 +165,20 @@ def _gen_landing(char_id: str, variant: str) -> dict:
 def main() -> int:
     global STATE_PATH
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="all_nonempty",
-                    help="all_nonempty(所有非空 source，默认) / 或任意具体 source 名")
+    ap.add_argument("--source", action="append", dest="sources",
+                    help="要刷的 source，可多次传；默认 chouxiang/feiren/image")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     ap.add_argument("--variant", default=DEFAULT_VARIANT,
-                    help="落地页变体，默认 default(第一个选项·长图叙事页)")
-    ap.add_argument("--force", action="store_true",
-                    help="强制重跑：忽略线上已有落地页与本地 done 记录，"
-                         "对所有【人设+封面齐全】的角色重新生成(覆盖旧页)")
+                    help="目标落地页变体，默认 interactive(互动卡片版)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--state", type=str, default=str(STATE_PATH))
     args = ap.parse_args()
 
     STATE_PATH = Path(args.state)
-    if args.source == "all_nonempty":
-        sources = _all_nonempty_sources()
-        print(f"all_nonempty → 覆盖非空 source: {', '.join(sources)}")
-    else:
-        sources = [args.source]
+    sources = args.sources or DEFAULT_SOURCES
+    variant = args.variant
+    print(f"刷新 source: {', '.join(sources)}  →  目标变体: {variant}")
 
     state = load_state()
     done = set(state["done"])
@@ -189,43 +187,40 @@ def main() -> int:
     summary = {}
     for src in sources:
         targets = _fetch_targets(src)
-        if args.force:
-            # 强制重跑：忽略 done 记录与线上已有落地页，全部重生成(覆盖)
-            need = [c["char_id"] for c in targets]
-            summary[src] = {"complete": len(targets), "todo": len(need)}
-            todo.extend((cid, src) for cid in need)
-            continue
         unknown = [c["char_id"] for c in targets if c["char_id"] not in done]
+        # 线上复核当前变体：已是目标变体的记为已完成，其余需要刷新
         with ThreadPoolExecutor(max_workers=32) as ex:
-            flags = list(ex.map(_has_landing_online, unknown))
-        need, newly_done = [], []
-        for cid, has in zip(unknown, flags):
-            (newly_done if has else need).append(cid)
+            variants = list(ex.map(_landing_variant_online, unknown))
+        need, already = [], []
+        for cid, cur in zip(unknown, variants):
+            (already if cur == variant else need).append(cid)
         with _STATE_LOCK:
-            for cid in newly_done:
+            for cid in already:
                 if cid not in done:
                     state["done"].append(cid)
                     done.add(cid)
-        summary[src] = {"complete": len(targets), "todo": len(need)}
+        summary[src] = {"total": len(targets), "already": len(already),
+                        "todo": len(need)}
         todo.extend((cid, src) for cid in need)
     save_state(state)
 
     if args.limit and args.limit > 0:
         todo = todo[:args.limit]
 
-    print(f"\n线上服务: {BASE}  变体: {args.variant}")
+    print(f"\n线上服务: {BASE}  变体: {variant}")
     for src in sources:
-        print(f"  {src}: 完整角色 {summary[src]['complete']}，待生成落地页 {summary[src]['todo']}")
-    print(f"本轮实际生成: {len(todo)} 个角色\n")
+        s = summary[src]
+        print(f"  {src}: 完整角色 {s['total']}，已是{variant} {s['already']}，待刷新 {s['todo']}")
+    print(f"本轮实际刷新: {len(todo)} 个角色\n")
 
     if args.dry_run:
         for cid, src in todo[:5]:
             print(f"  样例: {src}  {cid}")
-        print(f"[DRY] 计划为 {len(todo)} 个角色各生成一份落地页(variant={args.variant})。")
+        print(f"[DRY] 计划把 {len(todo)} 个角色的落地页刷成 variant={variant}。")
         return 0
 
     if not todo:
-        print("没有待生成的角色，全部已完成。")
+        print("没有待刷新的角色，全部已是目标变体。")
         return 0
 
     conc = max(1, args.concurrency)
@@ -236,7 +231,7 @@ def main() -> int:
         idx, cid, src = job
         print(f"[{idx}/{total}] {src} {cid}", flush=True)
         try:
-            _gen_landing(cid, args.variant)
+            _gen_landing(cid, variant)
             with _STATE_LOCK:
                 state["done"].append(cid)
                 if cid in state["failed"]:

@@ -22,9 +22,8 @@ CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 - 職業：{{social_status}}
 - 說話方式：{{speech_style}}
 - 個性：
-  表面 {{response}}，實際 {{cost}}。自以為想要 {{desire_outer}}，真正渴望 {{desire_inner}}，為此願意 {{desire_bottom_line}}。
-  {{personality}}
-- 隱藏面：{{hidden_side}}
+  {{personality_full}}
+- 內在（不會主動說出口）：{{hidden_side}}
 - 生活習慣：{{life_details}}，喜歡 {{likes}}，討厭 {{fears}}
 - 近況：{{current_state}}。想 {{wishlist}}
 - 表達愛意：{{love_style}}
@@ -224,6 +223,30 @@ def _personality_field(persona: dict, key: str, default: str) -> str:
     return _clean_text(_personality(persona).get(key), default)
 
 
+def _first_field(persona: dict, keys: tuple, default: str) -> str:
+    """按顺序取第一个非空字段——新旧 schema 键并存期的双读。"""
+    for key in keys:
+        text = _clean_text(persona.get(key))
+        if text:
+            return text
+    return default
+
+
+def _personality_full(persona: dict) -> str:
+    """個性段落：新 schema 是现成的多面向字符串；旧 schema 按原模板句式拼出。"""
+    pers = persona.get("personality")
+    if isinstance(pers, str) and pers.strip():
+        return pers.strip()
+    response = _personality_field(persona, "response", _personality_field(persona, "summary", "表面看起来很普通"))
+    cost = _personality_field(persona, "cost", "内心藏着不轻易示人的缺失和防备")
+    outer = _personality_field(persona, "desire_outer", "看起来像个还不错的人")
+    inner = _personality_field(persona, "desire_inner", "被真正理解")
+    bottom = _personality_field(persona, "desire_bottom_line", "稍微放下一点自尊")
+    summary = _personality_field(persona, "summary", "言行之间带着一点小小张力的人")
+    return (f"表面 {response}，實際 {cost}。自以為想要 {outer}，"
+            f"真正渴望 {inner}，為此願意 {bottom}。\n  {summary}")
+
+
 def _social_links(persona: dict) -> str:
     chunks = []
     for key in ("family", "social_network"):
@@ -233,8 +256,9 @@ def _social_links(persona: dict) -> str:
         if isinstance(value, list):
             for item in value:
                 if isinstance(item, dict):
-                    head = " · ".join(_clean_text(item.get(k)) for k in ("name", "relation") if _clean_text(item.get(k)))
-                    tail = "；".join(_clean_text(item.get(k)) for k in ("info", "dynamic") if _clean_text(item.get(k)))
+                    # 条目键新旧双读：旧 {name,relation,info,dynamic} / 新 {name,relationship,description}
+                    head = " · ".join(_clean_text(item.get(k)) for k in ("name", "relation", "relationship") if _clean_text(item.get(k)))
+                    tail = "；".join(_clean_text(item.get(k)) for k in ("info", "dynamic", "description") if _clean_text(item.get(k)))
                     chunks.append(f"{head}: {tail}" if head and tail else head or tail)
                 else:
                     chunks.append(_clean_text(item))
@@ -246,11 +270,15 @@ def _social_links(persona: dict) -> str:
 def _extra_value(persona: dict) -> str:
     labels = {
         "profile": "简介",
+        "value": "基础资料",
         "appearance": "外貌",
         "relationship_mode": "关系模式",
         "situational_reactions": "情境反应",
+        "behavior_patterns": "情绪反应方式",
+        "online_chat_style": "线上聊天习惯",
         "backstory": "成长经历",
         "premise": "世界观",
+        "worldview": "世界观",
         "tags": "标签",
         "opening": "开场",
     }
@@ -320,22 +348,24 @@ def build_prompt(record: dict, context: dict | None = None,
     replacements = {
         "{{name}}": _field(persona, "name", "无名角色"),
         "{{gender}}": _field(persona, "gender", "性别未知"),
-        "{{age}}": _field(persona, "age", "年龄未知"),
+        "{{age}}": _first_field(persona, ("age", "value"), "年龄未知"),
         "{{species}}": _field(persona, "species", "人类"),
         "{{hometown}}": _field(persona, "hometown", "未知"),
         "{{residence}}": _field(persona, "residence", "未知"),
-        "{{social_status}}": _field(persona, "social_status", "尚未具体透露"),
-        "{{speech_style}}": _field(persona, "speech_style", "自然的网聊口吻"),
+        "{{social_status}}": _first_field(persona, ("identity", "social_status"), "尚未具体透露"),
+        "{{speech_style}}": _first_field(persona, ("speech_style", "online_chat_style"), "自然的网聊口吻"),
+        "{{online_chat_style}}": _first_field(persona, ("online_chat_style", "speech_style"), "自然的网聊口吻"),
         "{{response}}": _personality_field(persona, "response", _personality_field(persona, "summary", "表面看起来很普通")),
         "{{cost}}": _personality_field(persona, "cost", "内心藏着不轻易示人的缺失和防备"),
         "{{desire_outer}}": _personality_field(persona, "desire_outer", "看起来像个还不错的人"),
         "{{desire_inner}}": _personality_field(persona, "desire_inner", "被真正理解"),
         "{{desire_bottom_line}}": _personality_field(persona, "desire_bottom_line", "稍微放下一点自尊"),
         "{{personality}}": _personality_field(persona, "summary", "言行之间带着一点小小张力的人"),
-        "{{hidden_side}}": _field(persona, "hidden_side", "只对亲近的人才会显露的一面"),
+        "{{personality_full}}": _personality_full(persona),
+        "{{hidden_side}}": _first_field(persona, ("inner_structure", "hidden_side"), "只对亲近的人才会显露的一面"),
         "{{life_details}}": _field(persona, "life_details", "生活细节会在聊天里自然流露"),
         "{{likes}}": _field(persona, "likes", "还在聊天里慢慢了解"),
-        "{{fears}}": _field(persona, "fears", "生硬的距离感和敷衍的反应"),
+        "{{fears}}": _first_field(persona, ("dislikes", "fears"), "生硬的距离感和敷衍的反应"),
         "{{current_state}}": _current_state(persona),
         "{{wishlist}}": _field(persona, "wishlist", "想和对方聊得更自在一些"),
         "{{love_style}}": _field(persona, "love_style", "比起说，更用一点点在意和回应来表达心意"),

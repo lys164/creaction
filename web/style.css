@@ -96,7 +96,9 @@ button.ghost:hover{border-color:var(--mut);background:var(--inset)}
 
 .char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px}
 .char-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  overflow:hidden;cursor:pointer;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.03)}
+  overflow:hidden;cursor:pointer;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.03);
+  /* 视口外的卡片跳过渲染/布局，1500+ 卡片时大幅降低主线程与滚动开销 */
+  content-visibility:auto;contain-intrinsic-size:auto 300px}
 .char-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.07);border-color:var(--line2)}
 .char-card.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .char-card .cover{width:100%;aspect-ratio:3/4;object-fit:cover;background:var(--inset);
@@ -137,7 +139,8 @@ button.ghost.danger:hover{color:#fff;background:#c0392b;border-color:#c0392b}
 .ig-reasoning summary{cursor:pointer;font-size:13px}
 .ig-reasoning pre{margin:10px 0 0;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.6}
 .post-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  overflow:hidden;display:flex;flex-direction:column;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.03)}
+  overflow:hidden;display:flex;flex-direction:column;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.03);
+  content-visibility:auto;contain-intrinsic-size:auto 480px}
 .post-card:hover{box-shadow:0 6px 20px rgba(0,0,0,.06)}
 .post-card .pimg{width:100%;aspect-ratio:3/4;object-fit:cover;background:var(--inset);
   display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px;text-align:center}

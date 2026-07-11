@@ -49,11 +49,20 @@ def _upload_cover(record: dict, lang: str) -> list[dict]:
 
 
 def _upload_landing(record: dict, lang: str) -> str | None:
-    page = pipeline.load_latest_landing(record["char_id"])
-    html = (page or {}).get("html_filled")
+    char_id = record["char_id"]
+    page = pipeline.load_latest_landing(char_id)
+    html = (page or {}).get("html")
+    if not html:
+        html = (page or {}).get("html_filled")
     if not html:
         return None
-    key = f"creaction/{record['char_id']}/landing.html"
+    # 落地页 img 指向【公网 TOS URL】，不内联 base64：封面/帖图先传公有桶拿直链。
+    cover_bytes = pipeline._image_bytes(record.get("cover"))
+    html = pipeline._landing_html_with_public_urls(
+        html, char_id, lang,
+        (page or {}).get("cover_url"), cover_bytes,
+        (page or {}).get("post_urls"))
+    key = f"creaction/{char_id}/landing.html"
     obj = arca_client.tos_upload(html.encode("utf-8"), key, "text/html", lang, public=True)
     return obj.get("url")
 
@@ -156,7 +165,7 @@ def _sync_character_locked(char_id: str, *, force: bool,
         # 用核心表单指纹判断是否有变化，避免每次都在 arca 插一个新 version。
         try:
             core_form = arca_mapping.persona_to_character_form(
-                record.get("persona", {}), page_config=page_config)
+                record.get("persona", {}), page_config=page_config, lang=lang)
             core_digest = _form_digest(core_form)
             if record.get("arca_form_digest") == core_digest:
                 result["skipped"] = True
@@ -193,7 +202,7 @@ def _sync_character_locked(char_id: str, *, force: bool,
                     result["errors"].append(f"landing 上传失败: {e}")
             form = arca_mapping.persona_to_character_form(
                 record.get("persona", {}), images=images, landing_url=landing_url,
-                page_config=page_config)
+                page_config=page_config, lang=lang)
             # arca 建角色前置硬校验（createCharacterParamCheck）：主图 + 音色缺一不可。
             # 提前拦截给出可操作的提示，避免白跑一次异步任务。
             if not images:
@@ -244,7 +253,7 @@ def _sync_character_locked(char_id: str, *, force: bool,
             # 存核心表单指纹（不含 images/landing），后续 sync 据此判断是否需要 update
             record["arca_form_digest"] = _form_digest(
                 arca_mapping.persona_to_character_form(
-                    record.get("persona", {}), page_config=page_config))
+                    record.get("persona", {}), page_config=page_config, lang=lang))
             result["arca_character_id"] = cid
             pipeline.save_character(record)
         except Exception as e:  # noqa: BLE001 建角色失败：落 errors，返回结构化结果不 raise
