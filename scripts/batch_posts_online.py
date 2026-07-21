@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""为「已完成角色(人设+封面)」批量生成 INS 帖子 —— 直接打线上服务(HTTP)。
+"""為「已完成角色(人設+封面)」批次生成 INS 帖子 —— 直接打線上服務(HTTP)。
 
-对应需求：feiren / image 两个 source 的角色都已有完整人设和封面，
-按各自链路补齐帖子。两者都走 /api/ig_posts/batch，差异只在 track / 封面画风：
+對應需求：feiren / image 兩個 source 的角色都已有完整人設和封面，
+按各自鏈路補齊帖子。兩者都走 /api/ig_posts/batch，差異只在 track / 封面畫風：
 
-- source="image"  → track="real"，帖子自拍以 realistic_portrait 封面做图生图人脸锚点。
-- source="feiren" → track="nonhuman"（非人物链路：不套画风，按 identity + 原图出图）。
+- source="image"  → track="real"，帖子自拍以 realistic_portrait 封面做圖生圖人臉錨點。
+- source="feiren" → track="nonhuman"（非人物鏈路：不套畫風，按 identity + 原圖出圖）。
 
-只处理【人设 + 封面都有】(has_identity 且 cover_url) 且【尚无帖子】的角色，天然幂等：
-已有帖子的角色跳过，中断后重跑自动续。进度写 data/batch_posts_online_state.json。
+只處理【人設 + 封面都有】(has_identity 且 cover_url) 且【尚無帖子】的角色，天然冪等：
+已有帖子的角色跳過，中斷後重跑自動續。進度寫 data/batch_posts_online_state.json。
 
 用法：
   PYTHONPATH=. python3 scripts/batch_posts_online.py [--source feiren|image|all]
@@ -34,15 +34,15 @@ BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_PATH = DATA_DIR / "batch_posts_online_state.json"
 
-# 每个 source 的链路参数：track + 封面/自拍锚点画风(nonhuman 不套画风 → style_id 为空)
+# 每個 source 的鏈路引數：track + 封面/自拍錨點畫風(nonhuman 不套畫風 → style_id 為空)
 SOURCE_CHAINS = {
     "image":  {"track": "real",     "style_id": "realistic_portrait"},
     "feiren": {"track": "nonhuman", "style_id": ""},
 }
 
-POLL_INTERVAL = 20         # 轮询间隔（单批出图数分钟，20s 足够，且大幅降低对 traefik 的请求压力）
-POSTS_TIMEOUT = 2400        # 单角色一批帖子(~9 图)
-DEFAULT_CONCURRENCY = 4     # 同时并行的角色数
+POLL_INTERVAL = 20         # 輪詢間隔（單批出圖數分鐘，20s 足夠，且大幅降低對 traefik 的請求壓力）
+POSTS_TIMEOUT = 2400        # 單角色一批帖子(~9 圖)
+DEFAULT_CONCURRENCY = 4     # 同時並行的角色數
 
 
 def load_state() -> dict:
@@ -58,7 +58,7 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    """原子写盘（tmp+rename）。调用方持有 _STATE_LOCK。"""
+    """原子寫盤（tmp+rename）。呼叫方持有 _STATE_LOCK。"""
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -74,10 +74,10 @@ def _healthy() -> bool:
 
 
 def _wait_healthy(label: str = "") -> None:
-    """服务器 502/宕机时阻塞等待其恢复（指数退避，最长 60s/次）。"""
+    """伺服器 502/宕機時阻塞等待其恢復（指數退避，最長 60s/次）。"""
     delay, waited = 5, 0
     while not _healthy():
-        print(f"      服务器不可用，等待恢复{(' ('+label+')') if label else ''} "
+        print(f"      伺服器不可用，等待恢復{(' ('+label+')') if label else ''} "
               f"已等 {waited}s", flush=True)
         time.sleep(delay)
         waited += delay
@@ -85,7 +85,7 @@ def _wait_healthy(label: str = "") -> None:
 
 
 class TaskLost(Exception):
-    """任务在服务器端丢失（进程重启，内存态任务清空 → /api/tasks 返回 404）。"""
+    """任務在伺服器端丟失（程式重啟，記憶體態任務清空 → /api/tasks 返回 404）。"""
 
 
 def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Response:
@@ -105,7 +105,7 @@ def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Respo
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 1)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _poll(task_id: str, timeout: int, label: str) -> dict:
@@ -114,7 +114,7 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
     while time.time() < deadline:
         r = _req("GET", f"{BASE}/api/tasks/{task_id}", timeout=30, allow_404=True)
         if r.status_code == 404:
-            raise TaskLost(f"{label} 任务 {task_id} 丢失（服务器疑似重启）")
+            raise TaskLost(f"{label} 任務 {task_id} 丟失（伺服器疑似重啟）")
         t = r.json()
         if t.get("done_count") != last:
             last = t.get("done_count")
@@ -123,9 +123,9 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
         if t.get("status") == "done":
             return t.get("result") or {}
         if t.get("status") == "error":
-            raise RuntimeError(f"{label} 任务失败: {t.get('error')}")
+            raise RuntimeError(f"{label} 任務失敗: {t.get('error')}")
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
+    raise TimeoutError(f"{label} 輪詢超時 ({timeout}s)")
 
 
 def _has_posts_online(char_id: str) -> bool:
@@ -138,7 +138,7 @@ def _has_posts_online(char_id: str) -> bool:
 
 
 def _all_nonempty_sources() -> list[str]:
-    """线上现存的所有【非空】source（排除无来源 ""）。"""
+    """線上現存的所有【非空】source（排除無來源 ""）。"""
     r = _req("GET", f"{BASE}/api/characters", timeout=120)
     chars = r.json()
     srcs = {(c.get("source") or "") for c in chars}
@@ -146,7 +146,7 @@ def _all_nonempty_sources() -> list[str]:
 
 
 def _fetch_targets(source: str) -> list[dict]:
-    """线上拉全部角色，筛出该 source 下【人设+封面都有】的角色。"""
+    """線上拉全部角色，篩出該 source 下【人設+封面都有】的角色。"""
     r = _req("GET", f"{BASE}/api/characters", timeout=120)
     chars = r.json()
     return [c for c in chars
@@ -155,10 +155,10 @@ def _fetch_targets(source: str) -> list[dict]:
 
 
 def _gen_posts(char_id: str, chain: dict, with_images: bool) -> dict:
-    """为单个角色生成帖子；任务因服务器重启丢失时先线上复核，否则重试。
+    """為單個角色生成帖子；任務因伺服器重啟丟失時先線上複核，否則重試。
 
-    chain 为 None 时：不指定 track/style_id，服务端按角色自身存储的 track 与
-    style_id 生成（各 source 链路不同：light/flirt/kdrama/nonhuman…，硬编码会错）。
+    chain 為 None 時：不指定 track/style_id，服務端按角色自身儲存的 track 與
+    style_id 生成（各 source 鏈路不同：light/flirt/kdrama/nonhuman…，硬編碼會錯）。
     """
     for attempt in range(3):
         payload = {"char_ids": [char_id], "with_images": with_images}
@@ -170,23 +170,23 @@ def _gen_posts(char_id: str, chain: dict, with_images: bool) -> dict:
         try:
             return _poll(task_id, POSTS_TIMEOUT, f"帖子 {char_id}")
         except TaskLost:
-            # 任务丢失（服务器重启，内存态任务清空）：线上复核是否已完成。
+            # 任務丟失（伺服器重啟，記憶體態任務清空）：線上複核是否已完成。
             _wait_healthy("posts")
             if _has_posts_online(char_id):
-                print(f"      帖子任务丢失但线上已完成，视为成功 {char_id}", flush=True)
+                print(f"      帖子任務丟失但線上已完成，視為成功 {char_id}", flush=True)
                 return {"generated": [{"char_id": char_id}], "errors": {}}
-            print(f"      帖子任务丢失，重试 {char_id} (第 {attempt + 2} 次)", flush=True)
+            print(f"      帖子任務丟失，重試 {char_id} (第 {attempt + 2} 次)", flush=True)
         except TimeoutError:
-            # 轮询超时：高并发下出图排队久，任务往往仍在后台跑完。先线上复核，
-            # 已有帖子就算成功（避免把其实成功的角色误判失败、下轮重复重跑）。
+            # 輪詢超時：高併發下出圖排隊久，任務往往仍在後臺跑完。先線上複核，
+            # 已有帖子就算成功（避免把其實成功的角色誤判失敗、下輪重複重跑）。
             if _has_posts_online(char_id):
-                print(f"      帖子轮询超时但线上已完成，视为成功 {char_id}", flush=True)
+                print(f"      帖子輪詢超時但線上已完成，視為成功 {char_id}", flush=True)
                 return {"generated": [{"char_id": char_id}], "errors": {}}
-            print(f"      帖子轮询超时且线上无帖子，重试 {char_id} (第 {attempt + 2} 次)", flush=True)
-    # 最后再复核一次，避免最后一轮刚好在超时后完成
+            print(f"      帖子輪詢超時且線上無帖子，重試 {char_id} (第 {attempt + 2} 次)", flush=True)
+    # 最後再複核一次，避免最後一輪剛好在超時後完成
     if _has_posts_online(char_id):
         return {"generated": [{"char_id": char_id}], "errors": {}}
-    raise RuntimeError("帖子多次超时/丢失，暂缓（续跑会自动补）")
+    raise RuntimeError("帖子多次超時/丟失，暫緩（續跑會自動補）")
 
 
 def main() -> int:
@@ -194,12 +194,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="all",
                     help="feiren / image / all(=feiren+image) / all_nonempty"
-                         "(所有非空 source，按角色自身 track+style 生成) / 或任意具体 source 名")
+                         "(所有非空 source，按角色自身 track+style 生成) / 或任意具體 source 名")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY,
-                    help="同时并行的角色数（默认 4）")
+                    help="同時並行的角色數（預設 4）")
     ap.add_argument("--no-post-images", action="store_true",
-                    help="帖子只出文案，不配图")
+                    help="帖子只出文案，不配圖")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--state", type=str, default=str(STATE_PATH))
     args = ap.parse_args()
@@ -210,20 +210,20 @@ def main() -> int:
         sources = ["feiren", "image"]
     elif args.source == "all_nonempty":
         sources = _all_nonempty_sources()
-        print(f"all_nonempty → 覆盖非空 source: {', '.join(sources)}")
+        print(f"all_nonempty → 覆蓋非空 source: {', '.join(sources)}")
     else:
         sources = [args.source]
 
     def _chain_for(src: str) -> dict | None:
-        """已知硬编码链路的用其配置；其余 source 返回 None，"""
-        """由服务端按角色自身存储的 track+style_id 生成。"""
+        """已知硬編碼鏈路的用其配置；其餘 source 返回 None，"""
+        """由服務端按角色自身儲存的 track+style_id 生成。"""
         return SOURCE_CHAINS.get(src)
 
     state = load_state()
     done = set(state["done"])
 
-    # 组装待跑清单：每个 source 拉线上完整角色，跳过已有帖子/本地已记完成的。
-    # 线上帖子探测并行化（几百个角色顺序探测太慢，会拖垮启动）。
+    # 組裝待跑清單：每個 source 拉線上完整角色，跳過已有帖子/本地已記完成的。
+    # 線上帖子探測並行化（幾百個角色順序探測太慢，會拖垮啟動）。
     todo: list[tuple[str, str]] = []   # (char_id, source)
     summary = {}
     for src in sources:
@@ -250,23 +250,23 @@ def main() -> int:
     if args.limit and args.limit > 0:
         todo = todo[:args.limit]
 
-    print(f"\n线上服务: {BASE}")
+    print(f"\n線上服務: {BASE}")
     for src in sources:
         ch = _chain_for(src)
-        chain_desc = (f"track={ch['track']}, 画风={ch['style_id'] or '无'}"
+        chain_desc = (f"track={ch['track']}, 畫風={ch['style_id'] or '無'}"
                       if ch else "按角色自身 track+style")
         print(f"  {src}: 完整角色 {summary[src]['complete']}，待生成帖子 {summary[src]['todo']}"
               f"（{chain_desc}）")
-    print(f"本轮实际生成: {len(todo)} 个角色；帖子: {'配图' if with_images else '仅文案'}\n")
+    print(f"本輪實際生成: {len(todo)} 個角色；帖子: {'配圖' if with_images else '僅文案'}\n")
 
     if args.dry_run:
         for cid, src in todo[:5]:
-            print(f"  样例: {src}  {cid}  → {_chain_for(src) or '角色自身链路'}")
-        print(f"[DRY] 计划为 {len(todo)} 个角色各生成一批 INS 帖子。")
+            print(f"  樣例: {src}  {cid}  → {_chain_for(src) or '角色自身鏈路'}")
+        print(f"[DRY] 計劃為 {len(todo)} 個角色各生成一批 INS 帖子。")
         return 0
 
     if not todo:
-        print("没有待生成的角色，全部已完成。")
+        print("沒有待生成的角色，全部已完成。")
         return 0
 
     conc = max(1, args.concurrency)
@@ -296,7 +296,7 @@ def main() -> int:
                     state["failed"].append(cid)
                 save_state(state)
                 counters["err"] += 1
-            print(f"      失败[{idx}] {cid}: {e}", flush=True)
+            print(f"      失敗[{idx}] {cid}: {e}", flush=True)
 
     jobs = [(i, cid, src) for i, (cid, src) in enumerate(todo, 1)]
     with ThreadPoolExecutor(max_workers=conc) as ex:
@@ -304,8 +304,8 @@ def main() -> int:
 
     with _STATE_LOCK:
         done_n = len(state["done"])
-    print(f"\n完成: 成功 {counters['ok']} 个, 失败 {counters['err']} 个。"
-          f"累计帖子完成 {done_n} 个角色。")
+    print(f"\n完成: 成功 {counters['ok']} 個, 失敗 {counters['err']} 個。"
+          f"累計帖子完成 {done_n} 個角色。")
     return 0 if counters["err"] == 0 else 1
 
 

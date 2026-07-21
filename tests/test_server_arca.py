@@ -31,7 +31,7 @@ def test_arca_sync_endpoint_runs_batch(monkeypatch):
 
 
 def test_arca_sync_endpoint_batch_resilient(monkeypatch):
-    """一个角色同步抛异常 → 该角色成 error 行，其余角色仍处理，整批不中断。"""
+    """一個角色同步拋異常 → 該角色成 error 行，其餘角色仍處理，整批不中斷。"""
     monkeypatch.setenv("ARCA_UID", "u1")
     import app.server as server
     importlib.reload(server)
@@ -56,10 +56,10 @@ def test_arca_sync_endpoint_batch_resilient(monkeypatch):
         time.sleep(0.02)
     assert t["status"] == "done"
     rows = {row["char_id"]: row for row in t["result"]}
-    # 全部 3 个角色都有结果行，整批未中断
+    # 全部 3 個角色都有結果行，整批未中斷
     assert set(rows) == {"c1", "bad", "c2"}
     assert rows["c1"]["arca_character_id"] == "arca-c1"
     assert rows["c2"]["arca_character_id"] == "arca-c2"
-    # 失败角色成 error 行
+    # 失敗角色成 error 行
     assert rows["bad"]["arca_character_id"] is None
     assert any("boom" in e for e in rows["bad"]["errors"])

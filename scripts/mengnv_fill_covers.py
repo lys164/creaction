@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""为 source=mengnv 缺封面的角色批量补封面（线上）。
+"""為 source=mengnv 缺封面的角色批次補封面（線上）。
 
-用 /api/characters/batch_cover 提交后台任务并轮询 /api/tasks/{id}。
+用 /api/characters/batch_cover 提交後臺任務並輪詢 /api/tasks/{id}。
 用法:
-  python3 scripts/mengnv_fill_covers.py --limit 5        # 先试 5 个
+  python3 scripts/mengnv_fill_covers.py --limit 5        # 先試 5 個
   python3 scripts/mengnv_fill_covers.py                  # 全部缺封面
   python3 scripts/mengnv_fill_covers.py --style realistic_portrait
 """
@@ -33,7 +33,7 @@ def main():
     miss = _missing()
     if args.limit:
         miss = miss[:args.limit]
-    print(f"待补封面: {len(miss)} 个，style={args.style}", flush=True)
+    print(f"待補封面: {len(miss)} 個，style={args.style}", flush=True)
     if not miss:
         return
 
@@ -43,7 +43,7 @@ def main():
     }, timeout=60)
     r.raise_for_status()
     tid = r.json()["task_id"]
-    print(f"task_id={tid}，轮询中…", flush=True)
+    print(f"task_id={tid}，輪詢中…", flush=True)
 
     start = time.time()
     while True:
@@ -58,12 +58,12 @@ def main():
             res = t.get("result") or {}
             cov = res.get("covered", [])
             errs = res.get("errors", {})
-            print(f"\n完成: 成功 {len(cov)}, 失败 {len(errs)}")
+            print(f"\n完成: 成功 {len(cov)}, 失敗 {len(errs)}")
             for cid, e in list(errs.items())[:20]:
                 print(f"  ✗ {cid}: {e}")
             break
         if st == "error":
-            print(f"任务失败: {t.get('error')}")
+            print(f"任務失敗: {t.get('error')}")
             break
 
 

@@ -1,35 +1,35 @@
 # -*- coding: utf-8 -*-
-"""把 default 落地页各语言 SP_TEMPLATE 里「头图 hero」那句松规格，
-替换成对齐基础卡(C-01)的写死封面规范：
+"""把 default 落地頁各語言 SP_TEMPLATE 裡「頭圖 hero」那句松規格，
+替換成對齊基礎卡(C-01)的寫死封面規範：
   - 封面容器 aspect-ratio:4/4.6（固定）
-  - 容器 border-radius:16px；外层卡片 border-radius:26px
-  - object-fit:cover；hero 区四周留白内嵌，不通栏贴边
-  - 仍注入 class="oc-cover"，src 留空（无封面用 CSS 渐变/纹理占位）
+  - 容器 border-radius:16px；外層卡片 border-radius:26px
+  - object-fit:cover；hero 區四周留白內嵌，不通欄貼邊
+  - 仍注入 class="oc-cover"，src 留空（無封面用 CSS 漸變/紋理佔位）
 
-幂等：命中新规格标记(MARK)则跳过。逐 pack 精确替换旧句。
+冪等：命中新規格標記(MARK)則跳過。逐 pack 精確替換舊句。
 """
 import json
 import re
 from pathlib import Path
 
 P = Path(__file__).resolve().parent.parent / "app" / "data" / "landing_prompts.json"
-MARK = "aspect-ratio:4/4.6"  # 新规格标记
+MARK = "aspect-ratio:4/4.6"  # 新規格標記
 
 OLD_RE = {
-    "zh-CN": r"- \*\*头图 hero（在最顶）\*\*：竖构图人物封面（约 4:4\.5~4:4\.6 比例、圆角、object-fit:cover）。[^\n]*",
+    "zh-CN": r"- \*\*頭圖 hero（在最頂）\*\*：豎構圖人物封面（約 4:4\.5~4:4\.6 比例、圓角、object-fit:cover）。[^\n]*",
     "zh-TW": r"- \*\*頭圖 hero（在最頂）\*\*：直構圖人物封面（約 4:4\.5~4:4\.6 比例、圓角、object-fit:cover）。[^\n]*",
     "ko": r"- \*\*헤더 이미지 hero\(맨 위\)\*\*: 세로 구도 인물 커버\(약 4:4\.5~4:4\.6 비율, 라운드, object-fit:cover\)\. [^\n]*",
     "en": r"- \*\*Hero image \(at the very top\)\*\*: a vertical-composition character cover \(about 4:4\.5~4:4\.6 ratio, rounded corners, object-fit:cover\)\.[^\n]*",
-    "ja": r"- \*\*ヘッダー画像 hero（一番上）\*\*：縦構図の人物カバー（約 4:4\.5~4:4\.6 比率、角丸、object-fit:cover）。[^\n]*",
+    "ja": r"- \*\*ヘッダー畫像 hero（一番上）\*\*：縦構図の人物カバー（約 4:4\.5~4:4\.6 比率、角丸、object-fit:cover）。[^\n]*",
 }
 
 NEW = {
     "zh-CN": (
-        "- **头图 hero（在最顶）**：竖构图人物封面，严格对齐基础卡规范——"
-        "封面图容器固定 aspect-ratio:4/4.6、border-radius:16px、object-fit:cover；"
-        "hero 区四周留白（图片内嵌在卡片里，不通栏贴边、不做整屏大图），外层卡片 border-radius:26px。"
-        "渲染器会把封面注入到 class=\"oc-cover\" 的元素中，你只需留好槽位、src 留空"
-        "（无封面则用 CSS 渐变/纹理做抽象占位，同样保持 4/4.6 比例与 16px 圆角）。"
+        "- **頭圖 hero（在最頂）**：豎構圖人物封面，嚴格對齊基礎卡規範——"
+        "封面圖容器固定 aspect-ratio:4/4.6、border-radius:16px、object-fit:cover；"
+        "hero 區四周留白（圖片內嵌在卡片裡，不通欄貼邊、不做整屏大圖），外層卡片 border-radius:26px。"
+        "渲染器會把封面注入到 class=\"oc-cover\" 的元素中，你只需留好槽位、src 留空"
+        "（無封面則用 CSS 漸變/紋理做抽象佔位，同樣保持 4/4.6 比例與 16px 圓角）。"
     ),
     "zh-TW": (
         "- **頭圖 hero（在最頂）**：直構圖人物封面，嚴格對齊基礎卡規範——"
@@ -54,10 +54,10 @@ NEW = {
         "(if there is no cover, use a CSS gradient/texture placeholder, still keeping the 4/4.6 ratio and 16px corners)."
     ),
     "ja": (
-        "- **ヘッダー画像 hero（一番上）**：縦構図の人物カバー。ベーシックカード規範に厳密に合わせる——"
-        "カバー画像コンテナは aspect-ratio:4/4.6、border-radius:16px、object-fit:cover に固定; "
-        "hero 領域は四方に余白を取り（画像はカード内に埋め込み、全幅ベタ塗り・全画面大画像は禁止）、外側カードは border-radius:26px。"
-        "レンダラーがカバーを class=\"oc-cover\" の要素に注入するので、スロットだけ残して src は空にする"
+        "- **ヘッダー畫像 hero（一番上）**：縦構図の人物カバー。ベーシックカード規範に厳密に合わせる——"
+        "カバー畫像コンテナは aspect-ratio:4/4.6、border-radius:16px、object-fit:cover に固定; "
+        "hero 領域は四方に餘白を取り（畫像はカード內に埋め込み、全幅ベタ塗り・全畫面大畫像は禁止）、外側カードは border-radius:26px。"
+        "レンダラーがカバーを class=\"oc-cover\" の要素に注入するので、スロットだけ殘して src は空にする"
         "（カバーがなければ CSS グラデーション/テクスチャで抽象プレースホルダー、同様に 4/4.6 比率と 16px 角丸を保つ）。"
     ),
 }
@@ -79,19 +79,19 @@ def main() -> int:
     for lang in NEW:
         pack = packs.get(lang)
         if not pack:
-            print(f"[skip] {lang} 无 pack"); continue
+            print(f"[skip] {lang} 無 pack"); continue
         sp2, ok = _patch(pack.get("SP_TEMPLATE", ""), lang)
         if ok is True:
             pack["SP_TEMPLATE"] = sp2; changed.append(lang)
         elif ok is None:
-            print(f"[WARN] {lang} 锚点未命中，跳过")
+            print(f"[WARN] {lang} 錨點未命中，跳過")
         else:
-            print(f"[skip] {lang} 已含新规格")
+            print(f"[skip] {lang} 已含新規格")
     top, ok = _patch(d.get("SP_TEMPLATE", ""), "zh-CN")
     if ok is True:
         d["SP_TEMPLATE"] = top; changed.append("(top)")
     if not changed:
-        print("无改动"); return 0
+        print("無改動"); return 0
     P.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
     print("已更新:", ", ".join(changed))
     return 0

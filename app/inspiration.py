@@ -1,17 +1,17 @@
-"""真实帖子拆解灵感库的检索层。
+"""真實帖子拆解靈感庫的檢索層。
 
-来源：scripts/build_inspiration_library.py 从 decompositions.json 派生的
-app/data/inspiration_library.json（约 2 万条 frame 级拆解）。
+來源：scripts/build_inspiration_library.py 從 decompositions.json 派生的
+app/data/inspiration_library.json（約 2 萬條 frame 級拆解）。
 
-用法：给定角色 persona 的 vibe 与某条帖子的 content，检索若干条"成品范例"
-作为生图灵感（借结构/手法，不照抄具体衣物/物件）。
+用法：給定角色 persona 的 vibe 與某條帖子的 content，檢索若干條"成品範例"
+作為生圖靈感（借結構/手法，不照抄具體衣物/物件）。
 
 匹配策略：
-  1) vibe ↔ persona（角色气质）
-  2) event/mood ↔ content（这条帖子在做什么）
-  3) 命中候选里随机抽 k 条，保证多样、不塌缩到同一批
-检索打分优先用 embedding（若存在预计算向量文件 + 端点可用），
-否则回退到纯词重叠（无第三方依赖，永远可用）。
+  1) vibe ↔ persona（角色氣質）
+  2) event/mood ↔ content（這條帖子在做什麼）
+  3) 命中候選裡隨機抽 k 條，保證多樣、不塌縮到同一批
+檢索打分優先用 embedding（若存在預計算向量檔案 + 端點可用），
+否則回退到純詞重疊（無第三方依賴，永遠可用）。
 """
 from __future__ import annotations
 
@@ -25,9 +25,9 @@ from . import config
 _LIB_PATH = config.DATA_DIR.parent / "app" / "data" / "inspiration_library.json"
 _VEC_PATH = config.DATA_DIR.parent / "app" / "data" / "inspiration_vectors.npy"
 
-# 拼进 prompt 的灵感字段：只留【纯氛围】维度——画面风格/拍摄手法/构图手法。
-# 刻意去掉 action/expression/makeup/clothes：那些绑定到某个人的具体造型，
-# 会把整组帖子往同一个姿势/穿搭带偏、冲淡角色人设，正是质量坍缩的来源。
+# 拼進 prompt 的靈感欄位：只留【純氛圍】維度——畫面風格/拍攝手法/構圖手法。
+# 刻意去掉 action/expression/makeup/clothes：那些繫結到某個人的具體造型，
+# 會把整組帖子往同一個姿勢/穿搭帶偏、沖淡角色人設，正是質量坍縮的來源。
 _INSPO_FIELDS = (
     "visual_style", "shooting_style", "framing",
 )
@@ -46,9 +46,9 @@ _ITEMS = _load_items()
 
 
 def _load_vectors():
-    """预计算向量（可选，numpy .npy + 内存映射 + 行范数预算）。
+    """預計算向量（可選，numpy .npy + 記憶體對映 + 行範數預算）。
 
-    缺失/依赖不可用/行数不匹配都返回 (None, None)，检索自动走词重叠回退。
+    缺失/依賴不可用/行數不匹配都返回 (None, None)，檢索自動走詞重疊回退。
     """
     if not _ITEMS or not _VEC_PATH.exists():
         return None, None
@@ -70,7 +70,7 @@ _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+")
 
 
 def _tokens(text: str) -> set:
-    """粗分词：英文按词、中文按 2-gram，够做词重叠打分。"""
+    """粗分詞：英文按詞、中文按 2-gram，夠做詞重疊打分。"""
     toks: set = set()
     for m in _TOKEN_RE.findall((text or "").lower()):
         if m.isascii():
@@ -88,7 +88,7 @@ def _item_tags(item: dict) -> str:
 
 
 def _query_vector(query: str):
-    """给查询串算 embedding；端点不可用则返回 None（触发词重叠回退）。"""
+    """給查詢串算 embedding；端點不可用則返回 None（觸發詞重疊回退）。"""
     if _VECTORS is None:
         return None
     try:
@@ -100,7 +100,7 @@ def _query_vector(query: str):
 
 
 def _scored_indices_vec(qvec, pool_size: int) -> list:
-    """numpy 向量化余弦：返回 top pool_size 下标。"""
+    """numpy 向量化餘弦：返回 top pool_size 下標。"""
     import numpy as np
     q = np.asarray(qvec, dtype=np.float32)
     qn = np.linalg.norm(q) or 1.0
@@ -121,7 +121,7 @@ def _scored_indices_lexical(query: str, pool_size: int) -> list:
 
 
 def _scored_indices(query: str, pool_size: int) -> list:
-    """按查询给全库打分，返回 top pool_size 下标（embedding 优先，词重叠回退）。"""
+    """按查詢給全庫打分，返回 top pool_size 下標（embedding 優先，詞重疊回退）。"""
     if not _ITEMS:
         return []
     qvec = _query_vector(query)
@@ -135,21 +135,21 @@ def _scored_indices(query: str, pool_size: int) -> list:
 
 def retrieve(vibe, content: str = "", k: int = 3, pool: int = 80,
              exclude: set | None = None) -> "tuple[list, list]":
-    """检索 k 条灵感 item。
+    """檢索 k 條靈感 item。
 
-    vibe: 角色气质（list 或 str），配 persona；
-    content: 这条帖子的文案，配 event/mood；
-    query 以 content 为主（content 决定这条帖子拍什么），vibe 只轻度带入，
-    避免不同帖子因共享同一 vibe 而召回高度雷同的候选池。
-    exclude: 跨帖子已用过的 src 集合，命中则跳过，保证多样。
-    返回 (items, srcs)，srcs 供调用方累加进 exclude 做跨帖去重。
-    库缺失时返回 ([], [])。
+    vibe: 角色氣質（list 或 str），配 persona；
+    content: 這條帖子的文案，配 event/mood；
+    query 以 content 為主（content 決定這條帖子拍什麼），vibe 只輕度帶入，
+    避免不同帖子因共享同一 vibe 而召回高度雷同的候選池。
+    exclude: 跨帖子已用過的 src 集合，命中則跳過，保證多樣。
+    返回 (items, srcs)，srcs 供呼叫方累加進 exclude 做跨帖去重。
+    庫缺失時返回 ([], [])。
     """
     if not _ITEMS:
         return [], []
     exclude = exclude or set()
     vibe_str = " ".join(vibe) if isinstance(vibe, (list, tuple)) else str(vibe or "")
-    # content 为主、vibe 只带一次，弱化共享气质对候选池的支配
+    # content 為主、vibe 只帶一次，弱化共享氣質對候選池的支配
     query = f"{content} {content} {vibe_str}".strip() if content else vibe_str
     cand = _scored_indices(query, pool) if query else []
     if not cand:
@@ -163,14 +163,14 @@ def retrieve(vibe, content: str = "", k: int = 3, pool: int = 80,
 
 
 _FIELD_LABELS = {
-    "action": "动作", "expression": "表情", "makeup": "妆容",
-    "clothes": "穿搭", "framing": "构图", "visual_style": "画面风格",
-    "shooting_style": "拍摄手法",
+    "action": "動作", "expression": "表情", "makeup": "妝容",
+    "clothes": "穿搭", "framing": "構圖", "visual_style": "畫面風格",
+    "shooting_style": "拍攝手法",
 }
 
 
 def format_refs(items: list) -> str:
-    """把检索到的 item 拼成 prompt 参考串（每条列出有值的灵感字段）。"""
+    """把檢索到的 item 拼成 prompt 參考串（每條列出有值的靈感欄位）。"""
     if not items:
         return ""
     blocks = []
@@ -180,7 +180,7 @@ def format_refs(items: list) -> str:
             for f in _INSPO_FIELDS if it.get(f)
         ]
         if lines:
-            blocks.append(f"  【范例{n}】\n" + "\n".join(lines))
+            blocks.append(f"  【範例{n}】\n" + "\n".join(lines))
     return "\n".join(blocks)
 
 

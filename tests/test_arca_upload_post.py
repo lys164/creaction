@@ -55,12 +55,32 @@ def test_tos_upload_returns_storage_object(monkeypatch):
     assert obj["bucket_name"] == "bkt"
     assert obj["object_key"] == "images/x.png"
     assert obj["object_type"] == "image"
-    # 虚拟主机风格直链：bucket 前缀 + OSS 公网 host
+    # 虛擬主機風格直鏈：bucket 字首 + OSS 公網 host
     assert obj["url"] == "https://bkt.oss-ap-northeast-1.aliyuncs.com/images/x.png"
-    # STS 三件套 + endpoint 正确透传给 oss2
+    # STS 三件套 + endpoint 正確透傳給 oss2
     assert uploaded["endpoint"] == "https://oss-ap-northeast-1.aliyuncs.com"
     assert (uploaded["ak"], uploaded["sk"], uploaded["token"]) == ("ak", "sk", "st")
     assert uploaded["content_type"] == "image/png"
+
+
+def test_public_tos_upload_uses_cdn_url_and_exposes_allowed_host(monkeypatch):
+    ac = _client(monkeypatch)
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        assert json["use_public"] is True
+        return _Resp({"code": 0, "data": {
+            "access_key_id": "ak", "secret_access_key": "sk",
+            "session_token": "st", "bucket": "public-bkt",
+            "endpoint": "https://oss.example", "cdn_domain": "https://cdn.example/",
+        }})
+
+    monkeypatch.setattr(ac.requests, "post", fake_post)
+    monkeypatch.setattr(ac, "_oss_put_object", lambda *_args: None)
+
+    obj = ac.tos_upload(b"html", "landing_import/p/index.html",
+                        "text/html; charset=utf-8", "zh", public=True)
+    assert obj["url"] == "https://cdn.example/landing_import/p/index.html"
+    assert ac.public_tos_hosts("zh") == {"cdn.example", "public-bkt.oss.example"}
 
 
 def test_create_post_returns_post_id(monkeypatch):
@@ -69,13 +89,13 @@ def test_create_post_returns_post_id(monkeypatch):
     def fake_post(url, json=None, headers=None, timeout=None, **kw):
         assert url.endswith("/post/create")
         assert json["character_id"] == "c1"
-        assert json["content"] == "今天天气真好"
+        assert json["content"] == "今天天氣真好"
         assert json["images"][0]["image_type"] == "aigc"
         assert json["images"][0]["media"]["object_key"] == "k"
         return _Resp({"code": 0, "data": {"post_id": "p777"}})
 
     monkeypatch.setattr(ac.requests, "post", fake_post)
-    pid = ac.create_post("c1", "今天天气真好",
+    pid = ac.create_post("c1", "今天天氣真好",
                          [{"bucket_name": "b", "object_key": "k", "object_type": "image"}],
                          lang="zh", visibility=1)
     assert pid == "p777"

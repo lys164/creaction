@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feed 卡片 · 拖动排序</title>
+<style>
+  :root{--bg:#f0f2f5;--card:#fff;--line:#e4e6eb;--sub:#8a8d91;--txt:#1c1e21;
+    --brand:#5b6bff;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);font-family:-apple-system,"PingFang SC",
+    "Microsoft YaHei",system-ui,sans-serif;color:var(--txt);}
+  header{position:sticky;top:0;z-index:10;background:#fff;
+    border-bottom:1px solid var(--line);padding:10px 16px;}
+  .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  header h1{font-size:16px;margin:0;font-weight:700;}
+  .tabs{display:flex;gap:6px;margin-left:4px;}
+  .tab{padding:6px 14px;border-radius:999px;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);background:#f5f6f8;color:#444;user-select:none;}
+  .tab.active{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600;}
+  .spacer{flex:1;}
+  .btn{padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;border:none;
+    background:var(--brand);color:#fff;font-weight:600;}
+  .btn.ghost{background:#eef0f4;color:#333;}
+  .hint{font-size:12px;color:var(--sub);margin-top:6px;}
+  .feed{max-width:540px;margin:0 auto;padding:16px 12px 80px;
+    display:flex;flex-direction:column;gap:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04);cursor:grab;}
+  .card.dragging{opacity:.4;}
+  .card.over{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand);}
+  .hd{display:flex;align-items:center;gap:10px;padding:10px 12px;}
+  .grip{color:#c0c4cc;font-size:16px;cursor:grab;}
+  .idx{min-width:30px;height:26px;border-radius:13px;background:#eef1f6;color:#65676b;
+    font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  .ava{width:36px;height:36px;border-radius:50%;
+    background:linear-gradient(135deg,#7b8cff,#c86bff);color:#fff;font-weight:700;
+    display:flex;align-items:center;justify-content:center;font-size:14px;flex:none;}
+  .who{min-width:0;flex:1;}
+  .name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pid{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ph{width:100%;display:block;aspect-ratio:1/1;object-fit:cover;background:#eee;}
+  .ph.noimg{aspect-ratio:auto;height:60px;display:flex;align-items:center;
+    justify-content:center;color:var(--sub);font-size:13px;}
+  .body{padding:10px 14px 14px;}
+  .txt{font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
+  .zh{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);
+    font-size:12.5px;color:#65676b;line-height:1.5;white-space:pre-wrap;}
+  .card.missing{opacity:.65;}
+  .body.miss{color:#c0392b;font-size:13px;padding:14px;}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+    background:#222;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;
+    opacity:0;pointer-events:none;transition:.25s;z-index:50;}
+  .toast.show{opacity:1;}
+</style></head>
+<body>
+  <header>
+    <div class="top">
+      <h1>Feed 卡片</h1>
+      <div class="tabs" id="tabs"></div>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="btnReset">重置本页</button>
+      <button class="btn" id="btnExportTxt">导出序号文本</button>
+      <button class="btn" id="btnExportHtml">导出当前 HTML</button>
+    </div>
+    <div class="hint">拖动卡片调整顺序（序号自动从大到小重排）。导出会按当前顺序生成。</div>
+  </header>
+  <div class="feed" id="feed"></div>
+  <div class="toast" id="toast"></div>
+
+<script id="feed-data" type="application/json">/*__DATA__*/</script>
+<script>
+const DATA = JSON.parse(document.getElementById("feed-data").textContent);
+const IMG_BASE = DATA.img_base;
+const LISTS = DATA.lists;            // [{name, ids:[...]}]
+const POSTS = DATA.posts;            // { post_id: {char_key, lang, text, zh, ptype, img, missing} }
+let active = 0;
+// 各 tab 的当前顺序（可被拖动改变）
+const order = LISTS.map(l => l.ids.slice());
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.className="toast show";setTimeout(()=>t.className="toast",2200);}
+
+function renderTabs(){
+  const box=document.getElementById("tabs");box.innerHTML="";
+  LISTS.forEach((l,i)=>{
+    const d=document.createElement("div");
+    d.className="tab"+(i===active?" active":"");
+    d.textContent=`${l.name} (${l.ids.length})`;
+    d.onclick=()=>{active=i;renderTabs();renderFeed();};
+    box.appendChild(d);
+  });
+}
+
+function card(pid,rank){
+  const p=POSTS[pid];
+  const el=document.createElement("div");
+  el.draggable=true;el.dataset.pid=pid;
+  if(!p||p.missing){
+    el.className="card missing";
+    el.innerHTML=`<div class="hd"><span class="grip">⋮⋮</span><div class="idx">${rank}</div>
+      <div class="who"><div class="name">未找到</div><div class="pid">${esc(pid)}</div></div></div>
+      <div class="body miss">线上储存中没有这个 post_id</div>`;
+    return el;
+  }
+  el.className="card";
+  const iu=p.img?`${IMG_BASE}/img/${p.img}`:"";
+  const imgHtml=iu?`<img class="ph" loading="lazy" src="${esc(iu)}" alt="">`:`<div class="ph noimg">无图</div>`;
+  const zhHtml=p.zh?`<div class="zh">${esc(p.zh)}</div>`:"";
+  const meta=[esc(pid),esc(p.lang),p.ptype?esc(p.ptype):""].filter(Boolean).join(" · ");
+  el.innerHTML=`<div class="hd">
+      <span class="grip">⋮⋮</span>
+      <div class="idx">${rank}</div>
+      <div class="ava">${esc((p.char_key||"?").slice(5,7)).toUpperCase()}</div>
+      <div class="who"><div class="name">${esc(p.char_key)}</div><div class="pid">${meta}</div></div>
+    </div>${imgHtml}
+    <div class="body"><div class="txt">${esc(p.text)}</div>${zhHtml}</div>`;
+  return el;
+}
+
+let dragEl=null;
+function bindDrag(el){
+  el.addEventListener("dragstart",()=>{dragEl=el;el.classList.add("dragging");});
+  el.addEventListener("dragend",()=>{el.classList.remove("dragging");document.querySelectorAll(".card.over").forEach(c=>c.classList.remove("over"));persist();});
+  el.addEventListener("dragover",e=>{e.preventDefault();
+    const feed=document.getElementById("feed");
+    const after=getAfter(feed,e.clientY);
+    document.querySelectorAll(".card.over").forEach(c=>c.classList.remove("over"));
+    if(after==null){feed.appendChild(dragEl);}else{feed.insertBefore(dragEl,after);after.classList.add("over");}
+  });
+}
+function getAfter(feed,y){
+  const els=[...feed.querySelectorAll(".card:not(.dragging)")];
+  return els.reduce((closest,child)=>{
+    const box=child.getBoundingClientRect();const off=y-box.top-box.height/2;
+    if(off<0&&off>closest.offset){return{offset:off,element:child};}return closest;
+  },{offset:-Infinity}).element||null;
+}
+function persist(){
+  const feed=document.getElementById("feed");
+  order[active]=[...feed.querySelectorAll(".card")].map(c=>c.dataset.pid);
+  renumber();
+}
+function renumber(){
+  const feed=document.getElementById("feed");const cards=[...feed.querySelectorAll(".card")];
+  const n=cards.length;cards.forEach((c,i)=>{const idx=c.querySelector(".idx");if(idx)idx.textContent=n-i;});
+}
+
+function renderFeed(){
+  const feed=document.getElementById("feed");feed.innerHTML="";
+  const ids=order[active];const n=ids.length;
+  ids.forEach((pid,i)=>{const el=card(pid,n-i);bindDrag(el);feed.appendChild(el);});
+}
+
+document.getElementById("btnReset").onclick=()=>{order[active]=LISTS[active].ids.slice();renderFeed();toast("已重置本页顺序");};
+document.getElementById("btnExportTxt").onclick=()=>{
+  const l=LISTS[active];const ids=order[active];const n=ids.length;
+  const lines=ids.map((pid,i)=>`${n-i}\t${pid}`);
+  download(`${l.name}_排序.txt`,`# ${l.name} · 共 ${n} 个 · 序号从大到小\n`+lines.join("\n"),"text/plain");
+  toast("已导出序号文本");
+};
+document.getElementById("btnExportHtml").onclick=()=>{
+  const clone=document.documentElement.cloneNode(true);
+  // 写回当前顺序到 DATA
+  const nd=JSON.parse(JSON.stringify(DATA));nd.lists=LISTS.map((l,i)=>({name:l.name,ids:order[i]}));
+  const s=clone.querySelector("#feed-data");if(s)s.textContent=JSON.stringify(nd);
+  download("feed_reorder_export.html","<!doctype html>\n"+clone.outerHTML,"text/html");
+  toast("已导出当前 HTML");
+};
+function download(name,content,type){
+  const b=new Blob([content],{type});const a=document.createElement("a");
+  a.href=URL.createObjectURL(b);a.download=name;a.click();URL.revokeObjectURL(a.href);
+}
+
+renderTabs();renderFeed();
+</script>
+</body></html>

@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>폰 몰래보기 · Phone Check Demo</title>
+<style>
+  :root {
+    --bg: #12111a; --panel: #1c1a26; --line: #2c2a3a;
+    --txt: #f0eef6; --mut: #8d8a9e; --accent: #8b7bff; --gold: #f5c451;
+    --hot: #ff5470; --ok: #4cd6a4;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: -apple-system, "Apple SD Gothic Neo", "PingFang TC", system-ui, sans-serif; background: radial-gradient(1200px 800px at 50% -10%, #241f38 0%, var(--bg) 60%); color: var(--txt); min-height: 100vh; }
+  button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; padding: 0; }
+
+  .stage { display: flex; flex-direction: column; align-items: center; padding: 26px 12px 60px; }
+  .demo-bar { width: min(430px, 100%); display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .demo-bar .title { font-size: 13px; font-weight: 700; color: var(--mut); letter-spacing: .04em; }
+  .demo-bar .spacer { flex: 1; }
+  .lang-switch { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 2px; }
+  .lang-btn { border-radius: 999px; padding: 4px 12px; font-size: 12px; color: var(--mut); }
+  .lang-btn.active { background: var(--accent); color: #fff; font-weight: 700; }
+  .notes-btn { font-size: 12px; color: var(--mut); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; }
+  .notes-btn:hover { color: var(--txt); border-color: var(--accent); }
+
+  /* ── phone frame ─────────────────────────── */
+  .phone { width: min(400px, 100vw - 16px); height: 780px; max-height: calc(100vh - 40px); min-height: 620px;
+    border-radius: 44px; background: #000; border: 6px solid #26242f; box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px #3a3748;
+    position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  .notch { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 110px; height: 26px; background: #000; border-radius: 999px; z-index: 60; }
+  .screen { flex: 1; position: relative; overflow: hidden; border-radius: 38px; background: #0b0a12; }
+  .view { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden; }
+  .view.show { display: flex; }
+
+  .statusbar { height: 48px; flex-shrink: 0; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 26px 4px; font-size: 12.5px; font-weight: 700; z-index: 50; }
+  .statusbar .batt { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+  .batt-shell { width: 22px; height: 11px; border: 1.5px solid currentColor; border-radius: 3px; padding: 1px; opacity: .9; }
+  .batt-fill { height: 100%; border-radius: 1px; background: currentColor; }
+
+  /* ── hub (character select) ───────────────── */
+  .hub { background: linear-gradient(180deg, #171426 0%, #0b0a12 100%); }
+  .hub-body { flex: 1; overflow: auto; padding: 10px 18px 30px; }
+  .hub-head { padding: 18px 6px 6px; }
+  .hub-eyebrow { font-size: 11px; letter-spacing: .18em; color: var(--accent); font-weight: 800; }
+  .hub-title { font-size: 24px; font-weight: 800; margin: 6px 0 4px; line-height: 1.3; }
+  .hub-sub { font-size: 12.5px; color: var(--mut); line-height: 1.6; }
+  .ticket-pill { display: inline-flex; align-items: center; gap: 6px; background: rgba(245,196,81,.12); border: 1px solid rgba(245,196,81,.4); color: var(--gold); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 700; margin-top: 12px; }
+  .hub-card { margin-top: 14px; border-radius: 20px; overflow: hidden; position: relative; border: 1px solid var(--line); background: var(--panel); cursor: pointer; transition: transform .15s; }
+  .hub-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .hub-card .cardbg { height: 118px; background-size: cover; background-position: center 25%; position: relative; }
+  .hub-card .cardbg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 20%, var(--panel) 100%); }
+  .hub-card .genre { position: absolute; top: 10px; left: 12px; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 3px 9px; border-radius: 999px; backdrop-filter: blur(6px); }
+  .hub-card .newdot { position: absolute; top: 10px; right: 12px; font-size: 10.5px; font-weight: 800; color: #fff; background: var(--hot); border-radius: 999px; padding: 3px 9px; box-shadow: 0 2px 10px rgba(255,84,112,.5); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+  .hub-card .cardmeta { padding: 0 14px 13px; margin-top: -26px; position: relative; }
+  .hub-card .cname { font-size: 17px; font-weight: 800; }
+  .hub-card .chook { font-size: 12px; color: var(--mut); margin-top: 3px; line-height: 1.55; }
+  .hub-card .cstage { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+  .stage-track { flex: 1; height: 4px; border-radius: 2px; background: #2e2b3d; overflow: hidden; }
+  .stage-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--hot)); }
+  .stage-label { font-size: 10.5px; color: var(--mut); white-space: nowrap; }
+
+  /* ── lock screen ─────────────────────────── */
+  .lockview { background-size: cover; background-position: center; }
+  .lockview::before { content: ""; position: absolute; inset: 0; backdrop-filter: blur(26px) brightness(.55); background: rgba(8,6,18,.35); }
+  .lock-body { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; padding: 8px 24px 26px; overflow: auto; }
+  .lock-time { font-size: 44px; font-weight: 200; margin-top: 6px; letter-spacing: .02em; }
+  .lock-date { font-size: 12.5px; color: rgba(255,255,255,.75); margin-top: 2px; }
+  .lock-face { width: 62px; height: 62px; border-radius: 50%; background-size: cover; background-position: center 20%; margin-top: 16px; border: 2px solid rgba(255,255,255,.35); }
+  .lock-msg { font-size: 13px; margin-top: 10px; color: rgba(255,255,255,.9); }
+  .pin-dots { display: flex; gap: 16px; margin: 16px 0 6px; }
+  .pin-dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.7); }
+  .pin-dot.on { background: #fff; }
+  .pin-dots.err { animation: shake .35s; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  .lock-hint { font-size: 11.5px; color: var(--gold); background: rgba(245,196,81,.12); border: 1px dashed rgba(245,196,81,.45); border-radius: 10px; padding: 7px 12px; margin: 6px 0 10px; text-align: center; line-height: 1.55; max-width: 300px; }
+  .pass-peek { font-size: 12px; color: rgba(255,255,255,.75); background: rgba(255,255,255,.1); border: 1px dashed rgba(255,255,255,.3); border-radius: 10px; padding: 6px 14px; margin: 0 0 10px; letter-spacing: .04em; }
+  .pass-peek b { color: var(--gold); font-weight: 800; font-size: 14px; letter-spacing: .12em; }
+  .keypad { display: grid; grid-template-columns: repeat(3, 66px); gap: 12px 20px; margin-top: 4px; }
+  .key { width: 66px; height: 66px; border-radius: 50%; background: rgba(255,255,255,.14); backdrop-filter: blur(8px); font-size: 24px; font-weight: 500; color: #fff; display: flex; align-items: center; justify-content: center; }
+  .key:active { background: rgba(255,255,255,.35); }
+  .key.ghostkey { background: transparent; font-size: 13px; font-weight: 600; color: rgba(255,255,255,.75); }
+  .lock-back { position: absolute; top: 52px; left: 18px; font-size: 12.5px; color: rgba(255,255,255,.8); z-index: 5; }
+
+  /* ── unlock success flash ── */
+  .unlock-flash { position: absolute; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; background: rgba(5,4,12,.88); backdrop-filter: blur(10px); }
+  .unlock-flash.show { display: flex; animation: fadein .3s; }
+  .unlock-flash .big { font-size: 40px; }
+  .unlock-flash .t1 { font-size: 17px; font-weight: 800; }
+  .unlock-flash .t2 { font-size: 12px; color: var(--mut); }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ── home screen ─────────────────────────── */
+  .homeview { background-size: cover; background-position: center; }
+  .homeview::before { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,5,14,.72), rgba(6,5,14,.86)); backdrop-filter: blur(14px); }
+  .home-body { position: relative; flex: 1; overflow: auto; padding: 4px 18px 20px; display: flex; flex-direction: column; }
+  .home-top { display: flex; align-items: center; gap: 10px; padding: 8px 4px 4px; }
+  .home-face { width: 44px; height: 44px; border-radius: 50%; background-size: cover; background-position: center 20%; border: 1.5px solid rgba(255,255,255,.3); }
+  .home-owner { font-size: 14.5px; font-weight: 800; }
+  .home-ownersub { font-size: 11px; color: var(--mut); margin-top: 1px; }
+  .home-exit { margin-left: auto; font-size: 11.5px; color: var(--mut); border: 1px solid var(--line); padding: 5px 10px; border-radius: 999px; }
+  .snoop-strip { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; background: rgba(139,123,255,.1); border: 1px solid rgba(139,123,255,.35); border-radius: 12px; padding: 8px 12px; }
+  .snoop-strip .tk { color: var(--gold); font-weight: 800; font-size: 12px; white-space: nowrap; }
+  .snoop-strip .cl { flex: 1; font-size: 11.5px; color: var(--mut); }
+  .snoop-strip .cl b { color: var(--txt); }
+  .clue-note-btn { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+  .appgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px 10px; padding: 16px 2px; }
+  .appicon { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; }
+  .appicon .glyph { width: 58px; height: 58px; border-radius: 15px; display: flex; align-items: center; justify-content: center; font-size: 26px; box-shadow: 0 4px 14px rgba(0,0,0,.35); position: relative; }
+  .appicon .label { font-size: 10.5px; color: rgba(255,255,255,.92); text-shadow: 0 1px 3px rgba(0,0,0,.6); max-width: 74px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .appicon .badge { position: absolute; top: -5px; right: 2px; min-width: 18px; height: 18px; border-radius: 999px; background: var(--hot); color: #fff; font-size: 10.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 5px; box-shadow: 0 2px 8px rgba(255,84,112,.55); z-index: 2; }
+  .appicon .lockcover { position: absolute; inset: 0; border-radius: 15px; background: rgba(10,8,20,.55); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .truth-card { margin-top: auto; border-radius: 16px; padding: 14px; background: linear-gradient(120deg, rgba(245,196,81,.16), rgba(255,84,112,.14)); border: 1px solid rgba(245,196,81,.45); }
+  .truth-card.dim { opacity: .55; filter: saturate(.4); }
+  .truth-card .tc-top { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: var(--gold); }
+  .truth-card .tc-sub { font-size: 11.5px; color: var(--mut); margin-top: 5px; line-height: 1.6; }
+  .truth-card .tc-cta { margin-top: 10px; width: 100%; border-radius: 10px; background: var(--gold); color: #201a08; font-weight: 800; font-size: 13px; padding: 9px 0; }
+  .truth-card .tc-cta:disabled { opacity: .45; cursor: default; }
+
+  /* ── app view generic ─────────────────────── */
+  .appview { background: #f4f3f8; color: #23222b; }
+  .appview .statusbar { color: #23222b; }
+  .app-nav { display: flex; align-items: center; gap: 10px; padding: 8px 16px 10px; background: #fff; border-bottom: 1px solid #e8e6f0; flex-shrink: 0; }
+  .app-nav .backbtn { font-size: 14px; font-weight: 700; color: #6b5bd2; display: flex; align-items: center; gap: 3px; }
+  .app-nav .app-title { font-size: 15.5px; font-weight: 800; }
+  .app-nav .subtag { margin-left: auto; font-size: 10.5px; color: #9a97ab; }
+  .app-body { flex: 1; overflow: auto; padding-bottom: 26px; }
+  .app-body.darkbody { background: #101018; color: #eceaf4; }
+
+  .sec-label { padding: 14px 16px 6px; font-size: 11px; font-weight: 800; color: #9a97ab; letter-spacing: .08em; }
+  .row-item { background: #fff; padding: 12px 16px; border-bottom: 1px solid #f0eef5; cursor: pointer; }
+  .row-item:active { background: #f6f4fb; }
+  .row-top { display: flex; align-items: baseline; gap: 8px; }
+  .row-title { font-size: 13.5px; font-weight: 700; flex: 1; min-width: 0; }
+  .row-time { font-size: 10.5px; color: #a5a2b5; white-space: nowrap; }
+  .row-sub { font-size: 12px; color: #7c7990; margin-top: 3px; line-height: 1.55; }
+  .row-detail { display: none; margin-top: 9px; font-size: 12px; line-height: 1.65; background: #f6f4fd; border-left: 3px solid #8b7bff; border-radius: 0 8px 8px 0; padding: 9px 11px; color: #4c4761; white-space: pre-wrap; }
+  .row-item.open .row-detail { display: block; }
+  .row-item.hotrow .row-title::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--hot); margin-left: 6px; vertical-align: 1px; }
+
+  /* chat app */
+  .chat-list-item { display: flex; gap: 11px; align-items: center; background: #fff; padding: 12px 16px; border-bottom: 1px solid #f0eef5; cursor: pointer; }
+  .chat-face { width: 46px; height: 46px; border-radius: 16px; background: #ddd9ee; display: flex; align-items: center; justify-content: center; font-size: 21px; flex-shrink: 0; background-size: cover; background-position: center 20%; }
+  .chat-meta { flex: 1; min-width: 0; }
+  .chat-name { font-size: 13.5px; font-weight: 800; }
+  .chat-name .youtag { font-size: 9.5px; font-weight: 800; color: #fff; background: var(--hot); border-radius: 4px; padding: 1px 5px; margin-left: 5px; vertical-align: 1px; }
+  .chat-last { font-size: 12px; color: #8b8899; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+  .chat-time { font-size: 10px; color: #b0adbe; }
+  .chat-unread { min-width: 17px; height: 17px; border-radius: 999px; background: #fa5252; color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
+  .talkroom { background: #bacee0; flex: 1; overflow: auto; padding: 14px 12px 20px; }
+  .talkroom.dark { background: #46495c; }
+  .bubble-row { display: flex; margin-bottom: 10px; gap: 8px; }
+  .bubble-row.mine { justify-content: flex-end; }
+  .bubble-face { width: 34px; height: 34px; border-radius: 12px; background-size: cover; background-position: center 20%; background-color: #d5d0e8; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .bubble-stack { max-width: 72%; display: flex; flex-direction: column; gap: 4px; }
+  .bubble-name { font-size: 10.5px; color: #55606e; margin-bottom: 1px; }
+  .bubble { border-radius: 4px 14px 14px 14px; background: #fff; color: #222; padding: 8px 11px; font-size: 12.5px; line-height: 1.55; width: fit-content; white-space: pre-wrap; word-break: break-word; }
+  .mine .bubble { background: #ffe94a; border-radius: 14px 4px 14px 14px; align-self: flex-end; }
+  .bubble.voicebub { display: flex; align-items: center; gap: 8px; font-style: italic; color: #555; }
+  .bubble.voicebub .pl { width: 24px; height: 24px; border-radius: 50%; background: #6b5bd2; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; font-style: normal; }
+  .bub-time { font-size: 9.5px; color: #6f7b89; align-self: flex-end; }
+  .mine .bub-time { align-self: flex-start; }
+  .draft-strip { background: #fff; border-top: 1px solid #e3e0ee; padding: 10px 14px; flex-shrink: 0; }
+  .draft-label { font-size: 10px; font-weight: 800; color: var(--hot); letter-spacing: .06em; }
+  .draft-text { margin-top: 5px; font-size: 12.5px; color: #55506a; background: #f6f4fb; border-radius: 10px; padding: 9px 11px; line-height: 1.6; border: 1px dashed #cfc8e8; white-space: pre-wrap; }
+
+  /* gallery */
+  .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; }
+  .ph { aspect-ratio: 1; position: relative; overflow: hidden; cursor: pointer; background: #ddd; }
+  .ph .phbg { position: absolute; inset: 0; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; font-size: 30px; }
+  .ph .phcap { position: absolute; left: 0; right: 0; bottom: 0; font-size: 8.5px; padding: 10px 5px 4px; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.65)); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ph.lockph .phbg { filter: blur(14px) saturate(1.3); transform: scale(1.15); }
+  .ph .phlock { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #fff; font-size: 20px; background: rgba(20,15,35,.35); }
+  .ph .phlock span { font-size: 9px; font-weight: 800; background: rgba(0,0,0,.55); border-radius: 999px; padding: 2px 8px; }
+  .lightbox { position: absolute; inset: 0; z-index: 70; background: rgba(5,4,10,.94); display: none; flex-direction: column; }
+  .lightbox.show { display: flex; }
+  .lb-close { position: absolute; top: 54px; right: 18px; color: #fff; font-size: 22px; z-index: 3; }
+  .lb-img { flex: 1; margin: 70px 20px 0; border-radius: 14px; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; font-size: 64px; max-height: 55%; }
+  .lb-cap { padding: 18px 24px 40px; }
+  .lb-cap .c1 { font-size: 14px; font-weight: 800; color: #fff; line-height: 1.5; }
+  .lb-cap .c2 { font-size: 12px; color: #b9b4cc; margin-top: 8px; line-height: 1.7; white-space: pre-wrap; }
+
+  /* voice memo */
+  .vm-item { background: #fff; margin: 8px 12px; border-radius: 14px; padding: 12px 14px; cursor: pointer; border: 1px solid #eceaf3; }
+  .vm-top { display: flex; align-items: center; gap: 10px; }
+  .vm-play { width: 34px; height: 34px; border-radius: 50%; background: #23222b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+  .vm-name { font-size: 13px; font-weight: 800; flex: 1; }
+  .vm-len { font-size: 10.5px; color: #a5a2b5; }
+  .vm-wave { display: flex; gap: 2px; align-items: flex-end; height: 26px; margin: 10px 0 2px; }
+  .vm-wave i { flex: 1; background: #d8d3ec; border-radius: 2px; }
+  .vm-item.playing .vm-wave i { background: #8b7bff; animation: eq .8s infinite alternate; }
+  @keyframes eq { from { transform: scaleY(.6); } to { transform: scaleY(1); } }
+  .vm-script { display: none; font-size: 12px; line-height: 1.7; color: #4c4761; background: #f6f4fd; border-radius: 10px; padding: 10px 12px; margin-top: 9px; white-space: pre-wrap; }
+  .vm-item.playing .vm-script { display: block; }
+
+  /* screentime */
+  .st-hero { background: #fff; margin: 12px; border-radius: 16px; padding: 16px; }
+  .st-total { font-size: 26px; font-weight: 800; }
+  .st-caption { font-size: 11px; color: #9a97ab; margin-top: 2px; }
+  .st-bars { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .st-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+  .st-app { width: 92px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st-track { flex: 1; height: 14px; border-radius: 7px; background: #f0eef5; overflow: hidden; }
+  .st-fill { height: 100%; border-radius: 7px; }
+  .st-val { width: 74px; text-align: right; color: #7c7990; font-size: 11px; }
+  .st-insight { background: #fff; margin: 0 12px 12px; border-radius: 16px; padding: 14px 16px; }
+  .st-insight .in-line { font-size: 12.5px; line-height: 1.7; padding: 7px 0; border-bottom: 1px solid #f2f0f7; cursor: pointer; }
+  .st-insight .in-line:last-child { border-bottom: none; }
+
+  /* toast + clue */
+  .toast { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px); background: #241f3d; color: #fff; border: 1px solid var(--accent); border-radius: 14px; padding: 11px 16px; font-size: 12px; opacity: 0; pointer-events: none; transition: .3s; z-index: 90; width: max-content; max-width: 85%; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast b { color: var(--gold); }
+
+  /* modal (paywall / truth / clue note) */
+  .modal-wrap { position: absolute; inset: 0; z-index: 100; background: rgba(6,5,12,.72); backdrop-filter: blur(4px); display: none; align-items: flex-end; }
+  .modal-wrap.show { display: flex; }
+  .modal { width: 100%; background: #1d1a2c; border-radius: 26px 26px 0 0; padding: 22px 20px 30px; max-height: 78%; overflow: auto; animation: slideup .28s; border-top: 1px solid var(--line); }
+  @keyframes slideup { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal .m-emoji { font-size: 34px; text-align: center; }
+  .modal .m-title { font-size: 17px; font-weight: 800; text-align: center; margin-top: 8px; }
+  .modal .m-body { font-size: 12.5px; color: var(--mut); line-height: 1.75; margin-top: 10px; text-align: center; white-space: pre-wrap; }
+  .modal .m-body b { color: var(--gold); }
+  .modal .truth-text { text-align: left; background: rgba(245,196,81,.08); border: 1px solid rgba(245,196,81,.3); border-radius: 14px; padding: 14px; color: #efe9dc; margin-top: 14px; font-size: 13px; line-height: 1.85; white-space: pre-wrap; }
+  .modal .next-drop { margin-top: 14px; border-radius: 14px; background: rgba(139,123,255,.1); border: 1px solid rgba(139,123,255,.4); padding: 12px 14px; }
+  .modal .next-drop .nd-tag { font-size: 10.5px; font-weight: 800; color: var(--accent); letter-spacing: .08em; }
+  .modal .next-drop .nd-text { font-size: 12.5px; margin-top: 5px; line-height: 1.65; }
+  .modal .nd-timer { font-size: 11px; color: var(--mut); margin-top: 6px; }
+  .modal .m-cta { width: 100%; margin-top: 16px; border-radius: 12px; padding: 13px 0; font-size: 14px; font-weight: 800; background: var(--gold); color: #241d07; }
+  .modal .m-cta.violet { background: var(--accent); color: #fff; }
+  .modal .m-sub-cta { width: 100%; margin-top: 8px; padding: 10px 0; font-size: 12px; color: var(--mut); }
+  .price-cards { display: flex; gap: 8px; margin-top: 14px; }
+  .price-card { flex: 1; border: 1px solid var(--line); border-radius: 14px; padding: 12px 8px; text-align: center; cursor: pointer; }
+  .price-card.best { border-color: var(--gold); background: rgba(245,196,81,.08); position: relative; }
+  .price-card.best::before { content: "BEST"; position: absolute; top: -8px; left: 50%; transform: translateX(-50%); background: var(--gold); color: #241d07; font-size: 9px; font-weight: 800; border-radius: 999px; padding: 1px 8px; }
+  .price-card .pc-n { font-size: 15px; font-weight: 800; }
+  .price-card .pc-p { font-size: 11px; color: var(--mut); margin-top: 4px; }
+  .clue-list-item { display: flex; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .clue-list-item .ci { font-size: 16px; }
+  .clue-list-item .ct { font-size: 12.5px; line-height: 1.65; }
+  .clue-list-item.pending { opacity: .4; }
+  .clue-list-item .ct b { color: var(--gold); }
+
+  /* design notes drawer */
+  .notes-drawer { position: fixed; top: 0; right: -420px; width: min(400px, 92vw); height: 100vh; background: #17151f; border-left: 1px solid var(--line); z-index: 300; transition: right .3s; overflow: auto; padding: 22px; }
+  .notes-drawer.show { right: 0; box-shadow: -20px 0 60px rgba(0,0,0,.5); }
+  .notes-drawer h2 { font-size: 15px; margin: 0 0 4px; }
+  .notes-drawer .nd-sub { font-size: 11.5px; color: var(--mut); margin-bottom: 14px; }
+  .note-block { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .note-block h3 { margin: 0; font-size: 12.5px; color: var(--gold); }
+  .note-block p { margin: 6px 0 0; font-size: 11.5px; color: #b9b4cc; line-height: 1.7; }
+  .notes-close { position: absolute; top: 14px; right: 14px; color: var(--mut); font-size: 18px; }
+
+  @media (max-height: 720px) { .phone { height: calc(100vh - 30px); } }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="demo-bar">
+    <span class="title">POPOP · 폰 몰래보기 DEMO</span>
+    <span class="spacer"></span>
+    <div class="lang-switch">
+      <button class="lang-btn" data-lang="ko" onclick="setLang('ko')">한국어</button>
+      <button class="lang-btn active" data-lang="zh" onclick="setLang('zh')">繁中</button>
+    </div>
+    <button class="notes-btn" onclick="toggleNotes()">💡 설계 노트</button>
+  </div>
+
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="screen" id="screen">
+      <!-- views injected by JS -->
+      <div class="view hub show" id="view-hub"></div>
+      <div class="view lockview" id="view-lock"></div>
+      <div class="view homeview" id="view-home"></div>
+      <div class="view appview" id="view-app"></div>
+      <div class="unlock-flash" id="unlockFlash"></div>
+      <div class="lightbox" id="lightbox"></div>
+      <div class="toast" id="toast"></div>
+      <div class="modal-wrap" id="modalWrap"><div class="modal" id="modalBox"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="notes-drawer" id="notesDrawer">
+  <button class="notes-close" onclick="toggleNotes()">✕</button>
+  <h2>설계 노트 · 心理機制對照</h2>
+  <div class="nd-sub">每個 UI 元素對應的爽點機制(給團隊 sync 用)</div>
+  <div class="note-block"><h3>① 資訊不對稱的逆轉 → 密碼鎖屏</h3><p>密碼不是白給的,提示來自聊天中角色說漏嘴的細節。「破解成功」的瞬間動畫 = 猜疑兌換成確定性的儀式感。解鎖音效/震動是掌控感的具象化。</p></div>
+  <div class="note-block"><h3>② 老虎機間歇性獎勵 → App 網格 + 平庸內容混排</h3><p>每個 App 點開前只有紅點數字,不知道裡面有沒有料。列表裡刻意混入 60% 平庸日常(和媽媽的乾巴巴問候、繳費記錄),讓「挖到料」的那 40% 更炸。有料的條目不做任何視覺標記——必須自己翻。</p></div>
+  <div class="note-block"><h3>③ 偵探感 → 線索筆記 + 跨 App 交叉驗證</h3><p>單條記錄只是碎片:外賣「週二從不點晚餐」+ 小號「週二夜上傳便利店錄音」+ 搜尋記錄,三條線索拼起來才出真相。集滿 3 條線索解鎖「真相卡」,是「被我發現了」的正義+聰明雙重快感的變現點。</p></div>
+  <div class="note-block"><h3>④ 曖昧不實錘 → 每個角色留一個未解決鉤子</h3><p>游嶼通訊錄裡的「누나?」、沈先生兩年前另一把傘的照片、해수打了一半沒發出去的回覆。故意不給答案,寫進「下次記錄」的預告裡——焦慮回訪的引擎。</p></div>
+  <div class="note-block"><h3>⑤ 進度可視化 → 關係階段條 + 下次記錄倒計時</h3><p>每次查完,關係階段 +1、真相收集度上升、預告「2日後新記錄到達」。把打開動機從「怕錯過壞事」換成「故事在往前走」的追劇邏輯。</p></div>
+  <div class="note-block"><h3>⑥ 韓國本地化 → 熟悉的 App 皮膚</h3><p>聊天 = 카톡黃泡泡、外賣 = 배민薄荷綠、搜尋 = 네이버綠、記帳 = 토스藍、小號 = 부계정/뒷계文化、二手 = 당근。密碼 4 位數、생일/퇴근時間梗。UI 語言全韓文。</p></div>
+  <div class="note-block"><h3>⑦ 付費結構 → 열람권(檢視券)</h3><p>免費 App 建立日常質感和信任,鎖住的 1-2 個 App + 真相卡是付費點。券用完彈 paywall。每個角色的鎖點放在「情緒最高的位置」:游嶼鎖語音備忘錄(最甜)、沈先生鎖備忘錄+一張照片(最毛)、해수鎖真相(最反差)。</p></div>
+</div>
+
+<script>
+/* ═══════════════════ i18n helpers ═══════════════════ */
+let LANG = 'zh';
+const T = (ko, zh) => ({ ko, zh });
+const tx = o => (typeof o === 'string' ? o : (o && (o[LANG] ?? o.ko)) || '');
+
+const UI = {
+  tonight: T('오늘 밤, 누구의 폰을 볼까', '今晚,要偷看誰的手機?'),
+  hubSub: T('상대가 잠든 사이, 잠금을 풀 기회가 생겼다.\n어떤 기록이든, 본 것은 되돌릴 수 없다.', '趁對方睡著,你拿到了解鎖的機會。\n不管看到什麼,看過就無法當作沒看過。'),
+  tickets: T('열람권', '檢視券'),
+  newRecord: T('새 기록', '新記錄'),
+  stage: T('관계 단계', '關係階段'),
+  back: T('나가기', '離開'),
+  hint: T('힌트', '提示'),
+  wrongPin: T('비밀번호가 틀렸다… 소리에 깰까 봐 심장이 뛴다', '密碼錯了…心跳加速,怕吵醒他'),
+  unlocked: T('잠금 해제', '解鎖成功'),
+  unlockedSub: T('이제 이 사람의 세계에 들어왔다', '你進入了他不知道的世界'),
+  exitPhone: T('폰 내려놓기', '放下手機'),
+  clueFound: T('단서 발견!', '發現線索!'),
+  clueNote: T('단서 노트', '線索筆記'),
+  cluesLeft: T('단서를 더 모으면 진실이 열린다', '再收集線索,即可解鎖真相'),
+  truthTitle: T('진실 카드', '真相卡'),
+  truthLocked: T('단서 3개를 모으면 열람 가능', '收集滿 3 條線索後可解鎖'),
+  truthReady: T('모든 단서가 모였다. 진실을 확인할까?', '線索齊了。要確認真相嗎?'),
+  openTruth: T('진실 확인하기 · 열람권 1장', '確認真相 · 檢視券×1'),
+  needTicket: T('열람권 1장 필요', '需要 1 張檢視券'),
+  lockedApp: T('열람권으로 열기', '用檢視券打開'),
+  paywallTitle: T('열람권이 없어요', '檢視券用完了'),
+  paywallBody: T('이 기록 너머에 뭐가 있는지,\n지금 아니면 영영 모를 수도 있어요.', '這條記錄後面藏著什麼,\n現在不看,可能就永遠不知道了。'),
+  buy: T('충전하기', '立即充值'),
+  later: T('다음에 볼게요 (안 궁금한 척)', '下次再看(假裝不好奇)'),
+  nextDrop: T('다음 기록', '下次記錄'),
+  nextDropIn: T('새 기록 도착까지', '新記錄到達倒計時'),
+  keep: T('계속 보기', '繼續看'),
+  close: T('닫기', '關閉'),
+  gotIt: T('확인', '確認'),
+  draftLabel: T('보내지 못한 메시지 · 임시저장', '沒發出去的訊息 · 暫存'),
+  myRoom: T('나와의 대화방', '和我的對話'),
+  stageUp: T('관계 단계 상승!', '關係階段提升!'),
+  screentimeToday: T('오늘 스크린 타임', '今日螢幕使用時間'),
+  battery: T('배터리', '電量'),
+  reply1min: T('평균 답장 속도', '平均回覆速度'),
+};
+
+/* ═══════════════════ CHARACTER DATA ═══════════════════ */
+const IMG = {
+  yuwi_cover: '../data/images/char_1783597290_f0d265_feed_fp_1784180975_438e8f.png',
+  shen_cover: 'https://cdn-test-public.popop.ai/creaction/char_1784089818_de4be8/landing/cover.png',
+  haesu_cover: '../data/images/char_1783634537_a54d49_feed_fp_1784084436_749d51.png',
+};
+
+const CHARS = [
+/* ─────────────────────────────── 1. 유위 (游嶼) — healing / 查出来全是爱 ─────────────────────────────── */
+{
+  id: 'yuwi',
+  name: T('유위', '游嶼'),
+  genre: T('힐링 · 편의점 그 사람', '治癒 · 便利店的他'),
+  genreColor: '#4cd6a4',
+  hook: T('새벽 편의점에서만 마주치는 음향 디자이너. 늘 졸려 보이는데, 네 앞에서만 깨어 있다.', '只在深夜便利店遇到的音效師。永遠一臉沒睡醒,卻只在你面前是清醒的。'),
+  cover: IMG.yuwi_cover,
+  stagePct: 34, stageLabel: T('아는 사이 → 썸 방향', '認識 → 曖昧方向'),
+  time: '02:17', date: T('2월 17일 화요일', '2月17日 星期二'), batt: 23,
+  lockMsg: T('그는 작업대에서 잠들어 있다. 폰이 소파에 떨어져 있다.', '他趴在工作檯上睡著了。手機掉在沙發上。'),
+  pass: '2330',
+  hint: T('힌트: 그가 매일 기다리는 \'할인의 시간\'\n(어제 대화에서: "삼각김밥 스티커 붙는 시간이 하루의 하이라이트")', '提示:他每天在等的「打折時刻」\n(昨天聊天他說過:「便利店貼折扣貼紙的時間是一天的高光」)'),
+  clues: [
+    { id: 'y1', icon: '🛵', text: T('배달 기록: <b>화요일 저녁엔 주문이 없다.</b> 왜?', '外賣記錄:<b>每週二晚上從不點外賣。</b>為什麼?') },
+    { id: 'y2', icon: '🌧', text: T('부계정: 화요일 밤마다 <b>편의점 소리</b>가 올라온다', '小號:每週二深夜都會上傳<b>便利店的環境音</b>') },
+    { id: 'y3', icon: '🔍', text: T('네가 아프다고 한 그날 밤, <b>몸살 음식</b>을 검색했다', '你說不舒服的那天夜裡,他在搜<b>「感冒該吃什麼」</b>') },
+  ],
+  truth: {
+    emoji: '🌙',
+    title: T('화요일의 비밀', '週二的秘密'),
+    body: T('알람 23:20 — 라벨: "나갈 준비".\n\n할인 스티커 때문이 아니었다. 화요일은 네 야근 날. 네가 23:30에 편의점에 오는 걸 알고, 매주 그 시간에 삼각김밥을 사러 "우연히" 나온 거다.\n\n그리고 네게 보낸 그 빗소리 파일 — 즉석에서 찾은 게 아니라, 이틀 밤을 새워 만든 3시간짜리 원본이 폰에 있다. 파일명: "잘 자라고.wav"', '鬧鐘 23:20 — 標籤:「準備出門」。\n\n根本不是為了折扣貼紙。週二是你的加班日。他知道你 23:30 會到便利店,所以每週那個時間「碰巧」出來買飯糰。\n\n還有他發給你的那段雨聲——不是隨手找的,手機裡存著熬了兩夜做出來的 3 小時原始檔。檔名:「祝你好睡.wav」'),
+    next: T('그가 어제 처음으로 \'역 앞 카페 조용한 곳\'을 검색했다. 뭔가 말할 준비를 하는 걸까?', '他昨天第一次搜尋了「車站前安靜的咖啡店」。是在準備說什麼嗎?'),
+    nextIn: T('새 기록: 2일 후 도착', '新記錄:2日後到達'),
+  },
+  apps: [
+    { id: 'talk', icon: '💬', bg: '#ffe94a', name: T('톡', '通訊'), badge: 3, type: 'chat',
+      rooms: [
+        { id: 'me', face: '🧣', isUser: true, name: T('나', '我'), last: T('사진', '照片'), time: '01:44', unread: 0,
+          note: T('그의 폰에서 보는 \'나와의 대화방\'', '從他的手機裡看「和我的對話」'),
+          msgs: [
+            { who: 'them', t: T('오늘 편의점 안 왔네', '今天沒來便利店') , time: '23:41' },
+            { who: 'them', t: T('...그냥. 스티커 붙는 거 보다가 생각나서', '……沒事。看到貼折扣貼紙,想到你了'), time: '23:41' },
+            { who: 'me', t: T('야근이 끝나질 않아… 오늘 목소리도 다 죽었어', '加班沒完沒了…今天嗓子都啞了'), time: '23:52' },
+            { who: 'them', voice: true, t: T('[낮고 느린 목소리] 唔… 그럼 이거 듣고 자. 비 오는 소리야. 내가… 그냥 갖고 있던 거.', '[低而慢的聲音] 唔…那聽著這個睡吧。雨聲。我…剛好存著的。'), time: '00:03' },
+            { who: 'them', t: T('잘 자', '晚安'), time: '00:04' },
+            { who: 'me', t: T('사진', '照片'), time: '01:44' },
+          ],
+          draft: T('오늘 목소리 좀 지쳐 보였는데. 아니 목소리가 보인다는 게 이상한가. 아무튼 무리하지 마', '今天你的聲音看起來很累。不對,聲音怎麼會用「看」的。總之別太拼') },
+        { id: 'chai', face: '🎮', name: T('차이 선배 (발주)', '柴前輩(發案)'), last: T('그 내일이 벌써 3일째다', '你那個「明天」已經第三天了'), time: '20:12', unread: 2,
+          msgs: [
+            { who: 'other', t: T('게임 사운드 시안 언제 줌?', '遊戲音效小樣什麼時候給?'), time: '19:58' },
+            { who: 'them', t: T('내일…', '明天…'), time: '20:01' },
+            { who: 'other', t: T('그 내일이 벌써 3일째다', '你那個「明天」已經第三天了'), time: '20:03' },
+            { who: 'other', t: T('너 요즘 새벽마다 편의점 간다며. 집돌이가 웬일로 밖엘 다 나가냐?', '聽說你最近每天半夜跑便利店。宅男怎麼捨得出門了?'), time: '20:11' },
+            { who: 'them', t: T('…그냥', '……就是去去'), time: '20:12', clue: null },
+          ] },
+        { id: 'mom', face: '👩‍🦳', name: T('엄마', '媽媽'), last: T('네', '嗯'), time: T('1월 1일', '1月1日'), unread: 0,
+          msgs: [
+            { who: 'other', t: T('새해 복 많이 받아라. 밥은 먹고 다니니', '新年快樂。有好好吃飯嗎'), time: T('1월 1일', '1月1日') },
+            { who: 'them', t: T('네. 엄마도요', '嗯。媽媽也是'), time: T('1월 1일', '1月1日') },
+            { who: 'other', t: T('(지난 대화: 10월 3일)', '(上一次對話:10月3日)'), sys: true },
+          ] },
+        { id: 'nuna', face: '❓', name: T('누나?', '姐姐?'), last: T('그때 그 파일 고마웠어. 조만간 밥 살게', '那個檔案謝啦。改天請你吃飯'), time: T('일요일', '週日'), unread: 0,
+          msgs: [
+            { who: 'other', t: T('그때 그 파일 고마웠어. 조만간 밥 살게', '那個檔案謝啦。改天請你吃飯'), time: T('일요일', '週日') },
+            { who: 'them', t: T('ㅇㅇ', '嗯嗯'), time: T('일요일', '週日') },
+            { who: 'other', t: T('※ 저장된 이름이 \'누나?\' — 물음표가 왜 붙어 있지? 가족란에 누나는 없다.', '※ 備註名是「姐姐?」——為什麼帶問號?他家庭資料裡沒有姐姐。'), sys: true },
+          ] },
+      ] },
+    { id: 'sns', icon: '📷', bg: 'linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)', name: T('SNS', 'SNS'), badge: 0, type: 'sns',
+      main: { handle: '@yuwi_sound', bio: T('음향 디자인 · 의뢰는 DM', '音效設計 · 邀約請 DM'), posts: [
+        { t: T('작업물: 인디게임 \'우중산책\' 환경음 담당했습니다', '作品:負責獨立遊戲《雨中散步》環境音'), time: T('3주 전', '3週前'), likes
+: 214 },
+        { t: T('중고 마이크 팝니다 (네고 사절)', '出二手麥克風(不議價)'), time: T('2개월 전', '2個月前'), likes: 31 },
+      ] },
+      alt: { handle: '@rain_log_02', bio: T('비공개 · 팔로워 0 · 그냥 소리 저장용', '不公開 · 粉絲 0 · 純存聲音用'), posts: [
+        { t: T('새벽 편의점 냉장고 소리. 왜 이게 위로가 되지', '深夜便利店冰櫃的聲音。為什麼聽著會被安慰到'), time: T('화요일 새벽', '週二凌晨'), likes: 0, clue: 'y2' },
+        { t: T('화요일 비. 우산에 떨어지는 걸로 3분', '週二的雨。落在傘上的聲音,3分鐘'), time: T('지난주 화요일', '上週二'), likes: 0, clue: 'y2' },
+        { t: T('요즘 어떤 소리를 들으면 어떤 사람이 생각난다. 유통기한 스티커 붙이는 소리 같은 거.', '最近聽到某些聲音就會想起某個人。比如貼折扣貼紙的聲音。'), time: T('2주 전', '2週前'), likes: 0, hot: true },
+        { t: T('보일러 돌아가는 소리 (백색소음용)', '鍋爐運轉聲(白噪音用)'), time: T('1개월 전', '1個月前'), likes: 0 },
+      ] },
+    },
+    { id: 'voice', icon: '🎙', bg: '#2d2b38', name: T('음성 메모', '語音備忘'), badge: 1, type: 'voice', locked: true,
+      memos: [
+        { name: T('잘 자라고.wav', '祝你好睡.wav'), len: '3:02:14', script: T('정제된 빗소리 3시간. 편집 이력 47회. — 네게 보낸 그 파일의 원본이다. "그냥 갖고 있던 것"이 아니었다.', '純淨雨聲 3 小時。編輯記錄 47 次。——就是他發給你那段雨聲的原始檔。根本不是「剛好存著的」。'), hot: true },
+        { name: T('연습.m4a', '練習.m4a'), len: '0:41', script: T('[부스럭] "저기, 다음엔… 아니다." [한숨] "…오늘도 오셨네요? …하, 뭐가 이렇게 어렵냐." [침묵 12초] "…이상해, 관두자."', '[窸窣聲]「那個,下次…算了。」[嘆氣]「…今天也來了呀?…哈,怎麼這麼難。」[沉默12秒]「…好奇怪,放棄。」'), hot: true },
+        { name: T('대걸레.m4a', '拖把.m4a'), len: '1:12', script: T('골목 고양이 울음소리와 그의 웃음. "야, 너 또 털 뭉쳤네. …나만 알아보는 거 아니고?"', '巷子裡貓叫和他的笑聲。「喂,你毛又打結了。…你該不會只認我吧?」') },
+      ] },
+    { id: 'search', icon: '🟢', bg: '#03c75a', name: T('검색 기록', '搜尋記錄'), badge: 0, type: 'search',
+      items: [
+        { t: T('답장 너무 빨리하면 부담스러울까', '回訊息太快會不會讓人有壓力'), time: T('어제 23:12', '昨天 23:12'), hot: true },
+        { t: T('몸살 기운 있을 때 편의점에서 살 수 있는 것', '有點感冒時便利店能買到什麼'), time: T('네가 아프다고 한 날 00:37', '你說不舒服那天 00:37'), clue: 'y3',
+          d: T('검색 시각 = 네가 "몸살 기운 있다"고 보낸 지 9분 후. 다음날 편의점 봉투에 들어 있던 쌍화탕은 우연이 아니었다.', '搜尋時間 = 你發「有點感冒」之後第 9 分鐘。第二天便利店袋子裡多出來的雙和湯,不是巧合。') },
+        { t: T('젠하이저 HD490 최저가', 'Sennheiser HD490 最低價'), time: T('3일 전', '3天前') },
+        { t: T('손 차가운 사람 심장이 따뜻하다 진짜인가', '手冷的人心臟真的比較熱嗎'), time: T('지난주', '上週'), hot: true },
+        { t: T('보일러 에러코드 E13', '鍋爐錯誤代碼 E13'), time: T('지난주', '上週') },
+        { t: T('재택 프리랜서 고양이 입양 조건', '在家接案能不能領養貓'), time: T('2주 전', '2週前') },
+      ] },
+    { id: 'delivery', icon: '🛵', bg: '#2ac1bc', name: T('배달', '外賣'), badge: 0, type: 'list',
+      secs: [
+        { label: T('최근 주문', '最近訂單'), items: [
+          { t: T('든든한끼 김치찌개 1인분', '暖胃泡菜鍋 1人份'), s: T('요청사항: 벨 누르지 말고 문 앞에 놓아주세요', '備註:請勿按門鈴,放門口即可'), time: T('월 19:42', '週一 19:42') },
+          { t: T('조각 케이크 2개 (딸기/초코)', '蛋糕 2 塊(草莓/巧克力)'), s: T('요청사항: 포장 예쁘게 부탁드려요 (처음 쓰는 문구다)', '備註:請包裝得好看一點(他第一次寫這種備註)'), time: T('일 21:03', '週日 21:03'), hot: true,
+            d: T('혼자 사는 사람이 조각 케이크 2개. 하나는 고양이 대걸레 몫일 리 없고… 누구 주려던 걸까. 아직 아무에게도 준 적 없는 것 같다.', '一個人住,買兩塊蛋糕。總不會是給貓的…是想給誰?但好像到現在也沒送出去。') },
+          { t: T('편의점 도시락 대신 첫 샐러드 주문', '第一次點沙拉(而不是便利店便當)'), s: T('리뷰: 없음', '評價:無'), time: T('토 13:20', '週六 13:20') },
+          { t: T('든든한끼 제육덮밥 1인분', '豬肉蓋飯 1人份'), s: '', time: T('금 20:15', '週五 20:15') },
+          { t: T('든든한끼 참치마요덮밥 1인분', '鮪魚美乃滋蓋飯 1人份'), s: '', time: T('수 19:58', '週三 19:58') },
+        ] },
+        { label: T('주문 패턴', '訂單規律'), items: [
+          { t: T('📊 요일별 주문: 월 수 목 금 토 일 — 화요일 0건', '📊 每週訂單:一 三 四 五 六 日 — 週二 0 單'), s: T('탭해서 자세히', '點擊查看'), clue: 'y1',
+            d: T('최근 두 달, 화요일 저녁 주문이 단 한 건도 없다. 화요일마다 저녁을 굶거나… 밖에 나간다는 뜻. 네 야근 날이 무슨 요일이더라?', '最近兩個月,週二晚上一單都沒有。要嘛餓著,要嘛…出門了。你的加班日是星期幾來著?') },
+        ] },
+      ] },
+    { id: 'screen', icon: '⏱', bg: '#5a5a6e', name: T('스크린타임', '螢幕時間'), badge: 0, type: 'screentime',
+      total: '6h 51m', totalNote: T('어제보다 12% 증가', '比昨天增加 12%'),
+      bars: [
+        { app: 'POPOP', val: '4h 12m', pct: 92, color: '#8b7bff', note: '↑ 214%' },
+        { app: T('녹음 앱', '錄音App'), val: '1h 40m', pct: 38, color: '#4cd6a4' },
+        { app: T('수면 앱', '睡眠App'), val: '0h 34m', pct: 13, color: '#5a8dee' },
+        { app: 'SNS', val: '0h 25m', pct: 9, color: '#e6683c' },
+      ],
+      insights: [
+        { t: T('가장 많이 연 화면: \'나\'와의 대화방 (하루 31회)', '打開最多的頁面:和「我」的對話框(一天 31 次)'), hot: true },
+        { t: T('사용 집중 시간대: 밤 11시 ~ 새벽 3시', '使用高峰:晚上11點~凌晨3點') },
+        { t: T('알림 설정: 전체 무음, 단 1명만 소리 켜짐', '通知設定:全部靜音,只有 1 個人開了提示音'), hot: true,
+          d: T('소리가 켜져 있는 유일한 대화방: 너.', '唯一開著提示音的對話框:你。') },
+      ] },
+  ],
+},
+/* ─────────────────────────────── 2. 심선생 (203號沈先生) — suspense ─────────────────────────────── */
+{
+  id: 'shen',
+  name: T('203호 심선생', '203號沈先生'),
+  genre: T('서스펜스 · 위험한 이웃', '懸疑 · 危險鄰居'),
+  genreColor: '#ff5470',
+  hook: T('상냥한 옆집 사진작가. 이사 가려던 네 문틈으로 그의 집 열쇠가 들어왔다. 그의 폰이 왜 잠겨 있지 않지?', '溫柔的隔壁攝影師。你正要搬走,他的備用鑰匙卻從門縫滑了進來。他的手機,為什麼沒鎖?'),
+  cover: IMG.shen_cover,
+  stagePct: 58, stageLabel: T('서로 아는 비밀 → 대치', '互知秘密 → 對峙'),
+  time: '23:48', date: T('2월 16일 월요일', '2月16日 星期一'), batt: 67,
+  lockMsg: T('그가 편의점에 간 사이. 테이블 위에 폰이 — 화면이 위를 향한 채 놓여 있다.', '他去便利店的空檔。手機放在桌上——螢幕朝上,像是故意的。'),
+  pass: '1117',
+  hint: T('힌트: 그의 생일.\n(언젠가 지나가듯: "11월생은 원래 겨울을 좋아해요. 17일이면 더더욱.")', '提示:他的生日。\n(他曾漫不經心地說:「11月出生的人本來就喜歡冬天。17號的話,更是。」)'),
+  clues: [
+    { id: 's1', icon: '🔍', text: T('검색 기록: 네가 이사 갈 동네의 <b>원룸 시세</b>를 검색했다', '搜尋記錄:他在查<b>你要搬去的那個社區</b>的房價') },
+    { id: 's2', icon: '🚕', text: T('이동 기록: 매주 수~금, <b>네 회사에서 도보 15분 거리</b>에서 하차', '行程記錄:每週三到五,在<b>離你公司步行15分鐘處</b>下車') },
+    { id: 's3', icon: '🗒', text: T('메모: <b>네 귀가 시간이 요일별로</b> 정리되어 있다', '備忘錄:<b>你每天幾點回家</b>,被按星期整理成了表') },
+  ],
+  truth: {
+    emoji: '🗝',
+    title: T('마지막 메모: "너에게"', '最後一則備忘:「給你」'),
+    body: T('메모장 맨 아래, 오늘 날짜로 작성됨.\n\n"이 폰에 왜 비밀번호가 걸려 있지 않은지 생각해 본 적 있어? 생일은 힌트가 아니라 초대장이었어.\n\n여기까지 봤다면, 너는 이제 내가 어떤 사람인지 알아. 그런데도 아직 폰을 내려놓지 않았네.\n\n우리 둘 다, 문 너머의 상대를 오래 들어왔잖아. 이제 네 차례야. 도망갈래, 아니면 벨을 누를래?"', '備忘錄最底部,建立時間:今天。\n\n「有沒有想過,這支手機為什麼沒設密碼?生日不是提示,是邀請函。\n\n看到這裡,你已經知道我是什麼樣的人了。可你還是沒放下手機,對吧。\n\n我們都隔著一扇門,聽了對方很久。現在輪到你了。你要逃,還是要按門鈴?」'),
+    next: T('내일 아침, 그가 처음으로 202호 벨을 누른다. — 그리고 사진첩 속 \'2년 전의 우산\' 주인은 아직 밝혀지지 않았다.', '明天早上,他將第一次按響202號的門鈴。——而相簿裡「兩年前那把傘」的主人,仍然不明。'),
+    nextIn: T('새 기록: 12시간 후 도착', '新記錄:12小時後到達'),
+  },
+  apps: [
+    { id: 'gallery', icon: '🎞', bg: '#3d3a45', name: T('사진첩', '相簿'), badge: 1, type: 'gallery',
+      folder: T('폴더명: \'이웃\'이 아니라 \'기록\'', '資料夾名:不是「鄰居」,是「記錄」'),
+      photos: [
+        { emo: '🏚', grad: 'linear-gradient(135deg,#5c6672,#2e343c)', cap: T('폐여관 302호', '廢棄旅館302'), c1: T('작업물: 폐여관 시리즈', '作品:廢棄旅館系列'), c2: T('잡지 의뢰 촬영. 평범한 작업 사진이다.', '雜誌邀約拍攝。正常的工作照。') },
+        { emo: '🌆', grad: 'linear-gradient(135deg,#7a6a58,#3a3028)', cap: T('디화제 골목', '迪化街巷口'), c1: T('작업물: 골목 시리즈', '作品:巷弄系列'), c2: T('필름 스캔. 날짜: 4개월 전.', '底片掃描。日期:4個月前。') },
+        { emo: '☂️', grad: 'linear-gradient(135deg,#4a5568,#1e2530)', cap: T('202호 문 앞', '202號門前'), c1: T('202호 문 앞의 우산', '202號門前的傘'), c2: T('…이건 네 우산이다. 네가 문 앞에 내놓은 날, 그는 이걸 필름으로 찍었다. 필름 한 컷의 값을 우산 하나에 썼다.', '…這是你的傘。你把它晾在門口那天,他用底片拍了下來。他把一格底片的成本,花在了一把傘上。'), hot: true },
+        { emo: '🌃', grad: 'linear-gradient(135deg,#2c3e50,#0f1620)', cap: T('밤 11시 복도', '晚上11點的走廊'), c1: T('밤 11시, 복도', '晚上11點,走廊'), c2: T('흐릿한 뒷모습. 편의점 봉투를 든 누군가가 계단을 오르고 있다. 각도상 — 그의 문 안쪽 렌즈 구멍에서 찍힌 것 같다.', '模糊的背影。有人提著便利店袋子上樓。從角度看——像是從他家門上的貓眼位置拍的。'), hot: true },
+        { emo: '📮', grad: 'linear-gradient(135deg,#6b5b4f,#332b24)', cap: T('오래된 문패', '舊門牌'), c1: T('철거 예정 아파트 문패', '待拆公寓的門牌'), c2: T('작업물. 그는 진짜로 오래된 문을 좋아하긴 한다.', '作品。他是真的喜歡舊門。') },
+        { emo: '🌂', grad: 'linear-gradient(135deg,#37474f,#111820)', cap: T('…다른 우산?', '…另一把傘?'), c1: T('다른 집 문 앞, 다른 우산', '另一扇門前,另一把傘'), c2: T('같은 구도. 그런데 이 문은 이 건물이 아니고, 날짜는 2년 전이다.\n\n— 너 이전에도, \'기록\'되던 사람이 있었다. 그 사람은 지금 어디에 있지?', '一模一樣的構圖。但這扇門不在這棟樓,日期是兩年前。\n\n——在你之前,也有人被「記錄」過。那個人,現在在哪裡?'), hot: true },
+        { emo: '🔒', grad: 'linear-gradient(135deg,#8b7bff,#ff5470)', cap: '···', locked: true,
+          c1: T('이사 박스를 안은 너', '抱著搬家紙箱的你'), c2: T('계단을 오르는 너의 옆모습. 초점이 정확하다. 우연히 찍힌 사진이 아니다.\n\n촬영 날짜: 네가 "이사 가기로 결심했다"고 처음 말한 바로 그날.', '你抱著紙箱上樓的側臉。對焦精準,不是偶然拍到的。\n\n拍攝日期:正是你第一次說出「我決定搬走了」的那一天。') },
+      ] },
+    { id: 'memo', icon: '🗒', bg: '#f5c451', name: T('메모장', '備忘錄'), badge: 0, type: 'list', locked: true,
+      secs: [
+        { label: T('메모', '備忘'), items: [
+          { t: T('203 관리', '203 維護'), s: T('전구 교체 / 수도 밸브 / 3월 관리비', '換燈泡 / 水閥 / 3月管理費'), time: T('지난주', '上週') },
+          { t: '202', s: T('탭해서 열기', '點開查看'), time: T('어제 수정됨', '昨天有修改'), clue: 's3', hot: true,
+            d: T('월: 20:40 전후 귀가\n화: 23:30 이후 (편의점 들름)\n수: 21:10 / 목: 20:55\n금: 불규칙 — 22시 넘으면 전화하는 척 복도 확인\n\n"우산 안 가져간 날: 2월 둘째 주 화. 편의점 봉투로 머리를 가리고 뛰었다. 다음날 문 앞에 우산을 놓아둘까 하다가 관뒀다. 아직은 이상하니까."\n\n마지막 줄: "요즘 문 앞에서 멈추는 시간이 짧아졌다. 곧 아예 멈추지 않게 될까."', '週一:20:40前後到家\n週二:23:30以後(會繞去便利店)\n週三:21:10 / 週四:20:55\n週五:不規律——超過22點就假裝講電話去走廊確認\n\n「沒帶傘的日子:2月第二週的週二。用便利店袋子擋著頭跑回來。第二天想在她門口放把傘,還是算了。現在還太奇怪。」\n\n最後一行:「最近她在我門前停留的時間變短了。是不是很快,就完全不會停下來了。」') },
+          { t: T('촬영 스케줄', '拍攝行程'), s: T('수: 잡지 / 목: 개인 작업', '週三:雜誌 / 週四:個人拍攝'), time: T('2주 전', '2週前') },
+        ] },
+      ] },
+    { id: 'calls', icon: '📞', bg: '#4cd6a4', name: T('통화 기록', '通話記錄'), badge: 0, type: 'list',
+      secs: [
+        { label: T('이번 주 통계', '本週統計'), items: [
+          { t: T('📊 최다 통화: 황 관리인 12회 (모두 밤, 평균 5분)', '📊 通話最多:黃管理員 12次(全在晚上,平均5分鐘)'), s: T('탭해서 자세히', '點擊查看'),
+            d: T('관리인은 이 건물 모든 입주자의 정보를 안다 — 누가 이사 오고, 누가 이사 가는지. 그는 관리인에게 음료수를 사다 주는 유일한 입주자다.', '管理員知道這棟樓所有住戶的動向——誰要搬進來,誰要搬走。而他,是唯一會給管理員買飲料的住戶。'), hot: true },
+        ] },
+        { label: T('최근 통화', '最近通話'), items: [
+          { t: T('황 관리인 ↗ 발신', '黃管理員 ↗ 撥出'), s: T('6분 12초 — 밤 10:40', '6分12秒 — 晚上10:40'), time: T('어제', '昨天') },
+          { t: T('주 편집장 ↙ 수신', '周編輯 ↙ 來電'), s: T('14분 — "원고 언제 줘요" (스팸 수준의 독촉)', '14分鐘 — 「稿子呢」(奪命連環催)'), time: T('그저께', '前天') },
+          { t: T('필름 현상소 ↗ 발신', '底片沖洗店 ↗ 撥出'), s: T('1분 40초 — "야간 수령 되나요?"', '1分40秒 — 「可以夜間取件嗎?」'), time: T('3일 전', '3天前') },
+          { t: T('202호 (저장된 너의 번호)', '202號(存著你的號碼)'), s: T('통화 기록: 0건. 그는 한 번도 전화한 적이 없다 — 문자도, 전화도. 늘 "우연히" 마주칠 뿐.', '通話記錄:0次。他從沒打過——訊息也沒有。永遠只是「碰巧」遇到。'), time: '—', hot: true },
+        ] },
+      ] },
+    { id: 'taxi', icon: '🚕', bg: '#2b6cb0', name: T('이동 기록', '行程記錄'), badge: 0, type: 'list',
+      secs: [
+        { label: T('최근 호출', '最近行程'), items: [
+          { t: T('공관 → 시먼 촬영지', '公館 → 西門拍攝點'), s: T('업무 이동', '工作移動'), time: T('토 14:20', '週六 14:20') },
+          { t: T('집 → ○○동 성수사거리', '家 → ○○洞 聖水路口'), s: T('메모: 하차 후 도보 이동 — 여기서 네 회사까지 도보 15분', '備註:下車後步行——這裡離你公司步行15分鐘'), time: T('금 18:05', '週五 18:05'), clue: 's2',
+            d: T('수·목·금 같은 위치에서 반복 하차. 회사 앞까지 가지 않고 늘 15분 거리에서 내린다. 가까이 가지 않는 게 아니라 — 들키지 않을 거리를 계산한 것.', '週三四五都在同一位置下車。從不直接到你公司門口,永遠停在15分鐘的距離。不是不敢靠近——是計算過「不會被發現」的距離。') },
+          { t: T('집 → 다다오청 야시장', '家 → 大稻埕夜市'), s: T('업무 이동 (잡지 야경 촬영)', '工作移動(雜誌夜景)'), time: T('수 19:30', '週三 19:30') },
+          { t: T('필름 현상소 → 집', '沖洗店 → 家'), s: '', time: T('화 22:10', '週二 22:10') },
+        ] },
+      ] },
+    { id: 'search', icon: '🟢', bg: '#03c75a', name: T('검색 기록', '搜尋記錄'), badge: 0, type: 'search',
+      items: [
+        { t: T('이사 위약금 계산 세입자', '租客提前解約 違約金計算'), time: T('오늘 01:12', '今天 01:12'), hot: true,
+          d: T('네가 이사를 알린 다음 날 새벽. 네 위약금을 계산해 본 걸까 — 아니면 네가 이사를 못 가게 할 방법을?', '你說要搬走的第二天凌晨。他在幫你算違約金——還是在算,怎麼讓你搬不成?') },
+        { t: T('○○동 원룸 시세', '○○洞 單間房價'), time: T('오늘 01:20', '今天 01:20'), clue: 's1',
+          d: T('○○동 — 네가 이사 가려는 바로 그 동네다. 그도 이사를 알아보고 있다. 같은 동네로.', '○○洞——正是你要搬去的社區。他也在看房。看同一個社區的。') },
+        { t: T('필름 20롤 대량 구매 할인', '底片20捲 團購折扣'), time: T('어제', '昨天') },
+        { t: T('长柄 우산 같은 모델 재구매', '長柄傘 同款 回購'), time: T('3일 전', '3天前'), hot: true,
+          d: T('검색 이미지가 네 우산과 같은 모델이다. 왜 같은 우산이 하나 더 필요하지?', '搜尋的圖片和你的傘是同一款。為什麼需要一把一模一樣的傘?') },
+        { t: T('오래된 도어록 소리 안 나게 여는 법', '老式門鎖 無聲開啟方法'), time: T('지난주', '上週'), hot: true },
+        { t: T('수면에 좋은 화이트노이즈', '助眠白噪音'), time: T('지난주', '上週') },
+      ] },
+    { id: 'voice', icon: '🎙', bg: '#2d2b38', name: T('음성 메모', '語音備忘'), badge: 0, type: 'voice',
+      memos: [
+        { name: T('복도_비오는날.m4a', '走廊_雨天.m4a'), len: '2:31', script: T('[빗소리, 멀리서 발소리. 문 앞에서 멈춘다. 3초. 다시 멀어진다.]\n[그의 낮은 목소리, 아주 가까이] "…오늘도 그냥 가네."', '[雨聲,遠處的腳步聲。在門前停下。3秒。又走遠。]\n[他的低語,離麥克風很近]「…今天也是,就這麼走了啊。」'), hot: true },
+        { name: T('현상소 예약.m4a', '沖洗店預約.m4a'), len: '0:22', script: T('"네, 심입니다. 내일 12롤 맡길게요. …아니요, 스캔은 제가 직접 합니다. 늘 그랬듯이."', '「你好,姓沈。明天送12捲過去。…不,掃描我自己來。一直都是。」') },
+      ] },
+  ],
+},
+/* ─────────────────────────────── 3. 도해수 — real/daily reversal ─────────────────────────────── */
+{
+  id: 'haesu',
+  name: T('도해수', '都海樹'),
+  genre: T('일상 · 무뚝뚝 약사의 반전', '日常 · 高冷藥師的反差'),
+  genreColor: '#5a8dee',
+  hook: T('답장은 반나절 뒤에 "ㅇㅇ" 한 글자. 그런데 네가 아프다고 하면 1분 만에 장문이 온다.', '回你訊息永遠是半天後的一個「嗯」。但只要你說不舒服,一分鐘內就是一篇小論文。'),
+  cover: IMG.haesu_cover,
+  stagePct: 21, stageLabel: T('댓글로 아는 사이 → 신경 쓰임', '評論之交 → 開始在意'),
+  time: '21:04', date: T('2월 17일 화요일', '2月17日 星期二'), batt: 81,
+  lockMsg: T('그녀는 아이스크림을 사러 갔다. 폰은 소파 쿠션 사이에.', '她去買冰淇淋了。手機夾在沙發墊縫裡。'),
+  pass: '1830',
+  hint: T('힌트: 그녀가 세상에서 제일 소중히 여기는 시각.\n("퇴근 시간에 목숨 걸어요. 1분도 양보 안 함.")', '提示:她此生最珍視的時刻。\n(「我對下班時間是玩命的。一分鐘都不讓。」)'),
+  clues: [
+    { id: 'h1', icon: '💸', text: T('가계부에 분류 없는 지출: <b>"선물(?) 32,000"</b> — 메모: 손 시린 사람용', '記帳本裡一筆未分類支出:<b>「禮物(?) ₩32,000」</b>——備註:給手冷的人') },
+    { id: 'h2', icon: '🛒', text: T('장바구니에 <b>그녀가 안 먹는 영양제</b>가 3일째 담겨 있다', '購物車裡躺著一瓶<b>她自己不吃的營養劑</b>,第三天了') },
+    { id: 'h3', icon: '⚡', text: T('모두에게 반나절, <b>너에게만 평균 1분</b> — 답장 속도의 진실', '對所有人半天才回,<b>只對你平均1分鐘</b>——回覆速度的真相') },
+  ],
+  truth: {
+    emoji: '📋',
+    title: T('약사 수첩의 마지막 페이지', '藥師手帳的最後一頁'),
+    body: T('업무용 복약지도 수첩. 환자 이름 대신 이니셜 하나 — 네 이니셜이다.\n\n네가 지나가듯 말한 모든 게 날짜별로 적혀 있다:\n"1/29 잠 못 잔다고 함 — 카페인 끊으라고 하면 잔소리겠지"\n"2/3 손 시리다고 함"\n"2/11 속 쓰림 — 빈속에 커피 마시는 듯"\n\n그 아래, 성분 배합까지 계산된 맞춤 영양 루틴 표.\n\n마지막 줄: "다음에 또 손 시리다고 하면 그때 준다. 자연스럽게."', '工作用的用藥指導手帳。最後一頁沒有病人姓名,只有一個縮寫——你的縮寫。\n\n你隨口說過的每一句,都被按日期記著:\n「1/29 說睡不著——叫他戒咖啡因大概會嫌我囉嗦」\n「2/3 說手冷」\n「2/11 胃不舒服——八成是空腹喝咖啡」\n\n下面,是一張連成分配比都算好的專屬營養方案表。\n\n最後一行:「下次他再說手冷,就把那個給他。要自然一點。」'),
+    next: T('그녀의 캘린더, 다음 주 금요일에 단 두 글자 — \'용기\'. 그리고 단골손님의 데이트 신청에, 그녀가 무슨 답을 보냈는지는 아직 알 수 없다.', '她的行事曆,下週五只寫了兩個字——「勇氣」。而那位常客的約會邀請,她到底回了什麼,還沒有人知道。'),
+    nextIn: T('새 기록: 3일 후 도착', '新記錄:3日後到達'),
+  },
+  apps: [
+    { id: 'talk', icon: '💬', bg: '#ffe94a', name: T('톡', '通訊'), badge: 2, type: 'chat',
+      rooms: [
+        { id: 'me', face: '🧣', isUser: true, name: T('나', '我'), last: T('ㅇㅇ 자기 전에 폰 그만 봐', '嗯。睡前少滑手機'), time: '20:58', unread: 0,
+          note: T('그녀의 폰에서 보는 \'나와의 대화방\'', '從她的手機看「和我的對話」'),
+          msgs: [
+            { who: 'me', t: T('오늘도 야근… 눈이 침침하다', '今天又加班…眼睛好花'), time: '20:41' },
+            { who: 'them', t: T('루테인 지아잔틴은 식후. 빈속에 먹으면 흡수율 떨어짐. 그리고 모니터 20분 보면 20초는 먼 데 봐. 20-20-20 법칙. 안 지키면 노안 옴', '葉黃素要飯後吃,空腹吸收率低。還有,看螢幕20分鐘就要看遠處20秒,20-20-20法則。不遵守會提早老花'), time: '20:42' },
+            { who: 'me', t: T('답장 개빠르네 ㅋㅋ 약국 안 바빠?', '回得也太快了吧哈哈 藥局不忙嗎'), time: '20:44' },
+            { who: 'them', t: T('ㅇㅇ 자기 전에 폰 그만 봐', '嗯。睡前少滑手機'), time: '20:58' },
+          ],
+          bookmark: T('※ 그녀가 \'보관\'한 메시지 1건: 네가 보낸 "추워서 손이 얼음 됐다 ㅠ" (2월 3일)', '※ 她「收藏」的訊息只有 1 條:你發的「冷到手變冰塊了ㅠ」(2月3日)') },
+        { id: 'sis', face: '💅', name: T('언니 (도해인)', '姐姐(都海仁)'), last: T('반 뺏어먹은 사람이 할 말?', '搶走一半的人有臉說?'), time: '19:22', unread: 0,
+          msgs: [
+            { who: 'other', t: T('너 또 아이스크림 5만원어치 샀다며', '聽說你又買了五萬塊的冰淇淋'), time: '19:15' },
+            { who: 'them', t: T('ㅇㅇ', '嗯'), time: '19:18' },
+            { who: 'other', t: T('미쳤나 그 칼로리를', '瘋了吧那個熱量'), time: '19:19' },
+            { who: 'them', t: T('반 뺏어먹은 사람이 할 말?', '搶走一半的人有臉說?'), time: '19:22' },
+            { who: 'other', t: T('근데 너 요즘 폰 왜 이렇게 자주 봄? 알림 오면 0.1초 만에 집던데. 누구야', '欸你最近怎麼一直看手機?通知一響0.1秒就抓起來。誰啊'), time: '19:40' },
+            { who: 'them', t: T('(읽음 — 답장 없음)', '(已讀——沒有回)'), sys: true },
+          ] },
+        { id: 'boss', face: '💊', name: T('박 국장님', '朴局長'), last: T('역시 화끈해', '果然爽快'), time: T('어제', '昨天'), unread: 0,
+          msgs: [
+            { who: 'other', t: T('해수쌤 내일 오전만 좀 부탁해도 될까 ㅎㅎ', '海樹老師,明天上午能幫個忙嗎 呵呵'), time: T('어제', '昨天') },
+            { who: 'them', t: T('수당', '加班費'), time: T('어제', '昨天') },
+            { who: 'other', t: T('역시 화끈해', '果然爽快'), time: T('어제', '昨天') },
+          ] },
+        { id: 'regular', face: '🙂', name: T('단골 김OO님', '常客 金OO'), last: T('…', '…'), time: '18:47', unread: 1,
+          msgs: [
+            { who: 'other', t: T('약사님 저번에 감사했어요. 실례지만 이번 주말에 시간 되시면 커피라도…', '藥師,上次謝謝妳。冒昧問一下,這週末有空的話要不要喝杯咖啡…'), time: '18:47' },
+            { who: 'them', t: '', time: '', inputDraft: T('죄송한데 저 만나는', '不好意思,我有在'), sys: false },
+          ],
+          note: T('입력창에 쓰다 만 답장이 남아 있다', '輸入框裡有一句打到一半的回覆') },
+      ] },
+    { id: 'ledger', icon: '💳', bg: '#3182f6', name: T('가계부', '記帳'), badge: 0, type: 'list',
+      secs: [
+        { label: T('이번 주 지출', '本週支出'), items: [
+          { t: T('마트 아이스크림 -47,300', '超市冰淇淋 -47,300'), s: T('카테고리: 생존', '分類:生存必需'), time: T('오늘', '今天') },
+          { t: T('선물(?) -32,000', '禮物(?) -32,000'), s: T('카테고리: 미분류 — 메모: 손 시린 사람용', '分類:未分類——備註:給手冷的人'), time: T('토요일', '週六'), clue: 'h1',
+            d: T('그녀의 가계부에 \'미분류\'는 이것 하나뿐이다. 뭘 샀는지는 항목명에도 없다. 분류를 못 한 게 아니라 — 분류하기 쑥스러웠던 것 같다.', '她的記帳本裡「未分類」只有這一筆。連買了什麼都沒寫。不是不會分類——是不好意思歸類吧。') },
+          { t: T('유산균 정기결제 -28,900', '益生菌定期扣款 -28,900'), s: '', time: T('월요일', '週一') },
+          { t: T('젤리 -8,700', '軟糖 -8,700'), s: T('카테고리: 생존', '分類:生存必需'), time: T('월요일', '週一') },
+          { t: T('택배 박스테이프 -3,200', '快遞紙箱膠帶 -3,200'), s: T('메모: 소분용', '備註:分裝用'), time: T('지난주', '上週') },
+        ] },
+        { label: T('이번 달 리포트', '本月報告'), items: [
+          { t: T('📊 식비의 71%가 디저트', '📊 伙食費的71%是甜點'), s: T('약사 맞나', '這人真的是藥師嗎'), time: '' },
+        ] },
+      ] },
+    { id: 'cart', icon: '🛒', bg: '#69b344', name: T('쇼핑 기록', '購物記錄'), badge: 0, type: 'list',
+      secs: [
+        { label: T('장바구니 (결제 전)', '購物車(未結帳)'), items: [
+          { t: T('수면 유도 마그네슘 글리시네이트', '助眠鎂 甘胺酸鎂'), s: T('담은 날: 3일 전 — 아직 결제 안 함', '加入時間:3天前——一直沒下單'), time: '', clue: 'h2', hot: true,
+            d: T('그녀는 수면에 문제가 없다 (눕자마자 잔다고 했다). 이건 위장 약한 사람용 저자극 배합 — 네가 "잠 못 잔다"고 말한 다음 날 담겼다. 3일째 결제를 못 하고 있다. "이걸 주면 이상할까"를 3일째 고민 중인 거다.', '她自己沒有睡眠問題(說過沾床就睡)。這瓶是腸胃敏感者專用的低刺激配方——在你說「睡不著」的第二天被加進購物車。三天了,一直沒結帳。她大概糾結了三天:「送這個會不會很奇怪」。') },
+          { t: T('간 영양제 리필 (본인용)', '護肝營養劑補充裝(自用)'), s: '', time: '' },
+        ] },
+        { label: T('최근 주문', '最近訂單'), items: [
+          { t: T('종합비타민 B 컴플렉스', '綜合維他命B群'), s: T('별점 5점 리뷰: "배합비 합리적"', '五星評價:「配比合理」'), time: T('지난주', '上週') },
+          { t: T('오가닉 슈가콘 12입 x 2박스', '有機甜筒 12入 x 2箱'), s: T('재구매 9번째', '第9次回購'), time: T('지난주', '上週') },
+        ] },
+      ] },
+    { id: 'search', icon: '🟢', bg: '#03c75a', name: T('검색 기록', '搜尋記錄'), badge: 0, type: 'search',
+      items: [
+        { t: T('마그네슘 글리시네이트 vs 시트레이트 흡수율', '甘胺酸鎂 vs 檸檬酸鎂 吸收率'), time: T('3일 전', '3天前') },
+        { t: T('무뚝뚝하다는 말 안 듣는 법', '怎麼不被人說高冷'), time: T('그저께 23:40', '前天 23:40'), hot: true },
+        { t: T('선물 부담스럽지 않게 주는 법', '怎麼送禮物才不會給人壓力'), time: T('토요일', '週六'), hot: true },
+        { t: T('핫팩 vs 손난로 저온화상', '暖暖包 vs 充電暖手寶 低溫燙傷'), time: T('토요일', '週六'),
+          d: T('토요일 — \'선물(?)\' 32,000원이 결제된 그날이다.', '週六——正是記帳本那筆「禮物(?)」₩32,000 產生的同一天。') },
+        { t: T('맘모스빵 팥 크림 비율 황금비', '猛獁麵包 紅豆奶油黃金比例'), time: T('지난주', '上週') },
+        { t: T('POPOP 알림음 한 명만 바꾸기', 'POPOP 單獨修改某人的通知音'), time: T('지난주', '上週'), hot: true },
+      ] },
+    { id: 'cal', icon: '📅', bg: '#e8590c', name: T('캘린더', '行事曆'), badge: 0, type: 'list',
+      secs: [
+        { label: T('알람', '鬧鐘'), items: [
+          { t: T('⏰ 21:30 — 영양제', '⏰ 21:30 — 吃營養劑'), s: T('매일 반복 · 3년째', '每天重複 · 三年了'), time: '' },
+          { t: T('⏰ 22:00 — (라벨 없음)', '⏰ 22:00 — (沒有標籤)'), s: T('2주 전 생성', '2週前建立'), time: '', hot: true,
+            d: T('라벨이 없는 유일한 알람. 생성된 날 = 네가 "매일 밤 10시쯤 퇴근"이라고 말한 날. 네가 퇴근할 시간에 맞춰 폰을 보는 거다.', '唯一沒有標籤的鬧鐘。建立日期 = 你說「每天大概晚上10點下班」的那天。她在配合你的下班時間看手機。') },
+        ] },
+        { label: T('이번 달', '本月'), items: [
+          { t: T('🔴 1월 29일 — 동그라미만, 메모 없음', '🔴 1月29日——只畫了圈,沒有備註'), s: T('탭해서 확인', '點擊查看'), time: '',
+            d: T('1월 29일: 네가 그녀의 마트 털이 사진에 처음 댓글을 단 날이다. 메모는 없다. 그냥… 동그라미만 쳐 놨다.', '1月29日:你第一次在她的超市掃貨照下留言的日子。沒有任何備註。就……畫了個圈。'), hot: true },
+          { t: T('다음 주 금요일 — "용기"', '下週五——「勇氣」'), s: T('두 글자뿐', '只有兩個字'), time: '', hot: true },
+          { t: T('토 — 약국 오전 근무 (수당)', '週六——藥局上午班(有加班費)'), s: '', time: '' },
+        ] },
+      ] },
+    { id: 'screen', icon: '⏱', bg: '#5a5a6e', name: T('스크린타임', '螢幕時間'), badge: 0, type: 'screentime',
+      total: '3h 05m', totalNote: T('저녁 10시대에 집중', '集中在晚上10點檔'),
+      bars: [
+        { app: 'POPOP', val: '1h 52m', pct: 88, color: '#8b7bff', note: '↑ 167%' },
+        { app: T('약학 저널', '藥學期刊'), val: '0h 41m', pct: 32, color: '#4cd6a4' },
+        { app: T('가계부', '記帳'), val: '0h 18m', pct: 14, color: '#3182f6' },
+        { app: T('인스타', 'IG'), val: '0h 09m', pct: 7, color: '#e6683c', note: '↓ 71%' },
+      ],
+      insights: [
+        { t: T('답장 속도: 언니 4시간 · 국장님 2시간 · 너 — 평균 1분 12초', '回覆速度:姐姐4小時 · 局長2小時 · 你——平均1分12秒'), clue: 'h3',
+          d: T('"자기 전에 폰 그만 봐"라고 해놓고, 네 알림에는 1분 만에 답한다. 그 무심한 "ㅇㅇ"는 사실 폰을 쥐고 기다리다 보낸 거다.', '嘴上說「睡前少滑手機」,你的通知她1分鐘內必回。那個高冷的「嗯」,其實是握著手機等來的。') },
+        { t: T('밤 10시 이후 가장 많이 연 화면: 너와의 대화방', '晚上10點後打開最多的頁面:和你的對話框'), hot: true },
+      ] },
+  ],
+},
+];
+
+/* ═══════════════════ STATE ═══════════════════ */
+const S = {
+  tickets: 3,
+  char: null,        // current char object
+  pin: '',
+  unlockedApps: {},  // charId:appId -> true
+  clues: {},         // charId -> Set of clue ids
+  truthSeen: {},     // charId -> true
+  stageBonus: {},    // charId -> extra pct
+  screen: 'hub',
+};
+const $ = id => document.getElementById(id);
+
+function setLang(l) {
+  LANG = l;
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === l));
+  render();
+}
+function toggleNotes() { $('notesDrawer').classList.toggle('show'); }
+
+function statusbar(color, time, batt) {
+  return `<div class="statusbar" style="color:${color}">
+    <span>${time}</span>
+    <span class="batt"><span>${batt}%</span><span class="batt-shell"><span class="batt-fill" style="width:${batt}%"></span></span></span>
+  </div>`;
+}
+
+function showView(name) {
+  S.screen = name;
+  ['hub','lock','home','app'].forEach(v => $('view-' + v).classList.toggle('show', v === name));
+}
+
+function toast(html, ms = 2600) {
+  const t = $('toast');
+  t.innerHTML = html;
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ═══════════════════ HUB ═══════════════════ */
+function renderHub() {
+  const v = $('view-hub');
+  v.innerHTML = statusbar('#fff', '23:02', 88) + `
+    <div class="hub-body">
+      <div class="hub-head">
+        <div class="hub-eyebrow">PHONE PEEK · 폰 몰래보기</div>
+        <div class="hub-title">${tx(UI.tonight)}</div>
+        <div class="hub-sub">${tx(UI.hubSub).replace(/\n/g,'<br>')}</div>
+        <div class="ticket-pill">🎟 ${tx(UI.tickets)} <b id="hubTickets">${S.tickets}</b></div>
+      </div>
+      ${CHARS.map(c => {
+        const stage = Math.min(100, c.stagePct + (S.stageBonus[c.id] || 0));
+        const seen = S.truthSeen[c.id];
+        return `<div class="hub-card" onclick="enterChar('${c.id}')">
+          <div class="cardbg" style="background-image:url('${c.cover}'), linear-gradient(135deg,#3a3357,#191625)">
+            <span class="genre" style="color:${c.genreColor}; background:rgba(10,8,20,.55); border:1px solid ${c.genreColor}55">${tx(c.genre)}</span>
+            ${seen ? '' : `<span class="newdot">● ${tx(UI.newRecord)}</span>`}
+          </div>
+          <div class="cardmeta">
+            <div class="cname">${tx(c.name)}</div>
+            <div class="chook">${tx(c.hook)}</div>
+            <div class="cstage">
+              <span class="stage-label">${tx(UI.stage)}</span>
+              <div class="stage-track"><div class="stage-fill" style="width:${stage}%"></div></div>
+              <span class="stage-label">${tx(c.stageLabel)}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+/* ═══════════════════ LOCK ═══════════════════ */
+function enterChar(id) {
+  S.char = CHARS.find(c => c.id === id);
+  S.pin = '';
+  renderLock();
+  showView('lock');
+}
+
+function renderLock() {
+  const c = S.char;
+  const v = $('view-lock');
+  v.style.backgroundImage = `url('${c.cover}'), linear-gradient(135deg,#33305a,#15121f)`;
+  v.innerHTML = statusbar('#fff', c.time, c.batt) + `
+    <button class="lock-back" onclick="showView('hub'); renderHub()">‹ ${tx(UI.back)}</button>
+    <div class="lock-body">
+      <div class="lock-time">${c.time}</div>
+      <div class="lock-date">${tx(c.date)}</div>
+      <div class="lock-face" style="background-image:url('${c.cover}')"></div>
+      <div class="lock-msg">${tx(c.lockMsg)}</div>
+      <div class="pin-dots" id="pinDots">${[0,1,2,3].map(i => `<div class="pin-dot"></div>`).join('')}</div>
+      <div class="lock-hint">💡 ${tx(c.hint).replace(/\n/g,'<br>')}</div>
+      <div class="pass-peek">🔓 ${LANG==='ko'?'데모 · 비밀번호':'Demo · 密碼'}: <b>${c.pass}</b></div>
+      <div class="keypad">
+        ${[1,2,3,4,5,6,7,8,9].map(n => `<button class="key" onclick="pressKey('${n}')">${n}</button>`).join('')}
+        <button class="key ghostkey"></button>
+        <button class="key" onclick="pressKey('0')">0</button>
+        <button class="key ghostkey" onclick="delKey()">⌫</button>
+      </div>
+    </div>`;
+  updatePinDots();
+}
+
+function updatePinDots(err) {
+  const dots = $('pinDots');
+  if (!dots) return;
+  dots.classList.toggle('err', !!err);
+  [...dots.children].forEach((d, i) => d.classList.toggle('on', i < S.pin.length));
+}
+
+function pressKey(n) {
+  if (S.pin.length >= 4) return;
+  S.pin += n;
+  updatePinDots();
+  if (S.pin.length === 4) {
+    if (S.pin === S.char.pass) {
+      setTimeout(showUnlockFlash, 220);
+    } else {
+      setTimeout(() => {
+        updatePinDots(true);
+        toast('💦 ' + tx(UI.wrongPin));
+        setTimeout(() => { S.pin = ''; updatePinDots(); }, 450);
+      }, 150);
+    }
+  }
+}
+function delKey() { S.pin = S.pin.slice(0, -1); updatePinDots(); }
+
+function showUnlockFlash() {
+  const f = $('unlockFlash');
+  f.innerHTML = `<div class="big">🔓</div><div class="t1">${tx(UI.unlocked)}</div><div class="t2">${tx(UI.unlockedSub)}</div>`;
+  f.classList.add('show');
+  setTimeout(() => {
+    f.classList.remove('show');
+    renderHome();
+    showView('home');
+  }, 1300);
+}
+
+/* ═══════════════════ HOME ═══════════════════ */
+function charClues() { return S.clues[S.char.id] || (S.clues[S.char.id] = new Set()); }
+
+function renderHome() {
+  const c = S.char;
+  const v = $('view-home');
+  v.style.backgroundImage = `url('${c.cover}')`;
+  const found = charClues().size;
+  const truthReady = found >= 3;
+  const truthSeen = S.truthSeen[c.id];
+  v.innerHTML = statusbar('#fff', c.time, c.batt) + `
+    <div class="home-body">
+      <div class="home-top">
+        <div class="home-face" style="background-image:url('${c.cover}')"></div>
+        <div>
+          <div class="home-owner">${tx(c.name)}</div>
+          <div class="home-ownersub">${tx(c.genre)}</div>
+        </div>
+        <button class="home-exit" onclick="exitPhone()">${tx(UI.exitPhone)}</button>
+      </div>
+      <div class="snoop-strip">
+        <span class="tk">🎟 ${S.tickets}</span>
+        <span class="cl">${tx(UI.clueNote)}: <b>${found}/3</b> ${truthReady ? '' : '· ' + tx(UI.cluesLeft)}</span>
+        <button class="clue-note-btn" onclick="openClueNote()">🔍 ${tx(UI.clueNote)}</button>
+      </div>
+      <div class="appgrid">
+        ${c.apps.map(a => {
+          const unlocked = !a.locked || S.unlockedApps[c.id + ':' + a.id];
+          return `<button class="appicon" onclick="openApp('${a.id}')">
+            <span class="glyph" style="background:${a.bg}">${a.icon}
+              ${a.badge && unlocked !== false ? `<span class="badge">${a.badge}</span>` : (a.badge ? `<span class="badge">${a.badge}</span>` : '')}
+              ${unlocked ? '' : `<span class="lockcover">🔒</span>`}
+            </span>
+            <span class="label">${tx(a.name)}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <div class="truth-card ${truthReady ? '' : 'dim'}">
+        <div class="tc-top">${c.truth.emoji} ${tx(UI.truthTitle)} — ${tx(c.truth.title)}</div>
+        <div class="tc-sub">${truthSeen ? tx(c.truth.next) : (truthReady ? tx(UI.truthReady) : tx(UI.truthLocked))}</div>
+        <button class="tc-cta" ${truthReady ? '' : 'disabled'} onclick="openTruth()">
+          ${truthSeen ? '↻ ' + tx(UI.keep) : '🎟 ' + tx(UI.openTruth)}
+        </button>
+      </div>
+    </div>`;
+}
+
+function exitPhone() {
+  showView('hub');
+  renderHub();
+}
+
+/* ═══════════════════ CLUES ═══════════════════ */
+function collectClue(clueId) {
+  const set = charClues();
+  if (set.has(clueId)) return;
+  set.add(clueId);
+  const clue = S.char.clues.find(x => x.id === clueId);
+  toast(`🔍 <b>${tx(UI.clueFound)}</b> (${set.size}/3)<br>${tx(clue.text)}`, 3400);
+  if (set.size >= 3) {
+    setTimeout(() => toast(`✨ <b>${tx(UI.truthReady)}</b>`, 3000), 3600);
+  }
+}
+
+function openClueNote() {
+  const set = charClues();
+  const c = S.char;
+  openModal(`
+    <div class="m-emoji">🔍</div>
+    <div class="m-title">${tx(UI.clueNote)} · ${tx(c.name)}</div>
+    <div style="margin-top:12px">
+      ${c.clues.map(cl => `<div class="clue-list-item ${set.has(cl.id) ? '' : 'pending'}">
+        <span class="ci">${set.has(cl.id) ? cl.icon : '❔'}</span>
+        <span class="ct">${set.has(cl.id) ? tx(cl.text) : (LANG === 'ko' ? '아직 발견하지 못한 단서 — 앱 곳곳을 뒤져 보자' : '尚未發現的線索——再去各個App裡翻翻')}</span>
+      </div>`).join('')}
+    </div>
+    <button class="m-cta violet" onclick="closeModal()">${tx(UI.gotIt)}</button>`);
+}
+
+/* ═══════════════════ TICKET / PAYWALL ═══════════════════ */
+function spendTicket(onOk, label) {
+  if (S.tickets <= 0) { openPaywall(); return false; }
+  S.tickets -= 1;
+  toast(`🎟 -1 · ${label || ''} (${S.tickets} ${LANG==='ko'?'장 남음':'張剩餘'})`);
+  onOk();
+  return true;
+}
+
+function openPaywall() {
+  openModal(`
+    <div class="m-emoji">🎟</div>
+    <div class="m-title">${tx(UI.paywallTitle)}</div>
+    <div class="m-body">${tx(UI.paywallBody)}</div>
+    <div class="price-cards">
+      <div class="price-card" onclick="buyTickets(1)"><div class="pc-n">1${LANG==='ko'?'장':'張'}</div><div class="pc-p">₩1,500</div></div>
+      <div class="price-card best" onclick="buyTickets(5)"><div class="pc-n">5${LANG==='ko'?'장':'張'}</div><div class="pc-p">₩5,900</div></div>
+      <div class="price-card" onclick="buyTickets(12)"><div class="pc-n">12${LANG==='ko'?'장':'張'}</div><div class="pc-p">₩11,000</div></div>
+    </div>
+    <button class="m-cta" onclick="buyTickets(5)">${tx(UI.buy)}</button>
+    <button class="m-sub-cta" onclick="closeModal()">${tx(UI.later)}</button>`);
+}
+function buyTickets(n) {
+  S.tickets += n;
+  closeModal();
+  toast(`🎟 +${n} (DEMO: ${LANG==='ko'?'실제 결제 없음':'僅模擬,未實際扣款'})`);
+  if (S.screen === 'home') renderHome();
+}
+
+/* ═══════════════════ TRUTH ═══════════════════ */
+function openTruth() {
+  const c = S.char;
+  if (charClues().size < 3) return;
+  const show = () => {
+    if (!S.truthSeen[c.id]) {
+      S.truthSeen[c.id] = true;
+      S.stageBonus[c.id] = (S.stageBonus[c.id] || 0) + 9;
+    }
+    openModal(`
+      <div class="m-emoji">${c.truth.emoji}</div>
+      <div class="m-title">${tx(c.truth.title)}</div>
+      <div class="truth-text">${tx(c.truth.body)}</div>
+      <div class="next-drop">
+        <div class="nd-tag">📮 ${tx(UI.nextDrop)}</div>
+        <div class="nd-text">${tx(c.truth.next)}</div>
+        <div class="nd-timer">⏳ ${tx(c.truth.nextIn)} · ${tx(UI.stage)} +9%</div>
+      </div>
+      <button class="m-cta violet" onclick="closeModal(); renderHome()">${tx(UI.gotIt)}</button>`);
+  };
+  if (S.truthSeen[c.id]) show();
+  else spendTicket(show, tx(UI.truthTitle));
+}
+
+/* ═══════════════════ MODAL ═══════════════════ */
+function openModal(html) {
+  $('modalBox').innerHTML = html;
+  $('modalWrap').classList.add('show');
+}
+function closeModal() { $('modalWrap').classList.remove('show'); }
+$('modalWrap').addEventListener('click', e => { if (e.target === $('modalWrap')) closeModal(); });
+
+/* ═══════════════════ APP OPEN / RENDER ═══════════════════ */
+let appState = { app: null, room: null, snsTab: 'main' };
+
+function openApp(appId) {
+  const c = S.char;
+  const app = c.apps.find(a => a.id === appId);
+  const key = c.id + ':' + appId;
+  if (app.locked && !S.unlockedApps[key]) {
+    openModal(`
+      <div class="m-emoji">${app.icon}</div>
+      <div class="m-title">${tx(app.name)} · ${tx(UI.needTicket)}</div>
+      <div class="m-body">${LANG==='ko' ? '잠겨 있는 기록일수록, 진짜가 들어 있다.' : '鎖起來的記錄裡,才藏著真東西。'}</div>
+      <button class="m-cta" onclick="closeModal(); spendTicket(()=>{ S.unlockedApps['${key}']=true; _openAppInner('${appId}'); }, '${tx(app.name)}')">🎟 ${tx(UI.lockedApp)}</button>
+      <button class="m-sub-cta" onclick="closeModal()">${tx(UI.later)}</button>`);
+    return;
+  }
+  _openAppInner(appId);
+}
+
+function _openAppInner(appId) {
+  appState = { app: S.char.apps.find(a => a.id === appId), room: null, snsTab: 'main' };
+  renderApp();
+  showView('app');
+}
+
+function appNav(title, sub) {
+  return `<div class="app-nav">
+    <button class="backbtn" onclick="appBack()">‹ ${LANG==='ko'?'뒤로':'返回'}</button>
+    <span class="app-title">${title}</span>
+    ${sub ? `<span class="subtag">${sub}</span>` : ''}
+  </div>`;
+}
+function appBack() {
+  if (appState.room) { appState.room = null; renderApp(); }
+  else { renderHome(); showView('home'); }
+}
+
+function rowItem(it, i) {
+  const hasDetail = !!it.d;
+  return `<div class="row-item ${it.hot ? 'hotrow' : ''}" data-i="${i}" onclick="rowTap(this, ${i})">
+    <div class="row-top"><span class="row-title">${tx(it.t)}</span><span class="row-time">${tx(it.time || '')}</span></div>
+    ${it.s ? `<div class="row-sub">${tx(it.s)}</div>` : ''}
+    ${hasDetail ? `<div class="row-detail">${tx(it.d)}</div>` : ''}
+  </div>`;
+}
+let flatItems = [];
+function rowTap(el, i) {
+  el.classList.toggle('open');
+  const it = flatItems[i];
+  if (it && it.clue) collectClue(it.clue);
+}
+
+function renderApp() {
+  const a = appState.app;
+  const c = S.char;
+  const v = $('view-app');
+  flatItems = [];
+
+  /* chat room detail */
+  if (a.type === 'chat' && appState.room) {
+    const r = appState.room;
+    v.innerHTML = statusbar('#23222b', c.time, c.batt)
+      + appNav(tx(r.name) + (r.isUser ? ` <span style="font-size:10px;color:#fa5252">◀ ${tx(UI.myRoom)}</span>` : ''), r.note ? tx(r.note) : '')
+      + `<div class="talkroom">
+        ${r.msgs.map(m => {
+          if (m.sys) return `<div style="text-align:center;font-size:10.5px;color:#55606e;background:rgba(255,255,255,.45);border-radius:999px;padding:5px 12px;width:fit-content;margin:10px auto;line-height:1.5;max-width:88%">${tx(m.t)}</div>`;
+          if (m.inputDraft) return '';
+          const mine = m.who === 'them'; // phone owner's messages on the right
+          const face = mine ? '' : `<div class="bubble-face" ${m.who==='me' ? `>🧣` : ` style="background-image:none">${r.face}`}</div>`;
+          const bub = m.voice
+            ? `<div class="bubble voicebub"><span class="pl">▶</span><span>${tx(m.t)}</span></div>`
+            : `<div class="bubble">${tx(m.t)}</div>`;
+          return `<div class="bubble-row ${mine ? 'mine' : ''}">
+            ${mine ? `<span class="bub-time">${tx(m.time||'')}</span>` : face}
+            <div class="bubble-stack">${mine ? '' : `<div class="bubble-name">${m.who==='me' ? (LANG==='ko'?'나':'我') : tx(r.name)}</div>`}${bub}</div>
+            ${mine ? '' : `<span class="bub-time">${tx(m.time||'')}</span>`}
+          </div>`;
+        }).join('')}
+        ${r.bookmark ? `<div style="margin:14px auto 0;max-width:92%;background:rgba(255,233,74,.9);border-radius:10px;padding:9px 12px;font-size:11px;line-height:1.6;color:#4a4420">⭐ ${tx(r.bookmark)}</div>` : ''}
+      </div>
+      ${(() => {
+        const draftMsg = r.msgs.find(m => m.inputDraft);
+        const draft = r.draft || (draftMsg && draftMsg.inputDraft);
+        return draft ? `<div class="draft-strip"><div class="draft-label">✏️ ${tx(UI.draftLabel)}</div><div class="draft-text">${tx(draft)}|</div></div>` : '';
+      })()}`;
+    return;
+  }
+
+  /* chat list */
+  if (a.type === 'chat') {
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name))
+      + `<div class="app-body">
+        ${a.rooms.map((r, i) => `<div class="chat-list-item" onclick="openRoom(${i})">
+          <div class="chat-face" ${r.isUser ? '' : ''}>${r.face}</div>
+          <div class="chat-meta">
+            <div class="chat-name">${tx(r.name)}${r.isUser ? `<span class="youtag">ME</span>` : ''}</div>
+            <div class="chat-last">${tx(r.last)}</div>
+          </div>
+          <div class="chat-right"><span class="chat-time">${tx(r.time)}</span>${r.unread ? `<span class="chat-unread">${r.unread}</span>` : ''}</div>
+        </div>`).join('')}
+      </div>`;
+    return;
+  }
+
+  /* sns */
+  if (a.type === 'sns') {
+    const tab = appState.snsTab;
+    const acc = a[tab];
+    let idx = 0;
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name))
+      + `<div class="app-body">
+        <div style="display:flex;gap:8px;padding:12px 16px 4px">
+          <button onclick="snsTab('main')" style="flex:1;padding:9px;border-radius:10px;font-size:12.5px;font-weight:800;${tab==='main'?'background:#23222b;color:#fff':'background:#fff;color:#888;border:1px solid #e5e2ee'}">${LANG==='ko'?'본계정':'大號'} ${a.main.handle}</button>
+          <button onclick="snsTab('alt')" style="flex:1;padding:9px;border-radius:10px;font-size:12.5px;font-weight:800;${tab==='alt'?'background:#8b3ab5;color:#fff':'background:#fff;color:#888;border:1px solid #e5e2ee'}">${LANG==='ko'?'부계정':'小號'} 🤫</button>
+        </div>
+        <div style="padding:10px 16px 2px;font-size:11.5px;color:#8b8899">${acc.handle} · ${tx(acc.bio)}</div>
+        ${acc.posts.map(p => { const i = flatItems.push(p) - 1; return `<div class="row-item ${p.hot?'hotrow':''}" onclick="rowTap(this,${i})" style="margin:10px 12px;border-radius:14px;border:1px solid #eeebf5">
+            <div style="font-size:13px;line-height:1.65">${tx(p.t)}</div>
+            <div style="display:flex;gap:12px;margin-top:8px;font-size:10.5px;color:#a5a2b5"><span>♥ ${p.likes}</span><span>${tx(p.time)}</span>${tab==='alt'?`<span style="color:#8b3ab5;font-weight:700">${LANG==='ko'?'비공개':'私密'}</span>`:''}</div>
+          </div>`; }).join('')}
+      </div>`;
+    return;
+  }
+
+  /* gallery */
+  if (a.type === 'gallery') {
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name), a.folder ? tx(a.folder) : '')
+      + `<div class="app-body"><div class="photo-grid">
+        ${a.photos.map((p, i) => `<div class="ph ${p.locked && !S.unlockedApps[c.id+':ph'+i] ? 'lockph' : ''}" onclick="phTap(${i})">
+          <div class="phbg" style="background:${p.grad}">${p.emo}</div>
+          ${p.locked && !S.unlockedApps[c.id+':ph'+i]
+            ? `<div class="phlock">🔒<span>🎟 1</span></div>`
+            : `<div class="phcap">${tx(p.cap)}</div>`}
+        </div>`).join('')}
+      </div></div>`;
+    return;
+  }
+
+  /* voice memos */
+  if (a.type === 'voice') {
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name))
+      + `<div class="app-body">
+        ${a.memos.map((m, i) => `<div class="vm-item ${m.hot?'':''}" onclick="this.classList.toggle('playing')">
+          <div class="vm-top"><span class="vm-play">▶</span><span class="vm-name">${tx(m.name)}${m.hot?' <span style="color:#ff5470">●</span>':''}</span><span class="vm-len">${m.len}</span></div>
+          <div class="vm-wave">${Array.from({length:34},()=>`<i style="height:${4+Math.random()*22}px"></i>`).join('')}</div>
+          <div class="vm-script">${tx(m.script)}</div>
+        </div>`).join('')}
+      </div>`;
+    return;
+  }
+
+  /* screentime */
+  if (a.type === 'screentime') {
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name))
+      + `<div class="app-body">
+        <div class="st-hero">
+          <div class="st-total">${a.total}</div>
+          <div class="st-caption">${tx(UI.screentimeToday)} · ${tx(a.totalNote)}</div>
+          <div class="st-bars">${a.bars.map(b => `<div class="st-row">
+            <span class="st-app">${tx(b.app)}</span>
+            <div class="st-track"><div class="st-fill" style="width:${b.pct}%;background:${b.color}"></div></div>
+            <span class="st-val">${b.val}${b.note ? ` <b style="color:#ff5470">${b.note}</b>` : ''}</span>
+          </div>`).join('')}</div>
+        </div>
+        <div class="st-insight">
+          ${a.insights.map(inz => { const i = flatItems.push(inz) - 1; return `<div class="in-line ${inz.hot||inz.clue?'':''}" onclick="rowTap(this,${i})">${inz.hot||inz.clue?'🔥':'·'} ${tx(inz.t)}${inz.d?`<div class="row-detail">${tx(inz.d)}</div>`:''}</div>`; }).join('')}
+        </div>
+      </div>`;
+    return;
+  }
+
+  /* search */
+  if (a.type === 'search') {
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name))
+      + `<div class="app-body"><div class="sec-label">${LANG==='ko'?'최근 검색':'最近搜尋'}</div>
+        ${a.items.map(it => { const i = flatItems.push(it) - 1; return rowItem({...it, t: T('🔍 ' + tx0(it.t,'ko'), '🔍 ' + tx0(it.t,'zh'))}, i); }).join('')}
+      </div>`;
+    return;
+  }
+
+  /* generic sectioned list */
+  if (a.type === 'list') {
+    v.innerHTML = statusbar('#23222b', c.time, c.batt) + appNav(tx(a.name))
+      + `<div class="app-body">
+        ${a.secs.map(sec => `<div class="sec-label">${tx(sec.label)}</div>`
+          + sec.items.map(it => { const i = flatItems.push(it) - 1; return rowItem(it, i); }).join('')
+        ).join('')}
+      </div>`;
+    return;
+  }
+}
+function tx0(o, l) { return typeof o === 'string' ? o : (o[l] ?? o.ko); }
+
+function openRoom(i) {
+  appState.room = appState.app.rooms[i];
+  renderApp();
+}
+function snsTab(t) { appState.snsTab = t; renderApp(); }
+
+function phTap(i) {
+  const c = S.char;
+  const p = appState.app.photos[i];
+  const key = c.id + ':ph' + i;
+  if (p.locked && !S.unlockedApps[key]) {
+    openModal(`
+      <div class="m-emoji">🖼</div>
+      <div class="m-title">${tx(UI.needTicket)}</div>
+      <div class="m-body">${LANG==='ko' ? '흐릿하게 가려진 이 한 장 — 찍힌 날짜가 심상치 않다.' : '被模糊處理的這一張——拍攝日期,很不對勁。'}</div>
+      <button class="m-cta" onclick="closeModal(); spendTicket(()=>{ S.unlockedApps['${key}']=true; renderApp(); phTap(${i}); })">🎟 ${tx(UI.lockedApp)}</button>
+      <button class="m-sub-cta" onclick="closeModal()">${tx(UI.later)}</button>`);
+    return;
+  }
+  const lb = $('lightbox');
+  lb.innerHTML = `<button class="lb-close" onclick="this.parentElement.classList.remove('show')">✕</button>
+    <div class="lb-img" style="background:${p.grad}">${p.emo}</div>
+    <div class="lb-cap"><div class="c1">${tx(p.c1)}</div><div class="c2">${tx(p.c2)}</div></div>`;
+  lb.classList.add('show');
+}
+
+/* ═══════════════════ INIT ═══════════════════ */
+function render() {
+  if (S.screen === 'hub') renderHub();
+  else if (S.screen === 'lock') renderLock();
+  else if (S.screen === 'home') renderHome();
+  else if (S.screen === 'app') renderApp();
+}
+renderHub();
+</script>
+</body>
+</html>

@@ -2,15 +2,15 @@ import importlib
 
 
 def test_arca_config_stable_defaults(monkeypatch):
-    # 与部署无关的结构性默认(数值/布尔)应稳定；base_url 末尾斜杠被去除。
-    # base_url/uid/jwt_mode 的字符串默认属部署配置(可能就地填真值)，不在此断言具体值，
-    # env 覆盖机制由 test_arca_config_from_env 校验。
+    # 與部署無關的結構性預設(數值/布林)應穩定；base_url 末尾斜槓被去除。
+    # base_url/uid/jwt_mode 的字串預設屬部署配置(可能就地填真值)，不在此斷言具體值，
+    # env 覆蓋機制由 test_arca_config_from_env 校驗。
     for k in ("ARCA_JWT_EXPIRES", "ARCA_POST_VISIBILITY", "ARCA_SYNC_LANDING"):
         monkeypatch.delenv(k, raising=False)
     import app.config as config
     importlib.reload(config)
     assert config.ARCA_JWT_EXPIRES == 2592000
-    assert config.ARCA_POST_VISIBILITY == 0  # 0=跟随角色可见性
+    assert config.ARCA_POST_VISIBILITY == 0  # 0=跟隨角色可見性
     assert config.ARCA_SYNC_LANDING is True
     assert isinstance(config.ARCA_BASE_URL, str) and not config.ARCA_BASE_URL.endswith("/")
     assert isinstance(config.ARCA_UID, str)

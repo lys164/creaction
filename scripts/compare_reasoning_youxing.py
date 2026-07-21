@@ -1,14 +1,14 @@
-"""游星 帖子生成三版对比：有reasoning(gemini) / 无reasoning(gemini) / gpt-5(有reasoning)。
+"""遊星 帖子生成三版對比：有reasoning(gemini) / 無reasoning(gemini) / gpt-5(有reasoning)。
 
-只对比【文案层】(build_ig_feed_messages_real 的 LLM 输出)，不出图。
-- 同一个 persona（从 arca 远端存储拉取）、同一套 prompt、同一个 API 池。
-- 唯一变量：是否注入 reasoning 块；以及 model（gemini vs gpt-5）。
-- "无reasoning" 通过把 build_ig_feed_messages_real 里那三处 replace 逆向还原实现，
-  等价于 reasoning 上线之前的原始 prompt（纯 JSON 数组、无 persona_read）。
+只對比【文案層】(build_ig_feed_messages_real 的 LLM 輸出)，不出圖。
+- 同一個 persona（從 arca 遠端儲存拉取）、同一套 prompt、同一個 API 池。
+- 唯一變數：是否注入 reasoning 塊；以及 model（gemini vs gpt-5）。
+- "無reasoning" 透過把 build_ig_feed_messages_real 裡那三處 replace 逆向還原實現，
+  等價於 reasoning 上線之前的原始 prompt（純 JSON 陣列、無 persona_read）。
 
 用法：
     python3 scripts/compare_reasoning_youxing.py
-产物：data/compare_youxing/{A_reasoning_gemini,B_noreason_gemini,C_reasoning_gpt5}.json
+產物：data/compare_youxing/{A_reasoning_gemini,B_noreason_gemini,C_reasoning_gpt5}.json
      data/compare_youxing/summary.md
 """
 import json
@@ -19,36 +19,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import api_client, arca_storage, config, prompts  # noqa: E402
 
-CHAR_ID = "char_1783573120_ae02ed"  # 游星, zh, real
+CHAR_ID = "char_1783573120_ae02ed"  # 遊星, zh, real
 N_POSTS = 8
 OUT_DIR = config.DATA_DIR / "compare_youxing"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# reasoning 注入的三处 replace（见 build_ig_feed_messages_real）。逆向还原即得
-# "无 reasoning" 的原始 prompt。逐字复制自 prompts.py，保持一致。
-_NEW_1 = prompts._REASON_BLOCK_ZH + "\n# 帖子类型（每条必须从三类里选一个打标签 post_type）"
-_OLD_1 = "\n# 帖子类型（每条必须从三类里选一个打标签 post_type）"
+# reasoning 注入的三處 replace（見 build_ig_feed_messages_real）。逆向還原即得
+# "無 reasoning" 的原始 prompt。逐字複製自 prompts.py，保持一致。
+_NEW_1 = prompts._REASON_BLOCK_ZH + "\n# 帖子型別（每條必須從三類裡選一個打標籤 post_type）"
+_OLD_1 = "\n# 帖子型別（每條必須從三類裡選一個打標籤 post_type）"
 
 _NEW_2 = (
-    "- 输出一个 JSON 对象：{\"persona_read\": {\"one_liner\":..., \"perception\":..., "
+    "- 輸出一個 JSON 物件：{\"persona_read\": {\"one_liner\":..., \"perception\":..., "
     "\"stances\":[...], \"visual_identity\":...}, \"posts\": [...]}。"
-    "persona_read 是你上面第一步的判断（简明填写、给自己定调）；posts 是"
+    "persona_read 是你上面第一步的判斷（簡明填寫、給自己定調）；posts 是"
 )
-_OLD_2 = "- 只输出一个 JSON 数组，"
+_OLD_2 = "- 只輸出一個 JSON 陣列，"
 
 _NEW_3 = (
-    " 的帖子数组，每个元素必须包含 content、post_type、format、image_type、selfie、"
-    "photo_kind、photo_prompt、photo_schema、topic_seed 这些键，"
-    "且每条都要对得上 persona_read（尤其 one_liner 与 visual_identity）。"
+    " 的帖子陣列，每個元素必須包含 content、post_type、format、image_type、selfie、"
+    "photo_kind、photo_prompt、photo_schema、topic_seed 這些鍵，"
+    "且每條都要對得上 persona_read（尤其 one_liner 與 visual_identity）。"
 )
 _OLD_3 = (
-    "；每个元素必须包含 content、post_type、format、image_type、\n"
-    "  selfie、photo_kind、photo_prompt、photo_schema、topic_seed 这些键。"
+    "；每個元素必須包含 content、post_type、format、image_type、\n"
+    "  selfie、photo_kind、photo_prompt、photo_schema、topic_seed 這些鍵。"
 )
 
 
 def strip_reasoning(messages: list[dict]) -> list[dict]:
-    """把 reasoning 注入逆向还原成上线前的原始 prompt。"""
+    """把 reasoning 注入逆向還原成上線前的原始 prompt。"""
     out = []
     for m in messages:
         c = m["content"]
@@ -61,7 +61,7 @@ def strip_reasoning(messages: list[dict]) -> list[dict]:
 
 
 def parse_feed(raw):
-    """把 LLM 输出解析成 (persona_read, posts)，兼容对象/数组两种形态。"""
+    """把 LLM 輸出解析成 (persona_read, posts)，相容物件/陣列兩種形態。"""
     persona_read = None
     feed = raw
     if isinstance(feed, dict):
@@ -74,7 +74,7 @@ def parse_feed(raw):
 
 
 def slim_post(p: dict) -> dict:
-    """只保留对比关心的字段，便于并排看文案与配图规划。"""
+    """只保留對比關心的欄位，便於並排看文案與配圖規劃。"""
     return {
         "content": p.get("content"),
         "post_type": p.get("post_type"),
@@ -117,13 +117,13 @@ def main():
         "C_reasoning_gpt5": run_variant("C_reasoning_gpt5", base_msgs, "gpt-5"),
     }
 
-    # 汇总 markdown，三版并排
-    lines = [f"# 游星 帖子三版对比（{persona.get('name')}, {lang}/real）\n",
-             f"- A_reasoning_gemini: 当前线上逻辑（有 reasoning, {config.LLM_MODEL}）",
+    # 彙總 markdown，三版並排
+    lines = [f"# 遊星 帖子三版對比（{persona.get('name')}, {lang}/real）\n",
+             f"- A_reasoning_gemini: 當前線上邏輯（有 reasoning, {config.LLM_MODEL}）",
              f"- B_noreason_gemini: 去掉 reasoning（{config.LLM_MODEL}）",
-             "- C_reasoning_gpt5: 有 reasoning, 换 gpt-5（同 API）\n"]
+             "- C_reasoning_gpt5: 有 reasoning, 換 gpt-5（同 API）\n"]
     for key, r in results.items():
-        lines.append(f"\n## {key}  (model={r['model']}, {r['n']} 条)")
+        lines.append(f"\n## {key}  (model={r['model']}, {r['n']} 條)")
         if r.get("persona_read"):
             lines.append("persona_read:")
             lines.append("```json")
@@ -136,7 +136,7 @@ def main():
             tags += "]"
             lines.append(f"{i}. {tags} {p.get('content')}")
     (OUT_DIR / "summary.md").write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n完成。产物在 {OUT_DIR}")
+    print(f"\n完成。產物在 {OUT_DIR}")
 
 
 if __name__ == "__main__":

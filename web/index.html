@@ -3,115 +3,126 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>POPOP 角色生产链路</title>
-<link rel="stylesheet" href="/style.css?v=19" />
+<title>POPOP 角色生產鏈路</title>
+<link rel="stylesheet" href="/style.css?v=20" />
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">POPOP <span>角色生产链路</span></div>
+  <div class="brand">POPOP <span>角色生產鏈路</span></div>
   <nav class="steps">
-    <a class="step active" data-view="upload">① 批量上传 / 生成人设</a>
-    <a class="step" data-view="characters">② 角色 / 人设 / 封面</a>
-    <a class="step" data-view="igposts">③ 生成 INS 帖子（9条）</a>
-    <a class="step" data-view="landing">④ 生成落地页</a>
+    <a class="step active" data-view="upload">① 批次上傳 / 生成人設</a>
+    <a class="step" data-view="characters">② 角色 / 人設 / 封面</a>
+    <a class="step" data-view="igposts">③ 生成 INS 帖子（9條）</a>
+    <a class="step" data-view="landing">④ 生成落地頁</a>
     <a class="step" data-view="chat">聊天</a>
-    <a class="step" data-view="styles">画风库</a>
-    <a class="step ext" href="https://api.popop.dev/admin" target="_blank" rel="noopener" title="打开 POPOP 平台">POPOP运营后台 ↗</a>
+    <a class="step ext" href="/daily.html">日程生产 Demo ↗</a>
+    <a class="step ext" href="/feed.html">第三方帖子 Demo ↗</a>
+    <a class="step ext" href="/phone_check_kr.html">查手機 Demo ↗</a>
+    <a class="step" data-view="styles">畫風庫</a>
+    <a class="step ext" href="https://api.popop.dev/admin" target="_blank" rel="noopener" title="開啟 POPOP 平臺">POPOP運營後臺 ↗</a>
   </nav>
 </header>
 
 <main>
   <!-- VIEW: UPLOAD -->
   <section id="view-upload" class="view active">
-    <h2>批量上传图片 → 扩写人设</h2>
+    <h2>批次上傳圖片 → 擴寫人設</h2>
     <div class="card">
       <div id="dropzone" class="dropzone">
         <input type="file" id="fileInput" accept="image/*,application/json,.json" multiple hidden />
-        <p>点击、拖拽或 Ctrl/⌘+V 粘贴图片，也可拖入角色 JSON（都选填；支持多选。JSON 会按所选语言扩写人设）</p>
+        <p>點選、拖拽或 Ctrl/⌘+V 貼上圖片，也可拖入角色 JSON（都選填；支援多選。JSON 會按所選語言擴寫人設）</p>
         <div id="thumbs" class="thumbs"></div>
       </div>
       <label class="field">
-        <span>创作补充要求 / 文字人设（选填；不传图片时，可只凭这里的文字生成人设，也可直接粘贴一段角色文字/JSON）</span>
-        <textarea id="userHint" rows="2" placeholder="例如：希望偏成熟御姐风、设定为财阀千金…；或直接粘贴一段角色描述/JSON"></textarea>
+        <span>創作補充要求 / 文字人設（選填；不傳圖片時，可只憑這裡的文字生成人設，也可直接貼上一段角色文字/JSON）</span>
+        <textarea id="userHint" rows="2" placeholder="例如：希望偏成熟御姐風、設定為財閥千金…；或直接貼上一段角色描述/JSON"></textarea>
       </label>
       <div class="field">
-        <span>语言（多选，每个语言各生成一个独立的本土化角色）</span>
+        <span>語言（多選，每個語言各生成一個獨立的本土化角色）</span>
         <div id="langPick" class="lang-pick"></div>
       </div>
       <label class="check">
         <input type="checkbox" id="onePerImage" checked />
-        每张图片各生成一个角色（取消则所有图描述同一角色）
+        每張圖片各生成一個角色（取消則所有圖描述同一角色）
       </label>
       <label class="check" id="dlImageRow" style="display:none">
         <input type="checkbox" id="downloadImage" checked />
-        JSON 导入：下载原始 image_url 当源图（用于外貌/封面一致；取消则纯文字推断）
+        JSON 匯入：下載原始 image_url 當源圖（用於外貌/封面一致；取消則純文字推斷）
       </label>
       <div class="field">
-        <span>封面图（选填，可在人设生成后直接批量产出）</span>
+        <span>封面圖（選填，可在人設生成後直接批次產出）</span>
         <div class="row">
           <label class="check">
             <input type="checkbox" id="withCoverOnCreate" checked />
-            同时生成封面图
+            同時生成封面圖
           </label>
           <label class="field small" id="createCoverStyleField">
-            <span>封面画风</span>
+            <span>封面畫風</span>
             <select id="createCoverStyle"></select>
           </label>
         </div>
       </div>
       <label class="field track-field">
-        <span>生成链路</span>
+        <span>生成鏈路</span>
         <select id="createTrack" class="track-sel">
-          <option value="real">链路一：真实人设</option>
-          <option value="light">链路二：轻剧情</option>
-          <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
-          <option value="adult">链路三：成人向</option>
-          <option value="kdrama">链路四：韩剧</option>
-          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
+          <option value="real">鏈路一：真實人設</option>
+          <option value="light">鏈路二：輕劇情</option>
+          <option value="flirt">鏈路二·荷爾蒙：輕劇情+張力（擦而不黃）</option>
+          <option value="adult">鏈路三：成人向</option>
+          <option value="kdrama">鏈路四：韓劇</option>
+          <option value="nonhuman">鏈路五：非人物（獸人/動物/外星人…）</option>
         </select>
       </label>
       <label class="field track-field">
-        <span>Source（来源标记，选填；打在角色上，导出时写入 character.json）</span>
-        <input type="text" id="createSource" class="track-sel" placeholder="例如：batch-0707 / 某活动 / 渠道名" />
+        <span>業務 style（傳給後端；非畫風詞）</span>
+        <select id="createStyle" class="track-sel">
+          <option value="real" selected>real</option>
+          <option value="cute">cute</option>
+          <option value="fantasy">fantasy</option>
+        </select>
       </label>
-      <button id="btnPersona" class="primary">生成人设（按所选语言各自生成）</button>
+      <label class="field track-field">
+        <span>Source（來源標記，選填；用於篩選與追溯）</span>
+        <input type="text" id="createSource" class="track-sel" placeholder="例如：batch-0707 / 某活動 / 渠道名" />
+      </label>
+      <button id="btnPersona" class="primary">生成人設（按所選語言各自生成）</button>
       <div id="uploadStatus" class="status"></div>
     </div>
   </section>
 
   <!-- VIEW: CHARACTERS -->
   <section id="view-characters" class="view">
-    <h2>角色库</h2>
+    <h2>角色庫</h2>
     <div id="charLangFilter" class="lang-filter"></div>
     <div id="charSourceFilter" class="lang-filter source-filter"></div>
     <div id="charToolbar" class="char-toolbar">
-      <button id="btnSelAll" class="ghost">全选</button>
-      <button id="btnSelNone" class="ghost">取消选择</button>
-      <button id="btnBatchPersona" class="ghost">↻ 批量重生人设</button>
-        <select id="regenTrack" class="track-sel" title="重生链路">
-        <option value="">链路：沿用角色原链路</option>
-        <option value="real">链路一：真实人设</option>
-        <option value="light">链路二：轻剧情</option>
-        <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
-        <option value="adult">链路三：成人向</option>
-          <option value="kdrama">链路四：韩剧</option>
-          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
+      <button id="btnSelAll" class="ghost">全選</button>
+      <button id="btnSelNone" class="ghost">取消選擇</button>
+      <button id="btnBatchPersona" class="ghost">↻ 批次重生人設</button>
+        <select id="regenTrack" class="track-sel" title="重生鏈路">
+        <option value="">鏈路：沿用角色原鏈路</option>
+        <option value="real">鏈路一：真實人設</option>
+        <option value="light">鏈路二：輕劇情</option>
+        <option value="flirt">鏈路二·荷爾蒙：輕劇情+張力（擦而不黃）</option>
+        <option value="adult">鏈路三：成人向</option>
+          <option value="kdrama">鏈路四：韓劇</option>
+          <option value="nonhuman">鏈路五：非人物（獸人/動物/外星人…）</option>
       </select>
-      <button id="btnBatchOpening" class="ghost">💬 批量重写开场白</button>
+      <button id="btnBatchOpening" class="ghost">💬 批次重寫開場白</button>
       <div class="char-cover-batch">
-        <select id="batchStyle" title="封面画风"></select>
+        <select id="batchStyle" title="封面畫風"></select>
         <select id="batchCoverMode" title="封面生成模式">
-          <option value="fill_missing">补缺失+生图</option>
-          <option value="full">全套重跑+生图</option>
-          <option value="image_only">只生图</option>
+          <option value="fill_missing">補缺失+生圖</option>
+          <option value="full">全套重跑+生圖</option>
+          <option value="image_only">只生圖</option>
         </select>
-        <button id="btnBatchCover" class="ghost">🖼 批量生成封面</button>
+        <button id="btnBatchCover" class="ghost">🖼 批次生成封面</button>
       </div>
-      <button id="btnBatchDelete" class="ghost danger">🗑 批量删除</button>
-      <button id="btnRetryDelete" class="ghost danger hidden" title="重试上次删除失败的角色">↻ 重试失败项</button>
-      <button id="btnBatchExport" class="ghost">📦 批量导出</button>
-      <button id="btnArcaSync" class="ghost" title="导出勾选角色到 POPOP：弹窗可选强制重推/同时推送帖子">☁️ 导出到POPOP</button>
-      <button id="btnStorageMigrate" class="ghost" title="把本地 data/ 存量数据全量迁移到 arca 通用存储（JSON 记录→存储中台，图片→OSS）。幂等可重跑；需已配置 ARCA_STORAGE_KEY">☁️⇪ 存量迁移到云端</button>
+      <button id="btnBatchDelete" class="ghost danger">🗑 批次刪除</button>
+      <button id="btnRetryDelete" class="ghost danger hidden" title="重試上次刪除失敗的角色">↻ 重試失敗項</button>
+      <button id="btnBatchExport" class="ghost">📦 批次匯出</button>
+      <button id="btnArcaSync" class="ghost" title="匯出勾選角色到 POPOP：彈窗可選強制重推/同時推送帖子">☁️ 匯出到POPOP</button>
+      <button id="btnStorageMigrate" class="ghost" title="把本地 data/ 存量資料全量遷移到 arca 通用儲存（JSON 記錄→儲存中臺，圖片→OSS）。冪等可重跑；需已配置 ARCA_STORAGE_KEY">☁️⇪ 存量遷移到雲端</button>
       <span id="selCount" class="muted"></span>
     </div>
     <div id="charList" class="char-grid"></div>
@@ -120,45 +131,45 @@
 
   <!-- VIEW: IG POSTS -->
   <section id="view-igposts" class="view">
-    <h2>生成 INS 帖子（推断最近 9 条）</h2>
-    <p class="muted">根据角色兴趣、生活方式、在意的东西，推断 TA 最近会发的 9 条 ins。自拍(selfie)拼入重绘封面做图生图，photo 直接文生图，也可能是纯文本。</p>
+    <h2>生成 INS 帖子（推斷最近 9 條）</h2>
+    <p class="muted">根據角色興趣、生活方式、在意的東西，推斷 TA 最近會發的 9 條 ins。自拍(selfie)拼入重繪封面做圖生圖，photo 直接文生圖，也可能是純文字。</p>
     <div class="card">
       <div class="field">
-        <span>选择角色（勾选可批量生成；点击头像/卡片查看已生成帖子）</span>
+        <span>選擇角色（勾選可批次生成；點選頭像/卡片檢視已生成帖子）</span>
         <div id="igLangFilter" class="lang-filter"></div>
         <div id="igSourceFilter" class="lang-filter source-filter"></div>
         <div class="ig-toolbar">
-          <button id="btnIgSelAll" class="ghost">全选</button>
-          <button id="btnIgSelNone" class="ghost">取消选择</button>
-          <button id="btnIgBatchDelete" class="ghost danger">🗑 批量删除</button>
-          <button id="btnIgRetryDelete" class="ghost danger hidden" title="重试上次删除失败的角色">↻ 重试失败项</button>
+          <button id="btnIgSelAll" class="ghost">全選</button>
+          <button id="btnIgSelNone" class="ghost">取消選擇</button>
+          <button id="btnIgBatchDelete" class="ghost danger">🗑 批次刪除</button>
+          <button id="btnIgRetryDelete" class="ghost danger hidden" title="重試上次刪除失敗的角色">↻ 重試失敗項</button>
           <span id="igSelCount" class="muted"></span>
         </div>
         <div id="igCharGrid" class="char-grid ig-char-grid"></div>
       </div>
       <div class="row">
         <label class="field small">
-          <span>帖子条数（选填）</span>
-          <input type="number" id="igCount" placeholder="空=模型规划3~9条" min="3" max="9" />
+          <span>帖子條數（選填）</span>
+          <input type="number" id="igCount" placeholder="空=模型規劃3~9條" min="3" max="9" />
         </label>
         <label class="check">
-          <input type="checkbox" id="igWithImages" checked /> 同时生成配图
+          <input type="checkbox" id="igWithImages" checked /> 同時生成配圖
         </label>
       </div>
         <label class="field small track-field">
-          <span>生成链路</span>
+          <span>生成鏈路</span>
           <select id="igTrack" class="track-sel">
-            <option value="">沿用角色原链路</option>
-            <option value="real">链路一：真实人设</option>
-            <option value="light">链路二：轻剧情</option>
-            <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
-            <option value="adult">链路三：成人向</option>
-          <option value="kdrama">链路四：韩剧</option>
-          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
+            <option value="">沿用角色原鏈路</option>
+            <option value="real">鏈路一：真實人設</option>
+            <option value="light">鏈路二：輕劇情</option>
+            <option value="flirt">鏈路二·荷爾蒙：輕劇情+張力（擦而不黃）</option>
+            <option value="adult">鏈路三：成人向</option>
+          <option value="kdrama">鏈路四：韓劇</option>
+          <option value="nonhuman">鏈路五：非人物（獸人/動物/外星人…）</option>
           </select>
         </label>
-      <button id="btnIg" class="primary">为勾选角色生成 INS 帖子</button>
-      <button id="btnArcaSyncPosts" class="ghost" title="把勾选角色的最近一批 INS 帖子同步到 arca-i18n（未同步过的角色会先创建角色）">☁️ 同步帖子到 arca</button>
+      <button id="btnIg" class="primary">為勾選角色生成 INS 帖子</button>
+      <button id="btnArcaSyncPosts" class="ghost" title="把勾選角色的最近一批 INS 帖子同步到 arca-i18n（未同步過的角色會先建立角色）">☁️ 同步帖子到 arca</button>
       <div id="igStatus" class="status"></div>
     </div>
     <h3 id="igViewingTitle" class="ig-viewing-title"></h3>
@@ -167,56 +178,56 @@
 
   <!-- VIEW: LANDING -->
   <section id="view-landing" class="view">
-    <h2>生成角色落地页</h2>
-    <p class="muted">用角色人设 + 重绘封面，对话式生成一屏 ins 风格的角色主页（展示页）。可选画风预设或自由描述，生成后可在右侧编辑代码并继续追加要求迭代。</p>
+    <h2>生成角色落地頁</h2>
+    <p class="muted">用角色人設 + 重繪封面，對話式生成一屏 ins 風格的角色主頁（展示頁）。可選畫風預設或自由描述，生成後可在右側編輯程式碼並繼續追加要求迭代。</p>
     <div class="landing-grid">
       <div class="landing-left card">
         <label class="field">
-          <span>选择角色（勾选可批量生成；点击卡片载入右侧编辑/迭代）</span>
+          <span>選擇角色（勾選可批次生成；點選卡片載入右側編輯/迭代）</span>
           <div id="ldLangFilter" class="lang-filter"></div>
           <div id="ldSourceFilter" class="lang-filter source-filter"></div>
           <div class="ig-toolbar">
-            <button id="btnLdSelAll" class="ghost">全选</button>
-            <button id="btnLdSelNone" class="ghost">取消选择</button>
+            <button id="btnLdSelAll" class="ghost">全選</button>
+            <button id="btnLdSelNone" class="ghost">取消選擇</button>
             <span id="ldSelCount" class="muted"></span>
           </div>
           <div id="ldCharGrid" class="char-grid ig-char-grid"></div>
         </label>
         <label class="field">
-          <span>页面模板</span>
+          <span>頁面模板</span>
           <select id="ldVariant" class="lstyle-input"></select>
           <span id="ldVariantDesc" class="muted" style="font-size:11px;margin-top:4px"></span>
         </label>
         <div class="field">
-          <span>风格（选填，默认按 prompt 内置风格生成）</span>
+          <span>風格（選填，預設按 prompt 內建風格生成）</span>
           <div id="ldStyleChips" class="lstyle-chips"></div>
-          <input id="ldStyleInput" class="lstyle-input" placeholder="留空即用默认风格；如需覆盖可输入，如「暗黑学院」…" />
+          <input id="ldStyleInput" class="lstyle-input" placeholder="留空即用預設風格；如需覆蓋可輸入，如「暗黑學院」…" />
         </div>
         <label class="field">
-          <span>要求 / 追加修改（选填）</span>
-          <textarea id="ldReq" rows="3" placeholder="首次可留空（自动套用设计指令）。已生成后在此输入「加一个歌单模块」「换成深色」等迭代。"></textarea>
+          <span>要求 / 追加修改（選填）</span>
+          <textarea id="ldReq" rows="3" placeholder="首次可留空（自動套用設計指令）。已生成後在此輸入「加一個歌單模組」「換成深色」等迭代。"></textarea>
         </label>
         <div class="row">
-          <button id="btnLanding" class="primary">生成落地页</button>
-          <button id="btnLandingReset" class="ghost" title="清空当前代码，下次从零生成">重置</button>
+          <button id="btnLanding" class="primary">生成落地頁</button>
+          <button id="btnLandingReset" class="ghost" title="清空當前程式碼，下次從零生成">重置</button>
         </div>
         <div id="ldStatus" class="status"></div>
         <div id="ldHistory" class="ld-history"></div>
       </div>
       <div class="landing-right">
         <div class="ld-rhead">
-          <span class="ld-title">页面 · HTML</span>
+          <span class="ld-title">頁面 · HTML</span>
           <div class="ld-seg" id="ldSeg">
-            <button data-v="preview" class="on">预览</button>
-            <button data-v="code">代码</button>
+            <button data-v="preview" class="on">預覽</button>
+            <button data-v="code">程式碼</button>
           </div>
-          <button id="ldSave" class="primary" title="保存当前 HTML（含手改），导出即用这份">保存</button>
-          <button id="ldCopy" class="ghost">复制</button>
-          <button id="ldOpen" class="ghost">新窗口打开</button>
+          <button id="ldSave" class="primary" title="儲存當前 HTML（含手改），匯出即用這份">儲存</button>
+          <button id="ldCopy" class="ghost">複製</button>
+          <button id="ldOpen" class="ghost">新視窗開啟</button>
         </div>
         <div class="ld-body preview-on">
           <iframe id="ldFrame" sandbox="allow-scripts allow-popups"></iframe>
-          <textarea id="ldEditor" spellcheck="false" class="mono hidden" placeholder="生成的 HTML 会显示在这里，可直接编辑。"></textarea>
+          <textarea id="ldEditor" spellcheck="false" class="mono hidden" placeholder="生成的 HTML 會顯示在這裡，可直接編輯。"></textarea>
         </div>
       </div>
     </div>
@@ -225,64 +236,64 @@
   <!-- VIEW: CHAT -->
   <section id="view-chat" class="view">
     <h2>角色聊天</h2>
-    <p class="muted">选择平台上的角色，把人设拼入韩语聊天 prompt 后进行 KakaoTalk 风格实时对话。模型会按 JSON 数组返回，前端会渲染成聊天气泡。</p>
+    <p class="muted">選擇平臺上的角色，把人設拼入韓語聊天 prompt 後進行 KakaoTalk 風格實時對話。模型會按 JSON 陣列返回，前端會渲染成聊天氣泡。</p>
     <div class="chat-layout">
       <aside class="chat-sidebar card">
         <label class="field chat-search-field">
-          <span>选择角色</span>
-          <input id="chatSearch" type="text" placeholder="搜索角色名 / ID" />
+          <span>選擇角色</span>
+          <input id="chatSearch" type="text" placeholder="搜尋角色名 / ID" />
         </label>
         <div id="chatLangFilter" class="lang-filter"></div>
         <div id="chatCharGrid" class="chat-char-list"></div>
       </aside>
       <section class="chat-main card">
-        <div id="chatEmpty" class="chat-empty">先从左侧选择一个角色。</div>
+        <div id="chatEmpty" class="chat-empty">先從左側選擇一個角色。</div>
         <div id="chatPanel" class="chat-panel hidden">
           <div class="chat-head">
             <div class="chat-avatar" id="chatAvatar">?</div>
             <div>
-              <div id="chatTitle" class="chat-title">未选择角色</div>
+              <div id="chatTitle" class="chat-title">未選擇角色</div>
               <div id="chatSub" class="chat-sub muted"></div>
             </div>
             <div class="chat-mode-switch" id="chatModeSwitch">
               <button type="button" class="chat-mode-btn active" data-mode="normal">普通</button>
               <button type="button" class="chat-mode-btn" data-mode="anonymous">匿名</button>
             </div>
-            <button id="btnChatHistory" class="ghost" type="button">历史</button>
-            <button id="btnChatNew" class="ghost">新对话</button>
+            <button id="btnChatHistory" class="ghost" type="button">歷史</button>
+            <button id="btnChatNew" class="ghost">新對話</button>
           </div>
           <details class="chat-context" id="chatHistoryBox" hidden>
-            <summary>历史对话</summary>
+            <summary>歷史對話</summary>
             <div id="chatHistoryList" class="chat-history-list"></div>
           </details>
           <details class="chat-context">
-            <summary>本次聊天 prompt 模板（占位符如 {{name}} 会自动替换，留空用默认）</summary>
+            <summary>本次聊天 prompt 模板（佔位符如 {{name}} 會自動替換，留空用預設）</summary>
             <div class="chat-prompt-box">
-              <textarea id="chatPromptTpl" rows="8" placeholder="留空则使用默认模板。修改只对「新对话」生效。"></textarea>
+              <textarea id="chatPromptTpl" rows="8" placeholder="留空則使用預設模板。修改只對「新對話」生效。"></textarea>
               <div class="chat-prompt-actions">
-                <button id="btnChatTplReset" class="ghost" type="button">恢复默认模板</button>
+                <button id="btnChatTplReset" class="ghost" type="button">恢復預設模板</button>
                 <span id="chatTplHint" class="muted"></span>
               </div>
             </div>
           </details>
           <details class="chat-context">
-            <summary>对话上下文（选填，会拼进 prompt 的「相对方信息 / 今天」）</summary>
+            <summary>對話上下文（選填，會拼進 prompt 的「相對方資訊 / 今天」）</summary>
             <div class="chat-context-grid">
-              <label class="field"><span>当前关系 relationship</span><input id="chatRelationship" type="text" placeholder="例如：刚通过匿名匹配认识 / 暧昧中 / 前任" /></label>
-              <label class="field"><span>用户设定 user_persona</span><input id="chatUserPersona" type="text" placeholder="例如：首尔留学中的设计师，晚睡" /></label>
-              <label class="field"><span>对用户印象 user_impression</span><input id="chatUserImpression" type="text" placeholder="例如：回复慢但很会接梗" /></label>
-              <label class="field"><span>一起经历 plot_summary</span><input id="chatPlotSummary" type="text" placeholder="例如：昨天聊过咖啡和猫" /></label>
-              <label class="field"><span>用户位置 location</span><input id="chatLocation" type="text" placeholder="例如：서울 / 上海" /></label>
-              <label class="field"><span>天气 weather</span><input id="chatWeather" type="text" placeholder="例如：小雨，19°C" /></label>
-              <label class="field wide"><span>今天总结 day_summary</span><input id="chatDaySummary" type="text" placeholder="例如：今天工作有点累，晚上刚回到家" /></label>
+              <label class="field"><span>當前關係 relationship</span><input id="chatRelationship" type="text" placeholder="例如：剛透過匿名匹配認識 / 曖昧中 / 前任" /></label>
+              <label class="field"><span>使用者設定 user_persona</span><input id="chatUserPersona" type="text" placeholder="例如：首爾留學中的設計師，晚睡" /></label>
+              <label class="field"><span>對使用者印象 user_impression</span><input id="chatUserImpression" type="text" placeholder="例如：回覆慢但很會接梗" /></label>
+              <label class="field"><span>一起經歷 plot_summary</span><input id="chatPlotSummary" type="text" placeholder="例如：昨天聊過咖啡和貓" /></label>
+              <label class="field"><span>使用者位置 location</span><input id="chatLocation" type="text" placeholder="例如：서울 / 上海" /></label>
+              <label class="field"><span>天氣 weather</span><input id="chatWeather" type="text" placeholder="例如：小雨，19°C" /></label>
+              <label class="field wide"><span>今天總結 day_summary</span><input id="chatDaySummary" type="text" placeholder="例如：今天工作有點累，晚上剛回到家" /></label>
               <label class="field wide"><span>今日日程 day_schedule</span><textarea id="chatDaySchedule" rows="2" placeholder="例如：09:00–12:00 | 작업실 | 검은 후드 | 피곤함 | 회의, 계속 메시지를 확인함"></textarea></label>
             </div>
           </details>
           <div id="chatStatus" class="status"></div>
           <div id="chatMessages" class="chat-messages"></div>
           <form id="chatForm" class="chat-input-row">
-            <textarea id="chatInput" rows="2" placeholder="输入你要发给角色的话。Enter 发送，Shift+Enter 换行。"></textarea>
-            <button id="btnChatSend" class="primary" type="submit">发送</button>
+            <textarea id="chatInput" rows="2" placeholder="輸入你要發給角色的話。Enter 傳送，Shift+Enter 換行。"></textarea>
+            <button id="btnChatSend" class="primary" type="submit">傳送</button>
           </form>
         </div>
       </section>
@@ -291,43 +302,43 @@
 
   <!-- VIEW: POSTS -->
   <section id="view-posts" class="view">
-    <h2>批量生产帖子</h2>
+    <h2>批次生產帖子</h2>
     <div class="card">
       <label class="field">
-        <span>选择角色</span>
+        <span>選擇角色</span>
         <div id="postLangFilter" class="lang-filter"></div>
         <div id="postSourceFilter" class="lang-filter source-filter"></div>
         <div class="row" style="gap:8px;align-items:center">
           <select id="postChar" style="flex:1"></select>
-          <button id="btnPostDeleteChar" class="ghost danger" title="删除当前选中的角色（连同其封面/帖子/落地页，不可恢复）">🗑 删除该角色</button>
+          <button id="btnPostDeleteChar" class="ghost danger" title="刪除當前選中的角色（連同其封面/帖子/落地頁，不可恢復）">🗑 刪除該角色</button>
         </div>
       </label>
       <div class="field">
-        <span>勾选帖子类型</span>
+        <span>勾選帖子型別</span>
         <div id="postTypes" class="type-list"></div>
       </div>
       <div class="row">
         <label class="field small">
-          <span>每类生成条数</span>
+          <span>每類生成條數</span>
           <input type="number" id="countPerType" value="2" min="1" max="10" />
         </label>
         <label class="check">
-          <input type="checkbox" id="withImages" checked /> 同时生成配图
+          <input type="checkbox" id="withImages" checked /> 同時生成配圖
         </label>
       </div>
       <label class="field track-field">
-        <span>生成链路</span>
+        <span>生成鏈路</span>
         <select id="postTrack" class="track-sel">
-          <option value="">沿用角色原链路</option>
-          <option value="real">链路一：真实人设</option>
-          <option value="light">链路二：轻剧情</option>
-          <option value="flirt">链路二·荷尔蒙：轻剧情+张力（擦而不黄）</option>
-          <option value="adult">链路三：成人向</option>
-          <option value="kdrama">链路四：韩剧</option>
-          <option value="nonhuman">链路五：非人物（兽人/动物/外星人…）</option>
+          <option value="">沿用角色原鏈路</option>
+          <option value="real">鏈路一：真實人設</option>
+          <option value="light">鏈路二：輕劇情</option>
+          <option value="flirt">鏈路二·荷爾蒙：輕劇情+張力（擦而不黃）</option>
+          <option value="adult">鏈路三：成人向</option>
+          <option value="kdrama">鏈路四：韓劇</option>
+          <option value="nonhuman">鏈路五：非人物（獸人/動物/外星人…）</option>
         </select>
       </label>
-      <button id="btnPosts" class="primary">批量生成帖子</button>
+      <button id="btnPosts" class="primary">批次生成帖子</button>
       <div id="postStatus" class="status"></div>
     </div>
     <div id="postResults" class="post-grid"></div>
@@ -335,33 +346,33 @@
 
   <!-- VIEW: STYLES -->
   <section id="view-styles" class="view">
-    <h2>画风库</h2>
-    <p class="muted">画风词稍后批量提供。可在此粘贴 JSON 覆盖（数组，元素含 id / name / prompt）。</p>
+    <h2>畫風庫</h2>
+    <p class="muted">畫風詞稍後批次提供。可在此貼上 JSON 覆蓋（陣列，元素含 id / name / prompt）。</p>
     <div class="card">
       <textarea id="stylesJson" rows="14" class="mono"></textarea>
-      <button id="btnSaveStyles" class="primary">保存画风库</button>
+      <button id="btnSaveStyles" class="primary">儲存畫風庫</button>
       <div id="styleStatus" class="status"></div>
     </div>
   </section>
 </main>
 
-<!-- 导出到 POPOP 选项对话框 -->
+<!-- 匯出到 POPOP 選項對話方塊 -->
 <dialog id="arcaSyncDialog" class="arca-dialog">
   <form method="dialog">
-    <h3>☁️ 导出到 POPOP</h3>
+    <h3>☁️ 匯出到 POPOP</h3>
     <p class="muted" id="arcaSyncDialogCount"></p>
     <label class="check">
       <input type="checkbox" id="arcaOptForce" />
-      强制重推（在 POPOP 重新创建全新角色；旧角色保留、不会删除）
+      強制重推（在 POPOP 重新建立全新角色；舊角色保留、不會刪除）
     </label>
     <label class="check">
       <input type="checkbox" id="arcaOptPosts" />
-      同时推送最近一批 INS 帖子（未同步过的帖子）
+      同時推送最近一批 INS 帖子（未同步過的帖子）
     </label>
-    <p class="muted small">不勾选时：未导出过的角色会创建；已导出过的原地更新（名称/性别/物种/简介/音色/开场白/可见性），无变化则跳过。</p>
+    <p class="muted small">不勾選時：未匯出過的角色會建立；已匯出過的原地更新（名稱/性別/物種/簡介/音色/開場白/可見性），無變化則跳過。</p>
     <div class="arca-dialog-actions">
       <button value="cancel" class="ghost" type="submit">取消</button>
-      <button value="ok" id="arcaSyncConfirm" class="primary" type="submit">开始导出</button>
+      <button value="ok" id="arcaSyncConfirm" class="primary" type="submit">開始匯出</button>
     </div>
   </form>
 </dialog>

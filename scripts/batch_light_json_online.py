@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""批量用「轻剧情(light track)」链路跑角色 —— 直接打线上服务(HTTP)。
+"""批次用「輕劇情(light track)」鏈路跑角色 —— 直接打線上服務(HTTP)。
 
-需求（本脚本）：
-- 输入是若干 JSON 文件（小红书导出），一个 item = 一个角色。
-- 每个角色只拼入该 item 的 desc（作为创作补充要求）+ images 里的【所有】图片（下载后作为视觉输入）。
-- 走线上链路，track=light（轻剧情），中日韩英四语言各生成一个本土化角色。
+需求（本指令碼）：
+- 輸入是若干 JSON 檔案（小紅書匯出），一個 item = 一個角色。
+- 每個角色只拼入該 item 的 desc（作為創作補充要求）+ images 裡的【所有】圖片（下載後作為視覺輸入）。
+- 走線上鏈路，track=light（輕劇情），中日韓英四語言各生成一個本土化角色。
 - source="mengnv"。
-- 只生成角色（人设），先不生成帖子，也不出封面（最轻负载）。
-- 全部数据落线上（服务器本身即线上存储）。
+- 只生成角色（人設），先不生成帖子，也不出封面（最輕負載）。
+- 全部資料落線上（伺服器本身即線上儲存）。
 
-断点续跑：进度写 data/batch_light_json_online_state.json（已完成的 item 唯一键）。
+斷點續跑：進度寫 data/batch_light_json_online_state.json（已完成的 item 唯一鍵）。
 
 用法：
   PYTHONPATH=. python3 scripts/batch_light_json_online.py [--limit N] [--concurrency 4]
@@ -39,18 +39,18 @@ JSON_FILES = [DL / "xhsTW.json", DL / "xhsTWN.json"]
 LANGS = "zh,ja,ko,en"
 SOURCE = "mengnv"
 TRACK = "light"
-COVER_STYLE = "realistic_portrait"   # 封面画风（写实杂志感，兼做后续自拍 i2i 人脸锚点）
+COVER_STYLE = "realistic_portrait"   # 封面畫風（寫實雜誌感，兼做後續自拍 i2i 人臉錨點）
 STATE_PATH = (Path(__file__).resolve().parent.parent
               / "data" / "batch_light_json_online_state.json")
 
 POLL_INTERVAL = 8
-PERSONA_TIMEOUT = 1800      # 单组人设(4语言并发) 给足超时
+PERSONA_TIMEOUT = 1800      # 單組人設(4語言併發) 給足超時
 DEFAULT_CONCURRENCY = 4
 DL_TIMEOUT = 120
 
 
 def _item_key(item: dict) -> str:
-    """item 的稳定唯一键：优先原始 url，否则对 desc+images 做哈希。"""
+    """item 的穩定唯一鍵：優先原始 url，否則對 desc+images 做雜湊。"""
     url = (item.get("url") or "").strip()
     if url:
         return url
@@ -64,7 +64,7 @@ def _load_items() -> list[dict]:
     items: list[dict] = []
     for f in JSON_FILES:
         if not f.exists():
-            print(f"  ⚠ 缺文件: {f}")
+            print(f"  ⚠ 缺檔案: {f}")
             continue
         data = json.loads(f.read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -72,7 +72,7 @@ def _load_items() -> list[dict]:
         for it in data:
             if isinstance(it, dict):
                 items.append(it)
-        print(f"  {f.name}: {sum(1 for x in data if isinstance(x, dict))} 个 item")
+        print(f"  {f.name}: {sum(1 for x in data if isinstance(x, dict))} 個 item")
     return items
 
 
@@ -108,7 +108,7 @@ def _wait_healthy(label: str = "") -> None:
     delay = 5
     waited = 0
     while not _healthy():
-        print(f"      ⏳ 服务器不可用，等待恢复{(' ('+label+')') if label else ''} "
+        print(f"      ⏳ 伺服器不可用，等待恢復{(' ('+label+')') if label else ''} "
               f"已等 {waited}s", flush=True)
         time.sleep(delay)
         waited += delay
@@ -116,7 +116,7 @@ def _wait_healthy(label: str = "") -> None:
 
 
 class TaskLost(Exception):
-    """任务在服务器端丢失（进程重启，内存态任务清空 → /api/tasks 返回 404）。"""
+    """任務在伺服器端丟失（程式重啟，記憶體態任務清空 → /api/tasks 返回 404）。"""
 
 
 def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Response:
@@ -136,7 +136,7 @@ def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Respo
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 1)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _poll(task_id: str, timeout: int, label: str) -> dict:
@@ -145,7 +145,7 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
     while time.time() < deadline:
         r = _req("GET", f"{BASE}/api/tasks/{task_id}", timeout=30, allow_404=True)
         if r.status_code == 404:
-            raise TaskLost(f"{label} 任务 {task_id} 丢失（服务器疑似重启）")
+            raise TaskLost(f"{label} 任務 {task_id} 丟失（伺服器疑似重啟）")
         t = r.json()
         if t.get("done_count") != last:
             last = t.get("done_count")
@@ -154,9 +154,9 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
         if t.get("status") == "done":
             return t.get("result") or {}
         if t.get("status") == "error":
-            raise RuntimeError(f"{label} 任务失败: {t.get('error')}")
+            raise RuntimeError(f"{label} 任務失敗: {t.get('error')}")
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
+    raise TimeoutError(f"{label} 輪詢超時 ({timeout}s)")
 
 
 _EXT_BY_CTYPE = {"jpeg": ".jpg", "jpg": ".jpg", "png": ".png",
@@ -164,7 +164,7 @@ _EXT_BY_CTYPE = {"jpeg": ".jpg", "jpg": ".jpg", "png": ".png",
 
 
 def _download_all(urls: list[str], tmp_dir: Path) -> list[Path]:
-    """下载该 item 的所有图片到本地临时目录，返回本地路径（失败的图跳过）。"""
+    """下載該 item 的所有圖片到本地臨時目錄，返回本地路徑（失敗的圖跳過）。"""
     paths: list[Path] = []
     for i, u in enumerate(urls):
         if not isinstance(u, str) or not u.lower().startswith("http"):
@@ -172,10 +172,10 @@ def _download_all(urls: list[str], tmp_dir: Path) -> list[Path]:
         try:
             r = requests.get(u, timeout=DL_TIMEOUT)
             if not r.ok or not r.content:
-                print(f"      ⚠ 图片下载失败 {r.status_code}: {u[:80]}", flush=True)
+                print(f"      ⚠ 圖片下載失敗 {r.status_code}: {u[:80]}", flush=True)
                 continue
         except requests.RequestException as e:
-            print(f"      ⚠ 图片下载异常: {e}", flush=True)
+            print(f"      ⚠ 圖片下載異常: {e}", flush=True)
             continue
         ctype = (r.headers.get("Content-Type") or "").lower()
         ext = ".png"
@@ -192,7 +192,7 @@ def _download_all(urls: list[str], tmp_dir: Path) -> list[Path]:
 def _create_group(desc: str, img_paths: list[Path],
                   with_cover: bool = True,
                   cover_style: str = COVER_STYLE) -> list[dict]:
-    """上传一个 item 的所有图 + desc → 人设(light, 4语言, source=mengnv) + 封面。"""
+    """上傳一個 item 的所有圖 + desc → 人設(light, 4語言, source=mengnv) + 封面。"""
     files = []
     handles = []
     try:
@@ -203,7 +203,7 @@ def _create_group(desc: str, img_paths: list[Path],
             files.append(("files", (p.name, fh, mime)))
         data = {
             "user_hint": desc or "",
-            "one_per_image": "false",   # 该 item 的所有图片合成一个角色
+            "one_per_image": "false",   # 該 item 的所有圖片合成一個角色
             "langs": LANGS,
             "with_cover": "true" if with_cover else "false",
             "cover_style_id": cover_style if with_cover else "",
@@ -216,7 +216,7 @@ def _create_group(desc: str, img_paths: list[Path],
     finally:
         for fh in handles:
             fh.close()
-    result = _poll(task_id, PERSONA_TIMEOUT, "人设+封面" if with_cover else "人设")
+    result = _poll(task_id, PERSONA_TIMEOUT, "人設+封面" if with_cover else "人設")
     chars = result.get("characters", [])
     if result.get("group_errors"):
         print(f"      ⚠ group_errors: {result['group_errors']}", flush=True)
@@ -226,13 +226,13 @@ def _create_group(desc: str, img_paths: list[Path],
 
 
 def _batch_cover(char_ids: list[str], cover_style: str) -> dict:
-    """为已建好的角色补封面（走服务端 /api/characters/batch_cover 异步任务）。"""
+    """為已建好的角色補封面（走服務端 /api/characters/batch_cover 非同步任務）。"""
     r = _req("POST", f"{BASE}/api/characters/batch_cover", json={
         "char_ids": char_ids, "style_id": cover_style,
         "use_reference": None, "mode": "fill_missing",
     }, timeout=120)
     task_id = r.json()["task_id"]
-    return _poll(task_id, PERSONA_TIMEOUT, "补封面")
+    return _poll(task_id, PERSONA_TIMEOUT, "補封面")
 
 
 def main() -> int:
@@ -245,7 +245,7 @@ def main() -> int:
     args = ap.parse_args()
     make_cover = not args.no_cover
 
-    print(f"线上服务: {BASE}")
+    print(f"線上服務: {BASE}")
     items = _load_items()
     state = load_state()
     done = set(state["done"])
@@ -270,12 +270,12 @@ def main() -> int:
 
     if args.dry_run:
         for key, desc, imgs in todo[:5]:
-            print(f"  样例: imgs={len(imgs)} desc={desc[:40]!r} key={key[:60]}")
-        print(f"[DRY] 计划跑 {len(todo)} 个角色（每个 4 语言）。")
+            print(f"  樣例: imgs={len(imgs)} desc={desc[:40]!r} key={key[:60]}")
+        print(f"[DRY] 計劃跑 {len(todo)} 個角色（每個 4 語言）。")
         return 0
 
     if not todo:
-        print("没有待跑角色。")
+        print("沒有待跑角色。")
         return 0
 
     conc = max(1, args.concurrency)
@@ -284,24 +284,24 @@ def main() -> int:
     tmp_root = STATE_PATH.parent / "batch_light_tmp"
     tmp_root.mkdir(parents=True, exist_ok=True)
 
-    # 补跑历史组的缺失封面（如首个"仅人设"组），不重建人设。
+    # 補跑歷史組的缺失封面（如首個"僅人設"組），不重建人設。
     if make_cover:
         pending_cov = [g for g in state["groups"]
                        if g.get("char_ids") and not g.get("cover_ok")]
         if pending_cov:
-            print(f"补封面：{len(pending_cov)} 个历史组（并发 {conc}）", flush=True)
+            print(f"補封面：{len(pending_cov)} 個歷史組（併發 {conc}）", flush=True)
 
             def _bf(g: dict) -> None:
                 try:
                     res = _batch_cover(g["char_ids"], args.cover_style)
                     if res.get("errors"):
-                        print(f"      ⚠ 补封面 errors {g.get('group_id')}: "
+                        print(f"      ⚠ 補封面 errors {g.get('group_id')}: "
                               f"{res['errors']}", flush=True)
                     with _STATE_LOCK:
                         g["cover_ok"] = True
                         save_state(state)
                 except Exception as e:  # noqa: BLE001
-                    print(f"      ✗ 补封面失败 {g.get('group_id')}: {e}", flush=True)
+                    print(f"      ✗ 補封面失敗 {g.get('group_id')}: {e}", flush=True)
 
             with ThreadPoolExecutor(max_workers=conc) as ex:
                 list(ex.map(_bf, pending_cov))
@@ -315,7 +315,7 @@ def main() -> int:
         try:
             local = _download_all(imgs, item_tmp)
             if not local and not desc:
-                raise RuntimeError("无可用图片且无 desc")
+                raise RuntimeError("無可用圖片且無 desc")
             chars = _create_group(desc, local, with_cover=make_cover,
                                    cover_style=args.cover_style)
             char_ids = [c["char_id"] for c in chars if c.get("char_id")]
@@ -334,7 +334,7 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             with _STATE_LOCK:
                 counters["err"] += 1
-            print(f"      ✗ 失败[{idx}]: {e}", flush=True)
+            print(f"      ✗ 失敗[{idx}]: {e}", flush=True)
         finally:
             for p in item_tmp.glob("*"):
                 try:
@@ -352,8 +352,8 @@ def main() -> int:
 
     with _STATE_LOCK:
         done_n = len(state["done"])
-    print(f"\n完成: 成功 {counters['ok']} 个, 失败 {counters['err']} 个。"
-          f"累计完成 {done_n} 个角色。")
+    print(f"\n完成: 成功 {counters['ok']} 個, 失敗 {counters['err']} 個。"
+          f"累計完成 {done_n} 個角色。")
     return 0 if counters["err"] == 0 else 1
 
 

@@ -1,9 +1,9 @@
-"""轻量后台任务系统：长任务异步执行 + 进度轮询。
+"""輕量後臺任務系統：長任務非同步執行 + 進度輪詢。
 
-任务状态存 SQLite（data/tasks.db，WAL 模式），跨进程共享——支持 uvicorn 多
-worker：任一 worker 都能读到任意 worker 创建/更新的任务状态，避免轮询被路由到
-另一 worker 时误报 404。任务的实际执行仍在“收到该请求的 worker”的本地线程池里，
-只有状态经由 SQLite 共享。公共 API（create_task/bump/get_task/run）签名不变。
+任務狀態存 SQLite（data/tasks.db，WAL 模式），跨程式共享——支援 uvicorn 多
+worker：任一 worker 都能讀到任意 worker 建立/更新的任務狀態，避免輪詢被路由到
+另一 worker 時誤報 404。任務的實際執行仍在“收到該請求的 worker”的本地執行緒池裡，
+只有狀態經由 SQLite 共享。公共 API（create_task/bump/get_task/run）簽名不變。
 """
 import json
 import os
@@ -18,9 +18,9 @@ from pathlib import Path
 from . import config
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=8)
-_TTL = 3600                      # 已结束任务保留时长（秒）
+_TTL = 3600                      # 已結束任務保留時長（秒）
 _DB_PATH = Path(config.DATA_DIR) / "tasks.db"
-_LOCAL = threading.local()       # 每线程一个 sqlite 连接（sqlite 连接非线程安全）
+_LOCAL = threading.local()       # 每執行緒一個 sqlite 連線（sqlite 連線非執行緒安全）
 _INIT_LOCK = threading.Lock()
 _INITED = False
 
@@ -90,7 +90,7 @@ def _gc() -> None:
 
 
 def create_task(kind: str, total: int = 0) -> str:
-    """注册一个任务，返回 task_id。"""
+    """註冊一個任務，返回 task_id。"""
     _gc()
     tid = uuid.uuid4().hex[:12]
     _conn().execute(
@@ -102,7 +102,7 @@ def create_task(kind: str, total: int = 0) -> str:
 
 
 def bump(tid: str, n: int = 1) -> None:
-    """推进进度计数（跨进程原子自增）。"""
+    """推進進度計數（跨程式原子自增）。"""
     _conn().execute(
         "UPDATE tasks SET done_count = done_count + ? WHERE id = ?", (n, tid)
     )
@@ -118,7 +118,7 @@ def get_task(tid: str) -> dict | None:
 
 
 def run(tid: str, fn) -> None:
-    """在后台线程池里执行 fn(tid)，把返回值存为 result。"""
+    """在後臺執行緒池裡執行 fn(tid)，把返回值存為 result。"""
     def _wrap():
         try:
             result = fn(tid)
@@ -126,7 +126,7 @@ def run(tid: str, fn) -> None:
                 "UPDATE tasks SET status='done', result=?, ended=? WHERE id=?",
                 (json.dumps(result, ensure_ascii=False), _now(), tid),
             )
-        except Exception as e:  # noqa: BLE001 任务内任何异常都要落到状态里
+        except Exception as e:  # noqa: BLE001 任務內任何異常都要落到狀態裡
             _conn().execute(
                 "UPDATE tasks SET status='error', error=?, traceback=?, "
                 "ended=? WHERE id=?",

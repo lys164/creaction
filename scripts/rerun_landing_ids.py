@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""按给定角色 id 名单重跑落地页(default 变体)，打线上服务。
+"""按給定角色 id 名單重跑落地頁(default 變體)，打線上服務。
 
-复用 batch_landing_online 的健壮轮询(_gen_landing / _poll / 断线重试 / 任务丢失
-线上复核)。名单默认取 data/chat_button_targets.json 的 "all"。并发默认 3。
+複用 batch_landing_online 的健壯輪詢(_gen_landing / _poll / 斷線重試 / 任務丟失
+線上複核)。名單預設取 data/chat_button_targets.json 的 "all"。併發預設 3。
 
-进度写 data/rerun_ids_state.json，天然幂等：done 里的跳过。中断后重跑自动续。
+進度寫 data/rerun_ids_state.json，天然冪等：done 裡的跳過。中斷後重跑自動續。
 
 用法：
   python3 scripts/rerun_landing_ids.py                       # 跑 chat_button_targets.json 的 all
@@ -20,7 +20,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# 复用同目录 batch_landing_online 的底层能力
+# 複用同目錄 batch_landing_online 的底層能力
 import batch_landing_online as base  # noqa: E402
 
 _LOCK = threading.Lock()
@@ -51,8 +51,8 @@ def save_state(state: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--targets", default=str(DEFAULT_TARGETS))
-    ap.add_argument("--key", default="all", help="targets json 里的键(all/heermeng/mengnv)")
-    ap.add_argument("--ids", default="", help="逗号分隔的 id，优先于 --targets")
+    ap.add_argument("--key", default="all", help="targets json 裡的鍵(all/heermeng/mengnv)")
+    ap.add_argument("--ids", default="", help="逗號分隔的 id，優先於 --targets")
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--variant", default="default")
     ap.add_argument("--dry-run", action="store_true")
@@ -71,16 +71,16 @@ def main() -> int:
     done = set(state["done"])
     todo = [c for c in ids if c not in done]
 
-    print(f"线上服务: {base.BASE}  变体: {args.variant}")
-    print(f"名单共 {len(ids)}，已完成跳过 {len(ids) - len(todo)}，本轮重跑 {len(todo)}")
+    print(f"線上服務: {base.BASE}  變體: {args.variant}")
+    print(f"名單共 {len(ids)}，已完成跳過 {len(ids) - len(todo)}，本輪重跑 {len(todo)}")
 
     if args.dry_run:
         for c in todo[:8]:
-            print("  样例:", c)
-        print(f"[DRY] 计划重跑 {len(todo)} 个。")
+            print("  樣例:", c)
+        print(f"[DRY] 計劃重跑 {len(todo)} 個。")
         return 0
     if not todo:
-        print("没有待重跑的角色。")
+        print("沒有待重跑的角色。")
         return 0
 
     total = len(todo)
@@ -105,7 +105,7 @@ def main() -> int:
                     state["failed"].append(cid)
                 save_state(state)
                 counters["err"] += 1
-            print(f"      失败 {cid}: {e}", flush=True)
+            print(f"      失敗 {cid}: {e}", flush=True)
 
     jobs = [(i + 1, cid) for i, cid in enumerate(todo)]
     with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as ex:

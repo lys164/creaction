@@ -4,7 +4,7 @@ from pathlib import Path
 
 D = Path(__file__).resolve().parent.parent / "data" / "compare_youxing"
 ORDER = [
-    ("A_reasoning_gemini", "当前线上：有 reasoning + gemini"),
+    ("A_reasoning_gemini", "當前線上：有 reasoning + gemini"),
     ("B_noreason_gemini", "去掉 reasoning + gemini"),
     ("C_reasoning_gpt5", "有 reasoning + gpt-5"),
     ("D_noreason_gpt5", "去掉 reasoning + gpt-5"),
@@ -15,8 +15,8 @@ def excl(s: str) -> int:
     return len(re.findall(r"[!！]", s or ""))
 
 
-lines = ["# 游星 帖子四版对比（zh/real，同一 persona / 同 prompt / 同 API 池）", ""]
-lines.append("| 版本 | 说明 | 叹号均值 | 高亢帖(>=3) | 平静帖(0) |")
+lines = ["# 遊星 帖子四版對比（zh/real，同一 persona / 同 prompt / 同 API 池）", ""]
+lines.append("| 版本 | 說明 | 歎號均值 | 高亢帖(>=3) | 平靜帖(0) |")
 lines.append("|---|---|---|---|---|")
 
 data = {}
@@ -34,7 +34,7 @@ for key, desc in ORDER:
 
 for key, desc in ORDER:
     d = data[key]
-    lines.append(f"\n\n## {key}  —  {desc}  (model={d['model']}, {d['n']} 条)")
+    lines.append(f"\n\n## {key}  —  {desc}  (model={d['model']}, {d['n']} 條)")
     pr = d.get("persona_read")
     if pr:
         lines.append("persona_read:")

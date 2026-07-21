@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""扫描 heermeng+mengnv 线上落地页，找出两类需重跑的页面：
-  A. 带聊天/回复/发消息 按钮或可点击 CTA（button/a/含 btn·cta·action class 且文案含召唤动词）
-  B. 带固定浮层组件（position:fixed / position:sticky 的可见块，如底部悬浮消息条、悬浮 CTA）
+"""掃描 heermeng+mengnv 線上落地頁，找出兩類需重跑的頁面：
+  A. 帶聊天/回覆/發訊息 按鈕或可點選 CTA（button/a/含 btn·cta·action class 且文案含召喚動詞）
+  B. 帶固定浮層元件（position:fixed / position:sticky 的可見塊，如底部懸浮訊息條、懸浮 CTA）
 
-输出并集 -> data/rerun_targets_btn_fixed.json ({"all":[...], "button":[...], "fixed":[...]})
+輸出並集 -> data/rerun_targets_btn_fixed.json ({"all":[...], "button":[...], "fixed":[...]})
 """
 import json
 import re
@@ -17,9 +17,9 @@ BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 OUT = Path(__file__).resolve().parent.parent / "data" / "rerun_targets_btn_fixed.json"
 
 CTA_KW = re.compile(
-    r"聊聊|聊天|回复|回覆|发消息|發消息|发条消息|传讯息|傳訊息|私信|说句话|說句話|"
-    r"去对话|去對話|和\s*TA|跟\s*TA|开始聊|開始聊|立即回复|立即回覆|马上聊|馬上聊|"
-    r"现在回复|現在回復|解锁|解鎖|打开\s*Popop|開啟\s*Popop|"
+    r"聊聊|聊天|回覆|回覆|發訊息|發訊息|發條訊息|傳訊息|傳訊息|私信|說句話|說句話|"
+    r"去對話|去對話|和\s*TA|跟\s*TA|開始聊|開始聊|立即回覆|立即回覆|馬上聊|馬上聊|"
+    r"現在回覆|現在回復|解鎖|解鎖|開啟\s*Popop|開啟\s*Popop|"
     r"답장|대화|메시지\s*보내|채팅|지금\s*답장|열어|"
     r"返信|話しに|メッセージ|チャット|開いて|"
     r"reply|message|chat|talk\s*to|say\s*hi|open\s*popop|start\s*chat|unlock",
@@ -45,11 +45,11 @@ def _has_button(html: str) -> bool:
 
 
 def _has_fixed(html: str) -> bool:
-    """页面里存在 position:fixed 或 sticky 的定位（悬浮/吸附组件）。
+    """頁面裡存在 position:fixed 或 sticky 的定位（懸浮/吸附元件）。
 
-    落地页设计规范是纯滚动阅读，不应有固定浮层。sticky 顶栏也算（截图里那种
-    浮层预告条本质是脱离文档流的固定块）。忽略 backdrop/伪元素等噪声：只要
-    出现 position:fixed / position:sticky 即判定。"""
+    落地頁設計規範是純滾動閱讀，不應有固定浮層。sticky 頂欄也算（截圖裡那種
+    浮層預告條本質是脫離檔案流的固定塊）。忽略 backdrop/偽元素等噪聲：只要
+    出現 position:fixed / position:sticky 即判定。"""
     return bool(re.search(r'position\s*:\s*(fixed|sticky)', html, re.I))
 
 
@@ -76,7 +76,7 @@ def main() -> int:
         btn = [cid for cid, b, f in rows if b]
         fixed = [cid for cid, b, f in rows if f]
         both = [cid for cid, b, f in rows if b or f]
-        print(f"\n==== {src}: 扫描 {len(ids)} → 按钮 {len(btn)}，固定浮层 {len(fixed)}，并集 {len(both)} ====")
+        print(f"\n==== {src}: 掃描 {len(ids)} → 按鈕 {len(btn)}，固定浮層 {len(fixed)}，並集 {len(both)} ====")
         result["button"] += btn
         result["fixed"] += fixed
         result["by_source"][src] = {"button": len(btn), "fixed": len(fixed), "union": len(both)}
@@ -86,7 +86,7 @@ def main() -> int:
     seen = set()
     result["all"] = [x for x in result["all"] if not (x in seen or seen.add(x))]
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n并集共 {len(result['all'])} 个待重跑，已写 {OUT}")
+    print(f"\n並集共 {len(result['all'])} 個待重跑，已寫 {OUT}")
     print("分解:", result["by_source"])
     return 0
 

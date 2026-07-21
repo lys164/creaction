@@ -1,8 +1,8 @@
-"""音色库：按语种分组的 Fish audio 音色。音色ID = 模型ID。
+"""音色庫：按語種分組的 Fish audio 音色。音色ID = 模型ID。
 
-不同语言可选的音色不同（data/voices.json 由数据表生成）。本项目人设是
-【按语种各自原生创作】的，所以在每个语言的人设 prompt 里只拼【该语种】的
-音色清单，让模型按角色性别从中选一个，voice 字段回填所选音色的【模型ID】。
+不同語言可選的音色不同（data/voices.json 由資料表生成）。本專案人設是
+【按語種各自原生創作】的，所以在每個語言的人設 prompt 裡只拼【該語種】的
+音色清單，讓模型按角色性別從中選一個，voice 欄位回填所選音色的【模型ID】。
 """
 import json
 from pathlib import Path
@@ -22,7 +22,7 @@ def _load() -> dict:
 
 
 def list_for(lang: str) -> list[dict]:
-    """该语种的音色列表 [{name, gender, id}, ...]。"""
+    """該語種的音色列表 [{name, gender, id}, ...]。"""
     return _load().get(lang, [])
 
 
@@ -31,7 +31,7 @@ def valid_ids(lang: str) -> set[str]:
 
 
 def prompt_block(lang: str, gender: str | None = None) -> str:
-    """渲染成可拼进 prompt 的音色清单文本；gender(男/女) 给定时优先只列该性别。"""
+    """渲染成可拼進 prompt 的音色清單文字；gender(男/女) 給定時優先只列該性別。"""
     items = list_for(lang)
     if gender:
         same = [v for v in items if v.get("gender") == gender]

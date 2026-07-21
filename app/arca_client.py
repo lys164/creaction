@@ -1,4 +1,4 @@
-"""arca-i18n HTTP 客户端：JWT / TOS 上传 / 建角色(异步) / 发帖。"""
+"""arca-i18n HTTP 客戶端：JWT / TOS 上傳 / 建角色(非同步) / 發帖。"""
 import json
 import re
 import threading
@@ -14,7 +14,7 @@ class ArcaError(Exception):
     pass
 
 
-# 日志脱敏：凭证类字段只留前 8 位（含 gen_jwt/tos_credential 响应里的 token/秘钥）
+# 日誌脫敏：憑證類欄位只留前 8 位（含 gen_jwt/tos_credential 響應裡的 token/秘鑰）
 _REDACT_JSON = re.compile(
     r'("(?:jwt_token|session_token|secret_access_key|access_key_id|help_header)"\s*:\s*")([^"]{8})[^"]*(")')
 _BODY_LIMIT = 4000000
@@ -27,14 +27,14 @@ def _redact(text: str) -> str:
 def _clip(text: str) -> str:
     text = text or ""
     if len(text) > _BODY_LIMIT:
-        return f"{text[:_BODY_LIMIT]}…(截断，共{len(text)}字符)"
+        return f"{text[:_BODY_LIMIT]}…(截斷，共{len(text)}字元)"
     return text
 
 
 def _post(url: str, payload: dict, headers: dict, timeout: int):
-    """所有 arca HTTP 请求的收口：ARCA_DEBUG=1 时打印原始请求/响应（脱敏）。"""
+    """所有 arca HTTP 請求的收口：ARCA_DEBUG=1 時列印原始請求/響應（脫敏）。"""
     if config.ARCA_DEBUG:
-        print(f"\n--- arca 请求 ---\nPOST {url}")
+        print(f"\n--- arca 請求 ---\nPOST {url}")
         for k, v in (headers or {}).items():
             if k.lower() == "authorization":
                 v = f"{v[:22]}…<redacted>"
@@ -43,12 +43,12 @@ def _post(url: str, payload: dict, headers: dict, timeout: int):
         print(f"\n{_clip(_redact(body))}")
     resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
     if config.ARCA_DEBUG:
-        print(f"--- arca 响应 HTTP {resp.status_code} ---\n{_clip(_redact(resp.text))}\n")
+        print(f"--- arca 響應 HTTP {resp.status_code} ---\n{_clip(_redact(resp.text))}\n")
     return resp
 
 
 def get_token() -> str:
-    """返回裸 JWT（不含 Bearer 前缀）。"""
+    """返回裸 JWT（不含 Bearer 字首）。"""
     if config.ARCA_JWT_MODE == "endpoint":
         if not config.ARCA_BASE_URL:
             raise ArcaError("ARCA_BASE_URL 未配置")
@@ -63,9 +63,9 @@ def get_token() -> str:
         if not tok:
             raise ArcaError(f"gen_jwt_token 未返回 token: {r.text[:200]}")
         return tok
-    # local 自签
+    # local 自籤
     if not config.ARCA_ACCESS_SECRET:
-        raise ArcaError("ARCA_ACCESS_SECRET 未配置（本地自签模式必需）")
+        raise ArcaError("ARCA_ACCESS_SECRET 未配置（本地自籤模式必需）")
     if not config.ARCA_UID:
         raise ArcaError("ARCA_UID 未配置")
     payload = {
@@ -80,10 +80,10 @@ def auth_header() -> dict:
 
 
 def _data(resp) -> dict:
-    """取 arca 统一响应壳 {code,msg,data}；code!=0 抛业务错误。
+    """取 arca 統一響應殼 {code,msg,data}；code!=0 拋業務錯誤。
 
-    go-zero 参数解析失败返回 HTTP 400 纯文本、JWT 失败 401 空 body——
-    把响应体带进异常，否则只剩 "400 Bad Request" 没法定位。
+    go-zero 引數解析失敗返回 HTTP 400 純文字、JWT 失敗 401 空 body——
+    把響應體帶進異常，否則只剩 "400 Bad Request" 沒法定位。
     """
     if resp.status_code >= 400:
         raise ArcaError(
@@ -91,20 +91,20 @@ def _data(resp) -> dict:
             f"{(resp.text or '').strip()[:500]}")
     body = resp.json() or {}
     if body.get("code", 0) not in (0, None):
-        raise ArcaError(f"arca 业务错误 code={body.get('code')} msg={body.get('msg')}")
+        raise ArcaError(f"arca 業務錯誤 code={body.get('code')} msg={body.get('msg')}")
     return body.get("data") or {}
 
 
 def _region_for_lang(lang: str) -> str:
-    """按角色语言解析 X-Region（两位大写国家码）。
+    """按角色語言解析 X-Region（兩位大寫國家碼）。
 
-    优先级：语言标签自带的地区码（zh-HK/zh-Hant-TW/en-GB）→ ARCA_REGION_BY_LANG
-    （精确标签，再退语言主码，如 zh-Hant→zh）→ 全局 ARCA_REGION。
-    zh 系归属 TW/HK 等繁中地区（arca 中文统一 zh-Hant；CN 被 RegionBlock 拒 403）。
+    優先順序：語言標籤自帶的地區碼（zh-HK/zh-Hant-TW/en-GB）→ ARCA_REGION_BY_LANG
+    （精確標籤，再退語言主碼，如 zh-Hant→zh）→ 全域性 ARCA_REGION。
+    zh 系歸屬 TW/HK 等繁中地區（arca 中文統一 zh-Hant；CN 被 RegionBlock 拒 403）。
     """
     tag = (lang or "").strip().replace("_", "-")
     parts = tag.split("-")
-    for p in parts[1:]:  # 标签里带地区码就直接用
+    for p in parts[1:]:  # 標籤裡帶地區碼就直接用
         if len(p) == 2 and p.isalpha():
             return p.upper()
     by = config.ARCA_REGION_BY_LANG
@@ -116,7 +116,7 @@ def _headers(lang: str, idempotency_key: str | None = None) -> dict:
     h = auth_header()
     h["Content-Type"] = "application/json"
     h["X-Language"] = lang or "zh"
-    # arca 强校验 X-Region 两位大写国家码（缺失/非法 400）
+    # arca 強校驗 X-Region 兩位大寫國家碼（缺失/非法 400）
     region = _region_for_lang(lang)
     if region:
         h["X-Region"] = region
@@ -156,37 +156,37 @@ def create_character(form: dict, lang: str, idempotency_key: str | None = None,
             result = st.get("result") or "{}"
             cid = (json.loads(result) if isinstance(result, str) else result).get("character_id")
             if not cid:
-                raise ArcaError(f"任务成功但无 character_id: {str(result)[:200]}")
+                raise ArcaError(f"任務成功但無 character_id: {str(result)[:200]}")
             return cid
         if status == "failed":
-            raise ArcaError(f"建角色失败 code={st.get('error_code')} msg={st.get('error_message')}")
+            raise ArcaError(f"建角色失敗 code={st.get('error_code')} msg={st.get('error_message')}")
         if time.time() > deadline:
-            raise ArcaError(f"建角色轮询超时 task_id={task_id}")
+            raise ArcaError(f"建角色輪詢超時 task_id={task_id}")
         if poll_interval:
             time.sleep(poll_interval)
 
 
 def _get(url: str, headers: dict, timeout: int):
-    """GET 请求收口：ARCA_DEBUG=1 时打印原始请求/响应（脱敏）。"""
+    """GET 請求收口：ARCA_DEBUG=1 時列印原始請求/響應（脫敏）。"""
     if config.ARCA_DEBUG:
-        print(f"\n--- arca 请求 ---\nGET {url}")
+        print(f"\n--- arca 請求 ---\nGET {url}")
         for k, v in (headers or {}).items():
             if k.lower() == "authorization":
                 v = f"{v[:22]}…<redacted>"
             print(f"{k}: {v}")
     resp = requests.get(url, headers=headers, timeout=timeout)
     if config.ARCA_DEBUG:
-        print(f"--- arca 响应 HTTP {resp.status_code} ---\n{_clip(_redact(resp.text))}\n")
+        print(f"--- arca 響應 HTTP {resp.status_code} ---\n{_clip(_redact(resp.text))}\n")
     return resp
 
 
 def get_page_config(lang: str) -> dict:
-    """GET /character/page_config：平台的角色配置枚举。
+    """GET /character/page_config：平臺的角色配置列舉。
 
     返回 data：{genders, character_tags, setting_options, species,
     voices, appearance_styles, landing_page_styles}。
-    tag 条目形如 {tag_key, tag_name, tag_icon, index?, tag_value?}；
-    voices 条目含 voice_id/voice_name/language。结果随 X-Language 本地化。
+    tag 條目形如 {tag_key, tag_name, tag_icon, index?, tag_value?}；
+    voices 條目含 voice_id/voice_name/language。結果隨 X-Language 本地化。
     """
     if not config.ARCA_BASE_URL:
         raise ArcaError("ARCA_BASE_URL 未配置")
@@ -199,18 +199,18 @@ _PAGE_CONFIG_CACHE: dict[str, dict] = {}
 
 
 def get_page_config_cached(lang: str) -> dict:
-    """page_config 的进程内缓存版（枚举很少变，一次同步批量里只拉一次/语言）。"""
+    """page_config 的程式內快取版（列舉很少變，一次同步批次裡只拉一次/語言）。"""
     if lang not in _PAGE_CONFIG_CACHE:
         _PAGE_CONFIG_CACHE[lang] = get_page_config(lang)
     return _PAGE_CONFIG_CACHE[lang]
 
 
 def update_character_basic_info(character_id: str, form: dict, lang: str) -> None:
-    """原地更新已同步角色（POST /character/updateBasicInfo，同步接口）。
+    """原地更新已同步角色（POST /character/updateBasicInfo，同步介面）。
 
-    后端只消费 name/gender/species/profile/voice_id/opening_prologue/visibility，
-    局部更新（非空才覆盖），每次变更插入新 character_version 快照；
-    tags/disposition/anonymous_tags/images/landing_page_url 传了也会被忽略。
+    後端只消費 name/gender/species/profile/voice_id/opening_prologue/visibility，
+    區域性更新（非空才覆蓋），每次變更插入新 character_version 快照；
+    tags/disposition/anonymous_tags/images/landing_page_url 傳了也會被忽略。
     """
     if not config.ARCA_BASE_URL:
         raise ArcaError("ARCA_BASE_URL 未配置")
@@ -219,18 +219,18 @@ def update_character_basic_info(character_id: str, form: dict, lang: str) -> Non
         {"character_id": character_id, "character_info": form},
         headers=_headers(lang), timeout=60,
     )
-    _data(r)  # 成功返回空 data；业务失败（角色失效/音色不存在/非本人）在此抛 ArcaError
+    _data(r)  # 成功返回空 data；業務失敗（角色失效/音色不存在/非本人）在此拋 ArcaError
 
 
 def list_my_characters(lang: str) -> list[dict]:
-    """列出当前 uid 名下全部自建角色 [{character_id, name}]（游标翻页拉全）。
+    """列出當前 uid 名下全部自建角色 [{character_id, name}]（遊標翻頁拉全）。
 
-    POST /character/list_my_characters；仅返回本人未删角色（读实现核实），
-    天然满足「同创建者」条件。
+    POST /character/list_my_characters；僅返回本人未刪角色（讀實現核實），
+    天然滿足「同建立者」條件。
     """
     out: list[dict] = []
     cursor = ""
-    for _ in range(50):  # 翻页保险上限
+    for _ in range(50):  # 翻頁保險上限
         r = _post(
             f"{config.ARCA_BASE_URL}/character/list_my_characters",
             {"cursor": cursor, "limit": 200},
@@ -251,16 +251,16 @@ def list_my_characters(lang: str) -> list[dict]:
 def character_exists(character_id: str, lang: str,
                      probe_name: str | None = None,
                      probe_visibility: str = "public") -> bool:
-    """判断角色是否存活（软删/失效返回 False）。网络等非业务错误上抛。
+    """判斷角色是否存活（軟刪/失效返回 False）。網路等非業務錯誤上拋。
 
-    注意：/character/detail 的实现【不过滤 is_deleted】（读了 Go 源码核实：
-    GetByCharacterID 仅按 character_id 查，用户自删只置 is_deleted），对软删
-    角色会返回成功——不能用它判活。可靠探针是 updateBasicInfo：其实现先查
-    IsDeleted/Status，软删/失效会返回「角色不存在/角色已失效」。
-    传 probe_name 时用 update 探针（带 name+visibility 的最小更新：值与现状
-    相同，仅多插一个内容相同的 version 快照，无业务副作用；visibility 必带，
-    否则 update 会把 is_public 无条件置 false）。不传则退回 detail（仅适用于
-    「记录被硬删除」的场景，识别不了软删）。
+    注意：/character/detail 的實現【不過濾 is_deleted】（讀了 Go 原始碼核實：
+    GetByCharacterID 僅按 character_id 查，使用者自刪只置 is_deleted），對軟刪
+    角色會返回成功——不能用它判活。可靠探針是 updateBasicInfo：其實現先查
+    IsDeleted/Status，軟刪/失效會返回「角色不存在/角色已失效」。
+    傳 probe_name 時用 update 探針（帶 name+visibility 的最小更新：值與現狀
+    相同，僅多插一個內容相同的 version 快照，無業務副作用；visibility 必帶，
+    否則 update 會把 is_public 無條件置 false）。不傳則退回 detail（僅適用於
+    「記錄被硬刪除」的場景，識別不了軟刪）。
     """
     if probe_name:
         r = _post(
@@ -286,9 +286,9 @@ def character_exists(character_id: str, lang: str,
 
 
 def delete_character(character_id: str, lang: str, reason: str = "") -> None:
-    """删除 arca 上的角色（POST /character/delete，同步、软删、仅限本人角色）。
+    """刪除 arca 上的角色（POST /character/delete，同步、軟刪、僅限本人角色）。
 
-    重复删除会返回业务错误「角色不存在」——调用方可视为幂等成功。
+    重複刪除會返回業務錯誤「角色不存在」——呼叫方可視為冪等成功。
     """
     if not config.ARCA_BASE_URL:
         raise ArcaError("ARCA_BASE_URL 未配置")
@@ -301,17 +301,17 @@ def delete_character(character_id: str, lang: str, reason: str = "") -> None:
 
 
 def _oss_put_object(endpoint, bucket, key, content, ak, sk, token, content_type):
-    """用阿里云 OSS SDK(oss2) + STS 临时凭证 PUT 一个对象。隔离成函数便于测试打桩。
+    """用阿里雲 OSS SDK(oss2) + STS 臨時憑證 PUT 一個物件。隔離成函式便於測試打樁。
 
-    /file/tos_credential 签发的是阿里云 OSS 的 STS 凭证（后端走 OssHelper），
-    必须用 oss2 的 StsAuth 签名直传，不能用火山 TOS SDK。
+    /file/tos_credential 簽發的是阿里雲 OSS 的 STS 憑證（後端走 OssHelper），
+    必須用 oss2 的 StsAuth 簽名直傳，不能用火山 TOS SDK。
     """
     import oss2
     if config.ARCA_DEBUG:
         print(f"\n--- OSS PUT ---\nPUT {endpoint} bucket={bucket} key={key} "
               f"content-type={content_type} bytes={len(content)}\n")
     auth = oss2.StsAuth(ak, sk, token)
-    # connect/read 超时兜底：oss2 默认无读超时，网络卡死会永久挂住导出线程。
+    # connect/read 超時兜底：oss2 預設無讀超時，網路卡死會永久掛住匯出執行緒。
     bucket_obj = oss2.Bucket(
         auth, endpoint, bucket,
         connect_timeout=config.OSS_PUT_TIMEOUT)
@@ -319,11 +319,11 @@ def _oss_put_object(endpoint, bucket, key, content, ak, sk, token, content_type)
         key, content, headers={"Content-Type": content_type})
 
 
-# TOS STS 凭证缓存：凭证 expires_in=3600，批量上传时按 (public,lang) 复用，
-# 避免每传一张图都往 api.popop.dev 要一次凭证（几百次导出会拖垮吞吐）。
+# TOS STS 憑證快取：憑證 expires_in=3600，批次上傳時按 (public,lang) 複用，
+# 避免每傳一張圖都往 api.popop.dev 要一次憑證（幾百次匯出會拖垮吞吐）。
 _TOS_CRED_CACHE: dict[tuple, tuple[float, dict]] = {}
 _TOS_CRED_LOCK = threading.Lock()
-_TOS_CRED_TTL = 1800  # 秒；比 3600 保守，留足直传余量
+_TOS_CRED_TTL = 1800  # 秒；比 3600 保守，留足直傳餘量
 
 
 def _tos_credential(public: bool, lang: str) -> dict:
@@ -346,10 +346,10 @@ def _tos_credential(public: bool, lang: str) -> dict:
 
 def tos_upload(data: bytes, object_key: str, content_type: str,
                lang: str, public: bool = False) -> dict:
-    """拿 /file/tos_credential 的 OSS STS 凭证，直传对象到阿里云 OSS，返回 StorageObject。
+    """拿 /file/tos_credential 的 OSS STS 憑證，直傳物件到阿里雲 OSS，返回 StorageObject。
 
-    public=True 用公有桶(落地页 HTML 等需公网直链)，否则私有桶(角色图片，后端签名读取)。
-    凭证按 (public,lang) 缓存复用，批量上传不再逐张重新签发。
+    public=True 用公有桶(落地頁 HTML 等需公網直鏈)，否則私有桶(角色圖片，後端簽名讀取)。
+    憑證按 (public,lang) 快取複用，批次上傳不再逐張重新簽發。
     """
     if not config.ARCA_BASE_URL:
         raise ArcaError("ARCA_BASE_URL 未配置")
@@ -362,9 +362,28 @@ def tos_upload(data: bytes, object_key: str, content_type: str,
         cred.get("session_token"), content_type,
     )
     host = endpoint.replace("https://", "").replace("http://", "")
-    url = f"https://{bucket}.{host}/{object_key}"
+    cdn_domain = (str(cred.get("cdn_domain") or "").strip()
+                  .removeprefix("https://").removeprefix("http://").rstrip("/"))
+    # importing-arca-character 要求落地頁及頁內資產使用 public bucket 的 CDN URL。
+    # 私有主圖仍保留 bucket/object_key，URL 只是讀取兜底。
+    url = (f"https://{cdn_domain}/{object_key}" if public and cdn_domain
+           else f"https://{bucket}.{host}/{object_key}")
     return {"bucket_name": bucket, "object_key": object_key,
             "object_type": "image", "url": url}
+
+
+def public_tos_hosts(lang: str) -> set[str]:
+    """Return hosts that identify the current public OSS bucket/CDN."""
+    cred = _tos_credential(True, lang)
+    hosts: set[str] = set()
+    cdn_domain = str(cred.get("cdn_domain") or "").strip()
+    if cdn_domain:
+        hosts.add(cdn_domain.removeprefix("https://").removeprefix("http://").split("/")[0])
+    endpoint = str(cred.get("endpoint") or "").replace("https://", "").replace("http://", "")
+    bucket = str(cred.get("bucket") or "").strip()
+    if bucket and endpoint:
+        hosts.add(f"{bucket}.{endpoint}")
+    return hosts
 
 
 def create_post(character_id: str, content: str, image_objs: list[dict],
@@ -390,8 +409,8 @@ def create_post(character_id: str, content: str, image_objs: list[dict],
 
 
 def set_post_visibility(post_id: str, visibility: int, lang: str) -> None:
-    """补偿设置帖子可见性（后端 /post/create 会忽略请求里的 visibility，
-    按角色 is_public 推导；只有显式配置覆盖时才需要调本接口）。"""
+    """補償設定帖子可見性（後端 /post/create 會忽略請求裡的 visibility，
+    按角色 is_public 推導；只有顯式配置覆蓋時才需要調本介面）。"""
     r = _post(
         f"{config.ARCA_BASE_URL}/post/update_visibility",
         {"post_id": post_id, "visibility": visibility},

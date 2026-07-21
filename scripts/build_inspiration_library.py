@@ -1,10 +1,10 @@
-"""把 137MB 的 decompositions.json 预处理成精简灵感库。
+"""把 137MB 的 decompositions.json 預處理成精簡靈感庫。
 
-- 去掉冗余的 raw 字段（它只是 parsed 的字符串副本）
-- 每个 frame 拍平成一条灵感：vibe/event/mood 作检索键，
-  action/expression/makeup/clothes/framing/visual_style/shooting_style 作生图灵感
+- 去掉冗餘的 raw 欄位（它只是 parsed 的字串副本）
+- 每個 frame 拍平成一條靈感：vibe/event/mood 作檢索鍵，
+  action/expression/makeup/clothes/framing/visual_style/shooting_style 作生圖靈感
 - 保留 char/file 溯源
-无第三方依赖，可反复运行、完全从源库派生。
+無第三方依賴，可反覆執行、完全從源庫派生。
 """
 import json
 import sys
@@ -53,7 +53,7 @@ def main():
                     "shooting_style": fr.get("shooting_style"),
                     "src": f"{char}/{file}",
                 }
-                # 至少要有一个生图灵感字段才留
+                # 至少要有一個生圖靈感欄位才留
                 if any(item[k] for k in ("action", "clothes", "framing", "visual_style")):
                     items.append(item)
     OUT.parent.mkdir(parents=True, exist_ok=True)

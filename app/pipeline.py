@@ -20,8 +20,8 @@ import requests
 from . import api_client, config, landing, library, prompts, storage, styles, voices
 
 
-# 按角色的进程内互斥锁：所有对同一 record 的读-改-写都应持锁，
-# 防止后台任务与前台请求并发时整文件覆盖丢写。
+# 按角色的程式內互斥鎖：所有對同一 record 的讀-改-寫都應持鎖，
+# 防止後臺任務與前臺請求併發時整檔案覆蓋丟寫。
 import threading as _threading
 _CHAR_LOCKS: dict[str, _threading.RLock] = {}
 _CHAR_LOCKS_GUARD = _threading.Lock()
@@ -36,8 +36,8 @@ def char_lock(char_id: str) -> _threading.RLock:
 
 
 def _locked(fn):
-    """按首参 char_id 持角色锁执行：所有对同一 record/批次的读-改-写互斥，
-    防止后台批量任务与前台请求并发时整文件覆盖丢写。"""
+    """按首參 char_id 持角色鎖執行：所有對同一 record/批次的讀-改-寫互斥，
+    防止後臺批次任務與前臺請求併發時整檔案覆蓋丟寫。"""
     import functools
 
     @functools.wraps(fn)
@@ -50,10 +50,61 @@ def _locked(fn):
 COVER_SPEC_VERSION = 3
 _RECENTLY_USED_VOICES: list[str] = []
 _VOICE_LOCK = _threading.Lock()
+PRODUCTION_STYLES = frozenset({"fantasy", "cute", "real"})
+
+# 全量 persona 快照快取：建人設的多樣性避讓(_recent_persona_traits)與發帖的同組
+# 兄弟掃描(_sibling_used_photo_kinds)原本每次呼叫都 glob+解析本地 1766+ 個 persona
+# 檔案。批次跑 N 組 × 4 語言時 = 數十萬次讀盤解析（O(N²)，資料越多越慢）。這裡按短
+# TTL 快取一次「所有 persona 的輕量記錄」，整批覆用；快取滯後最多讓避讓/避重看到
+# 略舊的近況（無正確性影響，最壞是多樣性避讓稍欠），到期自動重掃。
+_PERSONA_SNAPSHOT: dict = {"records": None, "exp": 0.0}
+_PERSONA_SNAPSHOT_TTL = 30  # 秒
+_PERSONA_SNAPSHOT_LOCK = _threading.Lock()
+
+
+def _persona_snapshot() -> list[dict]:
+    """所有本地 persona 記錄的輕量快照（短 TTL 快取，批次複用）。
+
+    只保留下游避讓/避重需要的欄位（char_id/group_id/lang/created/persona），避免
+    每次呼叫都全量 glob+json.loads。快取過期或未建立時重掃一次。
+    """
+    now = time.time()
+    snap = _PERSONA_SNAPSHOT["records"]
+    if snap is not None and now < _PERSONA_SNAPSHOT["exp"]:
+        return snap
+    with _PERSONA_SNAPSHOT_LOCK:
+        snap = _PERSONA_SNAPSHOT["records"]
+        if snap is not None and now < _PERSONA_SNAPSHOT["exp"]:
+            return snap
+        records: list[dict] = []
+        for p in config.PERSONA_DIR.glob("*.json"):
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            persona = rec.get("persona") or {}
+            records.append({
+                "char_id": rec.get("char_id"),
+                "group_id": rec.get("group_id"),
+                "lang": rec.get("lang"),
+                "created": rec.get("created", 0),
+                "persona": persona,
+            })
+        _PERSONA_SNAPSHOT["records"] = records
+        _PERSONA_SNAPSHOT["exp"] = now + _PERSONA_SNAPSHOT_TTL
+        return records
 
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+
+def normalize_production_style(value: str | None) -> str:
+    """Validate the business style chosen when a character is produced."""
+    style = (value or "").strip().lower()
+    if style not in PRODUCTION_STYLES:
+        raise ValueError("style must be one of: fantasy, cute, real")
+    return style
 
 
 def _gender_for_voice(persona: dict) -> str | None:
@@ -182,6 +233,7 @@ def list_characters() -> list[dict]:
             "exported": bool(r.get("exported")),
             "arca_synced": bool(r.get("arca_character_id")),
             "source": r.get("source") or "",
+            "style": r.get("style") or "",
             "created": r.get("created"),
         })
     return out
@@ -209,15 +261,8 @@ def _recent_persona_traits(lang: str, exclude_char_id: str | None = None,
                            max_records: int = 40) -> tuple[list[str], list[str], list[str]]:
     """Collect (names, job snippets, overused tags) from recent same-language
     characters, for the diversity avoid lists injected into persona prompts."""
-    records = []
-    for p in config.PERSONA_DIR.glob("*.json"):
-        try:
-            rec = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        if rec.get("lang") != lang or rec.get("char_id") == exclude_char_id:
-            continue
-        records.append(rec)
+    records = [rec for rec in _persona_snapshot()
+               if rec.get("lang") == lang and rec.get("char_id") != exclude_char_id]
     records.sort(key=lambda r: r.get("created", 0), reverse=True)
     records = records[:max_records]
 
@@ -235,7 +280,7 @@ def _recent_persona_traits(lang: str, exclude_char_id: str | None = None,
         for t in persona.get("tags") or []:
             if isinstance(t, str) and t.strip():
                 tag_counts[t.strip()] = tag_counts.get(t.strip(), 0) + 1
-    # 只把真正扎堆的 tag 列入避让（≥3 次且覆盖 ≥20% 的近期角色）
+    # 只把真正扎堆的 tag 列入避讓（≥3 次且覆蓋 ≥20% 的近期角色）
     threshold = max(3, len(records) // 5)
     overused = [t for t, c in sorted(tag_counts.items(), key=lambda x: -x[1])
                 if c >= threshold]
@@ -248,23 +293,23 @@ def _recent_persona_traits(lang: str, exclude_char_id: str | None = None,
 def _postprocess_persona(persona: dict) -> dict:
     """Strip production-only scratch keys that must never land in the persona.
 
-    behavior_patterns / online_chat_style 现在【所有角色都写】（不同情绪下的反应差异），
-    不按"是否普通人"剥离；personality/inner_structure 的写法也交给 PERSONALITY_RULES
-    引导，本函数只清理与人设内容无关的生产台账字段。
+    behavior_patterns / online_chat_style 現在【所有角色都寫】（不同情緒下的反應差異），
+    不按"是否普通人"剝離；personality/inner_structure 的寫法也交給 PERSONALITY_RULES
+    引導，本函式只清理與人設內容無關的生產臺賬欄位。
     """
     if not isinstance(persona, dict):
         return persona
-    # used_seeds 是灵感手牌的生产台账（real track），不属于人设内容；
-    # 正常路径在生成处已取走，这里防御性剥离，保证任何路径都不落进 persona。
+    # used_seeds 是靈感手牌的生產臺賬（real track），不屬於人設內容；
+    # 正常路徑在生成處已取走，這裡防禦性剝離，保證任何路徑都不落進 persona。
     persona.pop("used_seeds", None)
-    # _reasoning 是"先推理出这个人是谁"的思考区（real track 人设 prompt 要求作为第一个
-    # 字段输出），只用于引导模型先想清人再写卖点，不属于人设内容，剥离。
+    # _reasoning 是"先推理出這個人是誰"的思考區（real track 人設 prompt 要求作為第一個
+    # 欄位輸出），只用於引導模型先想清人再寫賣點，不屬於人設內容，剝離。
     persona.pop("_reasoning", None)
     return persona
 
 
 def _charm_audit(persona: dict, lang: str) -> dict:
-    """real track 冷读验收（转述测试）。API 异常时返回 skip，绝不阻塞生产。"""
+    """real track 冷讀驗收（轉述測試）。API 異常時返回 skip，絕不阻塞生產。"""
     try:
         messages = prompts.build_persona_audit_messages(persona, lang)
         res = api_client.chat_json(messages, temperature=0.2)
@@ -280,12 +325,12 @@ def _charm_audit(persona: dict, lang: str) -> dict:
 
 
 def _audit_retry_hint(user_hint: str, audit: dict) -> str:
-    """把冷读验收的失败意见拼回创作补充要求，用于打回重写。"""
+    """把冷讀驗收的失敗意見拼回創作補充要求，用於打回重寫。"""
     feedback = (
-        "# 上一版未通过冷读验收（转述测试）\n"
-        f"陌生读者只能转述出：「{audit.get('retell', '')}」；判定理由：{audit.get('reason', '')}。\n"
-        "重写时修正：给出更具体、带画面、只属于这个人的行为与反差，"
-        "让粉丝能用一句独一无二的话转述 TA；禁止退回泛用形容词。"
+        "# 上一版未透過冷讀驗收（轉述測試）\n"
+        f"陌生讀者只能轉述出：「{audit.get('retell', '')}」；判定理由：{audit.get('reason', '')}。\n"
+        "重寫時修正：給出更具體、帶畫面、只屬於這個人的行為與反差，"
+        "讓粉絲能用一句獨一無二的話轉述 TA；禁止退回泛用形容詞。"
     )
     base = user_hint.strip()
     return f"{base}\n\n{feedback}" if base else feedback
@@ -294,10 +339,10 @@ def _audit_retry_hint(user_hint: str, audit: dict) -> str:
 def _generate_persona_real(uris: list[str], lang: str, user_hint: str,
                            diversity_block: str,
                            track: str) -> tuple[dict, list[str], object]:
-    """一次人设生成调用：返回 (persona, used_seeds, reasoning)。
+    """一次人設生成呼叫：返回 (persona, used_seeds, reasoning)。
 
-    reasoning 是模型在 _reasoning 字段里做的"先推理出这个人"的思考，从 persona 里
-    剥出来单独保存（不进下游 prompt），仅用于在前端"完整人设 JSON"里展示。
+    reasoning 是模型在 _reasoning 欄位裡做的"先推理出這個人"的思考，從 persona 裡
+    剝出來單獨儲存（不進下游 prompt），僅用於在前端"完整人設 JSON"裡展示。
     """
     messages = prompts.build_persona_messages(
         uris, lang, user_hint=user_hint, diversity_block=diversity_block,
@@ -315,16 +360,18 @@ def _generate_persona_real(uris: list[str], lang: str, user_hint: str,
 
 def create_persona_one_lang(image_paths: list[str], lang: str,
                             user_hint: str = "", group_id: str | None = None,
-                            track: str = "real", source: str = "") -> dict:
+                            track: str = "real", source: str = "",
+                            style: str = "real") -> dict:
     """Create a single-language character: persona authored natively in `lang`."""
+    style = normalize_production_style(style)
     uris = [api_client.file_to_data_uri(p) for p in image_paths]
     names, jobs, tags = _recent_persona_traits(lang)
     diversity_block = prompts.build_persona_diversity_block(
         lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags, track=track)
-    # real track：发一手灵感牌（性格/职业库，冷却过滤后随机），
-    # 模型自主决定用不用，用了哪条通过 used_seeds 回报，编排层据此销账。
-    # 只有 real 发牌：light 保留自己的关系引擎、kdrama 走韩剧主角推理，随机职业/性格卡
-    # 都会干扰。light 虽已对齐 real 的魅力方法论，但用户明确不加职业/性格灵感（只留冷读验收）。
+    # real track：發一手靈感牌（性格/職業庫，冷卻過濾後隨機），
+    # 模型自主決定用不用，用了哪條透過 used_seeds 回報，編排層據此銷賬。
+    # 只有 real 發牌：light 保留自己的關係引擎、kdrama 走韓劇主角推理，隨機職業/性格卡
+    # 都會干擾。light 雖已對齊 real 的魅力方法論，但使用者明確不加職業/性格靈感（只留冷讀驗收）。
     if track == "real":
         hand = library.checkout()
         hand_block = library.hand_block(hand, lang)
@@ -334,11 +381,11 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
     persona, used_seeds, reasoning = _generate_persona_real(
         uris, lang, user_hint, diversity_block, track)
 
-    # real/light/nonhuman track：冷读验收（转述测试），fail 则带意见打回重写一次。
-    # nonhuman = real 方法论（要求"一句能转述这只 TA"），故同样验收；但它【不发灵感手牌】
-    # （职业/性格库是人向的，会把角色拽回"人"），手牌仍只发给 real（见上）。
-    # kdrama 不走此验收：它是 real track 的"粉丝转述测试"，retry 意见也是 real 方法论
-    # （让粉丝能一句转述 TA），与韩剧主角/对手戏方法论冲突——kdrama 同 adult 不发牌不验收。
+    # real/light/nonhuman track：冷讀驗收（轉述測試），fail 則帶意見打回重寫一次。
+    # nonhuman = real 方法論（要求"一句能轉述這隻 TA"），故同樣驗收；但它【不發靈感手牌】
+    # （職業/性格庫是人向的，會把角色拽回"人"），手牌仍只發給 real（見上）。
+    # kdrama 不走此驗收：它是 real track 的"粉絲轉述測試"，retry 意見也是 real 方法論
+    # （讓粉絲能一句轉述 TA），與韓劇主角/對手戲方法論衝突——kdrama 同 adult 不發牌不驗收。
     audits: list[dict] = []
     if track in ("real", "light", "flirt", "nonhuman"):
         audit = _charm_audit(persona, lang)
@@ -352,6 +399,9 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
     else:
         used_seeds = []
     _randomize_voice(persona, lang)
+    # This is an operational character category selected by the producer, not
+    # an image-generation prompt or a source label.
+    persona["style"] = style
 
     char_id = _new_id("char")
     record = {
@@ -363,6 +413,7 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
         "user_hint": user_hint,
         "track": track,
         "source": source,
+        "style": style,
         "used_seeds": used_seeds,
         "charm_audit": audits or None,
         "reasoning": reasoning,
@@ -378,7 +429,7 @@ def create_persona_one_lang(image_paths: list[str], lang: str,
 def create_personas_from_images(image_paths: list[str], langs: list[str],
                                 user_hint: str = "",
                                 track: str = "real",
-                                source: str = "") -> list[dict]:
+                                source: str = "", style: str = "real") -> list[dict]:
     """For each selected language, create an independent native character record.
 
     All records from the same upload share a `group_id`.
@@ -391,7 +442,7 @@ def create_personas_from_images(image_paths: list[str], langs: list[str],
     def _one(lang: str) -> dict:
         return create_persona_one_lang(
             image_paths, lang, user_hint=user_hint, group_id=group_id,
-            track=track, source=source
+            track=track, source=source, style=style
         )
 
     with ThreadPoolExecutor(max_workers=min(len(langs), config.MAX_WORKERS)) as ex:
@@ -406,19 +457,19 @@ def create_personas_from_images(image_paths: list[str], langs: list[str],
 
 @_locked
 def regenerate_persona(char_id: str, track: str | None = None) -> dict:
-    """只重新生成人设 schema：复用同一来源（源图 或 导入的原始 JSON）、同语言、同补充要求，
-    原地覆盖 persona。
+    """只重新生成人設 schema：複用同一來源（源圖 或 匯入的原始 JSON）、同語言、同補充要求，
+    原地覆蓋 persona。
 
-    不改图、不动 identity / cover / 帖子。用于批量重刷人设。
+    不改圖、不動 identity / cover / 帖子。用於批次重刷人設。
     """
     record = load_character(char_id)
     lang = record.get("lang", config.LANGUAGES[0])
-    # 界面可临时覆盖链路；覆盖后持久化到 record，后续发帖沿用新 track
+    # 介面可臨時覆蓋鏈路；覆蓋後持久化到 record，後續發帖沿用新 track
     if track:
         record["track"] = track
     track = record.get("track", "real")
     user_hint = record.get("user_hint", "")
-    # 从原始 JSON 导入的角色：用同一份 import_source 重新扩写，保持忠实保留。
+    # 從原始 JSON 匯入的角色：用同一份 import_source 重新擴寫，保持忠實保留。
     if record.get("import_source") is not None:
         messages = prompts.build_persona_from_json_messages(
             record["import_source"], lang, user_hint=user_hint, track=track)
@@ -426,17 +477,17 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         record["persona"] = _postprocess_persona(persona)
         _randomize_voice(record["persona"], lang)
     else:
-        # 原图优先；原图不在则回退用封面图推理，绝不无图凭空随机生成。
+        # 原圖優先；原圖不在則回退用封面圖推理，絕不無圖憑空隨機生成。
         ref_images = _regen_reference_images(record)
         if not ref_images:
             raise ValueError(
-                f"{char_id} 没有可用的原图或封面图，跳过重新生成（拒绝无图随机生成）")
+                f"{char_id} 沒有可用的原圖或封面圖，跳過重新生成（拒絕無圖隨機生成）")
         uris = [api_client.file_to_data_uri(p) for p in ref_images]
         names, jobs, tags = _recent_persona_traits(
             lang, exclude_char_id=char_id)
         diversity_block = prompts.build_persona_diversity_block(
             lang, avoid_names=names, recent_jobs=jobs, overused_tags=tags, track=track)
-        # 只有 real 发灵感手牌；light/nonhuman 走冷读验收但不发牌（见 create 路径注释）。
+        # 只有 real 發靈感手牌；light/nonhuman 走冷讀驗收但不發牌（見 create 路徑註釋）。
         if track == "real":
             hand = library.checkout()
             hand_block = library.hand_block(hand, lang)
@@ -458,9 +509,13 @@ def regenerate_persona(char_id: str, track: str | None = None) -> dict:
         record["persona"] = persona
         record["reasoning"] = reasoning
         _randomize_voice(record["persona"], lang)
-        # 早期"角色类型骰子"已移除；这里剥掉旧存档里遗留的 archetype 键（迁移清理），
-        # 新记录本就不含该键。
+        # 早期"角色型別骰子"已移除；這裡剝掉舊存檔裡遺留的 archetype 鍵（遷移清理），
+        # 新記錄本就不含該鍵。
         record.pop("archetype", None)
+    # Regenerating the LLM-authored persona must not erase the producer's
+    # business style selection.
+    if record.get("style") in PRODUCTION_STYLES:
+        record["persona"]["style"] = record["style"]
     record.pop("cover_spec", None)
     save_character(record)
     return record
@@ -515,18 +570,20 @@ def create_persona_from_json_one_lang(source_obj: dict, lang: str,
                                       group_id: str | None = None,
                                       source_image: str | None = None,
                                       track: str = "real",
-                                      source: str = "") -> dict:
+                                      source: str = "", style: str = "real") -> dict:
     """Create a single-language character from an existing source JSON object.
 
     The original object is stored under `import_source` so the persona can be
     re-expanded later. `source_image` (a local path, already downloaded) is
     shared across all language variants of the same source object.
     """
+    style = normalize_production_style(style)
     messages = prompts.build_persona_from_json_messages(
         source_obj, lang, user_hint=user_hint, track=track)
     persona = api_client.chat_json(messages, temperature=0.85)
     persona = _postprocess_persona(persona)
     _randomize_voice(persona, lang)
+    persona["style"] = style
 
     char_id = _new_id("char")
     record = {
@@ -538,6 +595,7 @@ def create_persona_from_json_one_lang(source_obj: dict, lang: str,
         "user_hint": user_hint,
         "track": track,
         "source": source,
+        "style": style,
         "import_source": source_obj,
         "persona": persona,
         "identity": None,
@@ -552,7 +610,7 @@ def create_personas_from_json_obj(source_obj: dict, langs: list[str],
                                   user_hint: str = "",
                                   download_image: bool = True,
                                   track: str = "real",
-                                  source: str = "") -> list[dict]:
+                                  source: str = "", style: str = "real") -> list[dict]:
     """For one source object, create an independent native character per language.
 
     All records from the same source share a `group_id` and (if available) the
@@ -568,7 +626,7 @@ def create_personas_from_json_obj(source_obj: dict, langs: list[str],
     def _one(lang: str) -> dict:
         return create_persona_from_json_one_lang(
             source_obj, lang, user_hint=user_hint, group_id=group_id,
-            source_image=source_image, track=track, source=source)
+            source_image=source_image, track=track, source=source, style=style)
 
     records = []
     with ThreadPoolExecutor(max_workers=min(len(langs), config.MAX_WORKERS)) as ex:
@@ -599,9 +657,9 @@ def extract_source_objects(payload) -> list[dict]:
 
 @_locked
 def regenerate_opening(char_id: str, user_hint: str = "") -> dict:
-    """只重写角色【开场白】(persona.opening)：依据其它人设信息生成新的 note + messages。
+    """只重寫角色【開場白】(persona.opening)：依據其它人設資訊生成新的 note + messages。
 
-    不改图、不动其它人设字段、不动 identity / cover / 帖子。用于单独/批量刷开场白。
+    不改圖、不動其它人設欄位、不動 identity / cover / 帖子。用於單獨/批次刷開場白。
     """
     record = load_character(char_id)
     persona = record.get("persona", {})
@@ -620,20 +678,20 @@ def regenerate_opening(char_id: str, user_hint: str = "") -> dict:
     return record
 
 
-# 上传图引用快照缓存：批量删除时几乎每个角色都要判断“共享上传图是否仍被引用”，
-# 原本每次都全量扫本地 1500+ persona 文件 + 远端 query_all 整集合，N 个角色 = N 次
-# 全量扫描，慢到离谱。这里按短 TTL 缓存一次“所有被引用的上传路径”快照，整批复用。
-# 快照可能滞后（刚删的角色仍在快照里）→ 只会让判断更保守（跳过删共享图，留下孤儿
-# 上传件），绝不会误删仍被引用的图；孤儿件可由存量迁移/清理另行回收。
+# 上傳圖引用快照快取：批次刪除時幾乎每個角色都要判斷“共享上傳圖是否仍被引用”，
+# 原本每次都全量掃本地 1500+ persona 檔案 + 遠端 query_all 整集合，N 個角色 = N 次
+# 全量掃描，慢到離譜。這裡按短 TTL 快取一次“所有被引用的上傳路徑”快照，整批覆用。
+# 快照可能滯後（剛刪的角色仍在快照裡）→ 只會讓判斷更保守（跳過刪共享圖，留下孤兒
+# 上傳件），絕不會誤刪仍被引用的圖；孤兒件可由存量遷移/清理另行回收。
 _REF_SNAPSHOT: dict = {"paths": None, "exp": 0.0}
 _REF_SNAPSHOT_TTL = 20  # 秒
 _REF_SNAPSHOT_LOCK = _threading.Lock()
 
 
 def _referenced_upload_paths() -> set[str] | None:
-    """所有 persona 仍引用的 source_images 路径集合。
+    """所有 persona 仍引用的 source_images 路徑集合。
 
-    返回 None 表示启用了远端存储但远端查询失败——调用方据此 fail-safe 拒删。
+    返回 None 表示啟用了遠端儲存但遠端查詢失敗——呼叫方據此 fail-safe 拒刪。
     """
     import time as _time
     now = _time.time()
@@ -655,7 +713,7 @@ def _referenced_upload_paths() -> set[str] | None:
         if arca_storage.enabled():
             try:
                 rows = storage.query_all("personas")
-            except Exception:  # noqa: BLE001 远端不可达 → 拒删（不缓存失败态）
+            except Exception:  # noqa: BLE001 遠端不可達 → 拒刪（不快取失敗態）
                 return None
             for row in rows:
                 rec = row.get("data") or {}
@@ -668,11 +726,11 @@ def _referenced_upload_paths() -> set[str] | None:
 def _source_image_is_referenced(path: str) -> bool:
     """Return True if any remaining character record still references upload path.
 
-    删除性守卫必须 fail-safe：启用远端存储时若远端查询失败，保守返回 True
-    （视为仍被引用、跳过删除），绝不能在只看到本地残缺视图时误删共享上传图。
+    刪除性守衛必須 fail-safe：啟用遠端儲存時若遠端查詢失敗，保守返回 True
+    （視為仍被引用、跳過刪除），絕不能在只看到本地殘缺檢視時誤刪共享上傳圖。
     """
     paths = _referenced_upload_paths()
-    if paths is None:  # 远端不可达 → 拒删
+    if paths is None:  # 遠端不可達 → 拒刪
         return True
     return path in paths
 
@@ -714,7 +772,7 @@ def _image_bytes(image: dict | None) -> bytes | None:
     url = image.get("url")
     if url:
         try:
-            # (connect, read) 超时：避免坏链/慢源永久挂住导出线程。
+            # (connect, read) 超時：避免壞鏈/慢源永久掛住匯出執行緒。
             resp = requests.get(url, timeout=(10, 60))
             if resp.ok and resp.content:
                 return resp.content
@@ -723,22 +781,22 @@ def _image_bytes(image: dict | None) -> bytes | None:
     return None
 
 
-# 导出兜底：真实社交平台名一律替换成 Popop（prompt 层已要求生成时就用 Popop，
-# 这里只是最后一道保险）。长词在前，避免"인스타그램"被"인스타"截断替换。
+# 匯出兜底：真實社交平臺名一律替換成 Popop（prompt 層已要求生成時就用 Popop，
+# 這裡只是最後一道保險）。長詞在前，避免"인스타그램"被"인스타"截斷替換。
 _BRAND_TOKEN_REPLACEMENTS = [
     "Instagram", "instagram", "INSTAGRAM",
     "인스타그램", "인스타", "インスタグラム", "インスタ",
-    "小红书", "Threads", "threads", "스레드", "スレッズ",
+    "小紅書", "Threads", "threads", "스레드", "スレッズ",
     "Twitter", "twitter", "推特", "트위터", "ツイッター",
     "TikTok", "tiktok", "틱톡", "抖音",
-    # KakaoTalk：长词在前，避免"카카오톡"被"카카오"截断替换。
+    # KakaoTalk：長詞在前，避免"카카오톡"被"카카오"截斷替換。
     "KakaoTalk", "kakaotalk", "KAKAOTALK", "Kakao", "kakao",
     "카카오톡", "카톡", "カカオトーク",
 ]
-# 短缩写只在无字母上下文时替换（"发个ins"命中，"insert/<ins>"不命中）。
+# 短縮寫只在無字母上下文時替換（"發個ins"命中，"insert/<ins>"不命中）。
 _BRAND_SHORT_RE = re.compile(r"(?<![A-Za-z</])(?:ins|IG)(?![A-Za-z>])")
-# LINE 单独处理：英文"line"是常见普通词（online / a line），直接替换会误伤。
-# 只命中全大写 LINE（无字母上下文）、韩语 라인、日语 ライン。
+# LINE 單獨處理：英文"line"是常見普通詞（online / a line），直接替換會誤傷。
+# 只命中全大寫 LINE（無字母上下文）、韓語 라인、日語 ライン。
 _BRAND_LINE_RE = re.compile(r"(?<![A-Za-z</])LINE(?![A-Za-z>])|라인|ライン")
 
 
@@ -751,8 +809,8 @@ def _apply_brand_replacements(text: str) -> str:
     return _BRAND_SHORT_RE.sub("Popop", text)
 
 
-# 已上传公有桶的图片直链缓存：key = object_key + 内容 md5，value = 公网 URL。
-# 导出/同步会为封面/帖图反复传同样的图，缓存后重复导出可直接命中、跳过上传。
+# 已上傳公有桶的圖片直鏈快取：key = object_key + 內容 md5，value = 公網 URL。
+# 匯出/同步會為封面/帖圖反覆傳同樣的圖，快取後重復匯出可直接命中、跳過上傳。
 _TOS_URL_CACHE_PATH = config.DATA_DIR / "tos_public_url_cache.json"
 _TOS_URL_CACHE_LOCK = _threading.Lock()
 _TOS_URL_CACHE: dict[str, str] | None = None
@@ -786,9 +844,9 @@ def _tos_cache_put(key: str, url: str) -> None:
 def _tos_public_url(data: bytes, object_key: str, lang: str) -> str | None:
     """Upload bytes to the public TOS bucket, return the public https URL.
 
-    落地页 img 需指向公网 URL（不内联 base64），封面/帖图先传公有桶拿直链。
-    相同内容+对象键命中缓存则直接返回，跳过重复上传（大幅加速重复导出）。
-    失败返回 None，调用方自行降级。"""
+    落地頁 img 需指向公網 URL（不內聯 base64），封面/帖圖先傳公有桶拿直鏈。
+    相同內容+物件鍵命中快取則直接返回，跳過重複上傳（大幅加速重複匯出）。
+    失敗返回 None，呼叫方自行降級。"""
     if not data:
         return None
     cache_key = object_key + ":" + hashlib.md5(data).hexdigest()
@@ -803,7 +861,7 @@ def _tos_public_url(data: bytes, object_key: str, lang: str) -> str | None:
         if url:
             _tos_cache_put(cache_key, url)
         return url
-    except Exception:  # noqa: BLE001 上传失败降级，不阻断导出/同步
+    except Exception:  # noqa: BLE001 上傳失敗降級，不阻斷匯出/同步
         return None
 
 
@@ -812,10 +870,10 @@ def _landing_html_with_public_urls(
     cover_url: str | None, cover_bytes: bytes | None,
     post_urls: list[str] | None,
 ) -> str:
-    """把落地页里的封面/帖图替换成【公网 TOS URL】（img 指向 url，不用 base64）。
+    """把落地頁裡的封面/帖圖替換成【公網 TOS URL】（img 指向 url，不用 base64）。
 
-    复用 inject_cover / inject_post_images：只是注入的是公网 URL 而非 /img/ 相对路径，
-    同时把落地页里残留的 /img/ 引用替换成公网 URL。上传失败的图保持原样（不内联）。
+    複用 inject_cover / inject_post_images：只是注入的是公網 URL 而非 /img/ 相對路徑，
+    同時把落地頁裡殘留的 /img/ 引用替換成公網 URL。上傳失敗的圖保持原樣（不內聯）。
     """
     # 1) 封面 → 公有桶
     if cover_bytes:
@@ -823,10 +881,10 @@ def _landing_html_with_public_urls(
             cover_bytes, f"creaction/{char_id}/landing/cover.png", lang)
         if pub:
             if cover_url:
-                # html_filled 里封面可能是相对 /img/… 也可能已被改写成带域名的
-                # 绝对 URL（config.PUBLIC_BASE_URL），两种形态都替换成公有桶直链。
-                # 先替换更长的绝对形态，再替换相对形态：否则相对串是绝对串的
-                # 子串，先换相对会把绝对 URL 拦腰截断，拼出 http://域名https://直链。
+                # html_filled 裡封面可能是相對 /img/… 也可能已被改寫成帶域名的
+                # 絕對 URL（config.PUBLIC_BASE_URL），兩種形態都替換成公有桶直鏈。
+                # 先替換更長的絕對形態，再替換相對形態：否則相對串是絕對串的
+                # 子串，先換相對會把絕對 URL 攔腰截斷，拼出 http://域名https://直鏈。
                 abs_cover = landing.absolutize_urls(
                     f'src="{cover_url}"', config.PUBLIC_BASE_URL)[len('src="'):-1]
                 if abs_cover != cover_url:
@@ -834,7 +892,7 @@ def _landing_html_with_public_urls(
                 html = html.replace(cover_url, pub)
             html = landing.inject_cover(html, pub)
 
-    # 2) 帖图 → 公有桶（逐个上传、逐个替换 /img/ 引用并填空槽位）
+    # 2) 帖圖 → 公有桶（逐個上傳、逐個替換 /img/ 引用並填空槽位）
     for idx, url in enumerate(post_urls or [], start=1):
         if not url:
             continue
@@ -850,7 +908,7 @@ def _landing_html_with_public_urls(
             data, f"creaction/{char_id}/landing/{name}", lang)
         if not pub:
             continue
-        # 同封面：先替换绝对形态再替换相对形态，避免子串截断拼坏 URL。
+        # 同封面：先替換絕對形態再替換相對形態，避免子串截斷拼壞 URL。
         abs_url = landing.absolutize_urls(
             f'src="{url}"', config.PUBLIC_BASE_URL)[len('src="'):-1]
         if abs_url != url:
@@ -865,103 +923,164 @@ def _slot_fill(idx: int, url: str) -> list[str]:
     return [""] * (idx - 1) + [url]
 
 
+def _post_image_desc(post: dict) -> str:
+    """交付用的「生圖 prompt」：取原始生成意圖，不含畫風/收尾等後綴。
+
+    - photo / composite：直接用模型產出的 photo_prompt。
+    - selfie：photo_prompt 為 null，把 selfie 的 variable/shooting/scene 拍平成一段描述。
+    - text_only 或無圖：空字串。
+    """
+    if post.get("format") == "text_only":
+        return ""
+    raw = post.get("photo_prompt")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    selfie = post.get("selfie")
+    if isinstance(selfie, dict):
+        parts: list[str] = []
+        for section in ("variable", "shooting", "scene"):
+            block = selfie.get(section)
+            if isinstance(block, dict):
+                parts.extend(str(v).strip() for v in block.values() if str(v).strip())
+            elif isinstance(block, str) and block.strip():
+                parts.append(block.strip())
+        return "；".join(parts)
+    return ""
+
+
+def _import_main_image(char_id: str, lang: str, provider: str,
+                       cover_bytes: bytes | None) -> list[dict]:
+    """Upload the required import main image to the private bucket.
+
+    ImportCharacterReq consumes a StorageObject and resolves its primary image
+    by bucket/object_key.  It is intentionally separate from the public landing
+    asset upload: character images may stay private, while landing assets must
+    be public.
+    """
+    if not cover_bytes:
+        return []
+    from . import arca_client
+    obj = arca_client.tos_upload(
+        cover_bytes,
+        f"character_import/{provider}/{char_id}/main.png",
+        "image/png",
+        lang,
+        public=False,
+    )
+    return [{"image_type": "aigc", "is_main_pic": True, "media": obj}]
+
+
+def _build_import_landing(
+    *, char_id: str, lang: str, provider: str, cover_bytes: bytes | None,
+    public_asset_hosts: set[str],
+) -> tuple[str | None, str | None]:
+    """Prepare and upload a contract-compliant public landing page, if any."""
+    landing_page = load_latest_landing(char_id) or {}
+    landing_html = landing_page.get("html_filled") or landing_page.get("html")
+    if not landing_html:
+        return None, None
+
+    from . import arca_client
+    from .arca_import_export import (
+        ContractViolation,
+        ImportCharacterContractError,
+        validate_landing_html,
+    )
+
+    landing_html = _apply_brand_replacements(_landing_html_with_public_urls(
+        landing_html, char_id, lang,
+        landing_page.get("cover_url"), cover_bytes,
+        landing_page.get("post_urls")))
+    issues = validate_landing_html(landing_html, public_asset_hosts)
+    if issues:
+        raise ImportCharacterContractError(issues)
+    object_key = f"landing_import/{provider}/{char_id}/index.html"
+    landing = arca_client.tos_upload(
+        landing_html.encode("utf-8"), object_key,
+        "text/html; charset=utf-8", lang, public=True)
+    landing_url = landing.get("url")
+    if not landing_url:
+        raise ImportCharacterContractError([
+            ContractViolation("landing.html", "public upload did not return a URL")])
+    return landing_url, landing_html
+
+
 def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | str]], dict]:
-    """Do all the heavy per-character work (OSS 下载 + TOS 上传 + 文案处理)，
-    返回 (folder_base, files, report)。files 是 [(相对路径, 内容)] 列表，
-    内容为 str(文本) 或 bytes(二进制)。不碰 zip、不加文件夹去重后缀 ——
-    这些留给串行的写入阶段，以便整段重活可安全并行。"""
+    """Build exactly one importing-arca-character delivery JSON.
+
+    Persona generation is deliberately left unchanged.  This export boundary
+    fetches the live enum configuration, uploads contract assets, maps the
+    stored persona to ImportCharacterReq, then rejects the entire file on any
+    contract violation.
+    """
     record = load_character(char_id)
     persona = record.get("persona", {})
     lang = record.get("lang", "zh")
 
     name = _localized_text(persona.get("name"), lang) or char_id
     folder_base = _safe_name(name, fallback=char_id)
-
-    ig = load_latest_ig(char_id) or {}
-    posts = ig.get("posts", []) if isinstance(ig, dict) else []
-
-    files: list[tuple[str, bytes | str]] = []
     report = {"char_id": char_id, "folder": folder_base, "images": 0, "missing": []}
 
-    # 图片一律【上传公有桶取公网直链】写进 character.json，不再把二进制打进 zip：
-    # 避免几百个角色的封面/帖图（每张 4-5MB）撑成数 GB 大包、下载超时/404。
-    # 2) 封面 → 公网 URL
+    from . import arca_client
+    from .arca_import_export import (
+        ContractViolation,
+        ImportCharacterContractError,
+        assert_valid_import_character_req,
+        build_import_character_req,
+    )
+
+    # Enums (especially voice_id) are runtime API data.  Do not fall back to a
+    # static list or silently produce a JSON that will later be rejected.
+    page_config = arca_client.get_page_config_cached(lang)
+    provider = str(record.get("source") or config.ARCA_IMPORT_PROVIDER).strip()
+    if not provider:
+        raise ImportCharacterContractError([
+            ContractViolation("request.provider", "must be configured")])
+
     cover_bytes = _image_bytes(record.get("cover"))
-    cover_public = None
-    if cover_bytes:
-        # 复用与落地页导出一致的对象键，命中内容哈希缓存、避免重复上传同一张封面。
-        cover_public = _tos_public_url(
-            cover_bytes, f"creaction/{char_id}/landing/cover.png", lang)
-        if cover_public:
-            report["images"] += 1
-        else:
-            report["missing"].append("cover_upload_failed")
-    else:
-        report["missing"].append("cover")
+    if not cover_bytes:
+        raise ImportCharacterContractError([
+            ContractViolation(
+                "request.character_create_form.images",
+                "a source cover is required to export the contract main image")])
 
-    # 3) 帖图 → 公网 URL（此角色内部并行上传），把 image_url 注入每条 post
-    export_posts = [dict(p) for p in posts]  # 浅拷贝，避免污染内存态
+    # Validate persona content and runtime enum values before creating durable
+    # OSS objects.  The temporary image is structurally valid and lets the
+    # common validator inspect every non-asset part of the final request.
+    preflight = build_import_character_req(
+        record,
+        page_config=page_config,
+        images=[{
+            "image_type": "upload",
+            "is_main_pic": True,
+            "media": {"object_key": "preflight"},
+        }],
+        landing_page_url=None,
+        provider=provider,
+    )
+    assert_valid_import_character_req(
+        preflight, page_config=page_config)
 
-    def _upload_post(i_post: tuple[int, dict]) -> tuple[int, str | None]:
-        i, post = i_post
-        img = post.get("image")
-        data = _image_bytes(img)
-        if not data:
-            return i, None
-        # 用图片文件名做对象键（与落地页帖图键一致），命中缓存复用同一张已传图。
-        nm = None
-        if isinstance(img, dict):
-            lp = img.get("local_path") or img.get("url")
-            if lp:
-                nm = Path(lp).name
-        key = f"creaction/{char_id}/landing/{nm or f'post_{i + 1}.png'}"
-        return i, _tos_public_url(data, key, lang)
+    # Obtain the public bucket/CDN identity only after persona preflight.  The
+    # host set is required to prove landing assets are final public URLs.
+    public_asset_hosts = arca_client.public_tos_hosts(lang)
+    images = _import_main_image(char_id, lang, provider, cover_bytes)
+    if images:
+        report["images"] += 1
 
-    if export_posts:
-        with ThreadPoolExecutor(max_workers=min(len(export_posts), config.MAX_WORKERS)) as ex:
-            for i, url in ex.map(_upload_post, enumerate(export_posts)):
-                if url:
-                    export_posts[i]["image_url"] = url
-                    report["images"] += 1
+    landing_url, landing_html = _build_import_landing(
+        char_id=char_id, lang=lang, provider=provider, cover_bytes=cover_bytes,
+        public_asset_hosts=public_asset_hosts)
+    request = build_import_character_req(
+        record, page_config=page_config, images=images,
+        landing_page_url=landing_url, provider=provider)
+    assert_valid_import_character_req(
+        request, page_config=page_config, public_asset_hosts=public_asset_hosts)
 
-    # 交付 schema：每条 post 只保留 post_id / content / image_url，
-    # 其余中间字段（post_type、format、image、photo_* 等）不出包。
-    export_posts = [
-        {
-            "post_id": p.get("post_id"),
-            "content": p.get("content"),
-            "image_url": p.get("image_url"),
-        }
-        for p in export_posts
-    ]
-
-    # 1) character.json — persona fields + posts + 封面/帖图公网 URL（无二进制）
-    from .persona_export import to_export_schema
-    bundle = {
-        "char_id": char_id,
-        "lang": lang,
-        "name": name,
-        "source": record.get("source", ""),
-        "track": record.get("track", "real"),
-        "cover_url": cover_public,
-        "persona": to_export_schema(persona, lang),
-        "posts": export_posts,
-    }
-    bundle_json = _apply_brand_replacements(
-        json.dumps(bundle, ensure_ascii=False, indent=2))
-    files.append(("character.json", bundle_json))
-
-    # 4) landing.html — 封面/帖图指向【公网 TOS URL】（img 用 url，不内联 base64）。
-    landing_page = load_latest_landing(char_id) or {}
-    landing_html = landing_page.get("html_filled") or landing_page.get("html")
+    files: list[tuple[str, bytes | str]] = [(
+        "character.json", json.dumps(request, ensure_ascii=False, indent=2))]
     if landing_html:
-        landing_html = _apply_brand_replacements(_landing_html_with_public_urls(
-            landing_html, char_id, lang,
-            landing_page.get("cover_url"), cover_bytes,
-            landing_page.get("post_urls")))
         files.append(("landing.html", landing_html))
-    else:
-        report["missing"].append("landing")
 
     # mark the character record as exported
     record["exported"] = True
@@ -974,15 +1093,16 @@ def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | s
 def export_characters_zip(char_ids: list[str]) -> bytes:
     """Bundle the given characters into a zip (one folder per character).
 
-    Each folder contains character.json (persona + posts + 封面/帖图公网 URL) and
-    landing.html (standalone landing page) when one has been generated. 图片不
-    再打包二进制，全部以公网 TOS/CDN URL 引用，导出包因此很小、下载稳定。
+    Each ``character.json`` is a complete, directly importable
+    ImportCharacterReq.  ``landing.html`` is included only as an optional
+    source copy; the JSON points at the final public-bucket HTML URL.  Images
+    are never bundled as binaries.
 
-    每个角色的重活（OSS 下载 + TOS 上传 + 文案处理）跨角色并行；zip 写入
-    （非线程安全）在主线程串行完成。保序输出，保证结果与串行版一致。
+    每個角色的重活（OSS 下載 + TOS 上傳 + 文案處理）跨角色並行；zip 寫入
+    （非執行緒安全）在主執行緒序列完成。保序輸出，保證結果與序列版一致。
 
-    注意：同步版把整份 zip 囤在内存并阻塞请求，仅适合小批量。大批量走
-    export_characters_zip_to_file + 异步任务，避免反代读超时（504）。
+    注意：同步版把整份 zip 囤在記憶體並阻塞請求，僅適合小批次。大批次走
+    export_characters_zip_to_file + 非同步任務，避免反代讀超時（504）。
     """
     results = _build_all_character_files(char_ids)
     buf = io.BytesIO()
@@ -992,10 +1112,10 @@ def export_characters_zip(char_ids: list[str]) -> bytes:
 
 
 def _write_zip(dst, char_ids: list[str], results: dict[str, tuple]) -> None:
-    """把已构建好的角色文件写进 zip（dst 为文件对象或路径）。串行、保序。"""
+    """把已構建好的角色檔案寫進 zip（dst 為檔案物件或路徑）。序列、保序。"""
     used_folders: set = set()
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
-        for cid in char_ids:  # 保持请求顺序
+        for cid in char_ids:  # 保持請求順序
             built = results.get(cid)
             if built is None:
                 continue
@@ -1011,8 +1131,8 @@ def _write_zip(dst, char_ids: list[str], results: dict[str, tuple]) -> None:
 
 def _build_all_character_files(char_ids: list[str],
                                on_done=None) -> dict[str, tuple]:
-    """并行构建所有角色的文件（重活）。on_done(cid) 每完成一个回调一次，
-    供任务进度上报。返回 {cid: (folder_base, files, report)}。"""
+    """並行構建所有角色的檔案（重活）。on_done(cid) 每完成一個回撥一次，
+    供任務進度上報。返回 {cid: (folder_base, files, report)}。"""
     def _one(cid: str):
         try:
             return cid, _build_character_files(cid)
@@ -1033,8 +1153,8 @@ def _build_all_character_files(char_ids: list[str],
 
 def export_characters_zip_to_file(char_ids: list[str], dst_path: Path,
                                   on_done=None) -> int:
-    """异步导出用：并行构建后把 zip 直接写到磁盘文件（不在内存里囤 160MB+）。
-    返回成功打包的角色数。"""
+    """非同步匯出用：並行構建後把 zip 直接寫到磁碟檔案（不在記憶體裡囤 160MB+）。
+    返回成功打包的角色數。"""
     results = _build_all_character_files(char_ids, on_done=on_done)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     with open(dst_path, "wb") as f:
@@ -1045,9 +1165,9 @@ def export_characters_zip_to_file(char_ids: list[str], dst_path: Path,
 @_locked
 @_locked
 def delete_character(char_id: str) -> bool:
-    """删除一个角色及所有以角色 id 归属的数据。
+    """刪除一個角色及所有以角色 id 歸屬的資料。
 
-    持角色锁执行：与后台同步/生成互斥，避免删除中途被并发写“复活”。
+    持角色鎖執行：與後臺同步/生成互斥，避免刪除中途被併發寫“復活”。
     """
     p = _char_path(char_id)
     record = None
@@ -1059,10 +1179,10 @@ def delete_character(char_id: str) -> bool:
         except (json.JSONDecodeError, OSError):
             record = None
 
-    # 远端存储联动删除：persona 记录 + 该角色的批次/ig/landing/chat 记录。
-    # 注意顺序：远端删除成功后才删本地文件——否则远端失败重试时 record 已丢，
-    # 共享上传图清理会被跳过。
-    # 远端删除失败必须上抛（否则残留记录会被 list/load 回源"复活"），由上层报错重试。
+    # 遠端儲存聯動刪除：persona 記錄 + 該角色的批次/ig/landing/chat 記錄。
+    # 注意順序：遠端刪除成功後才刪本地檔案——否則遠端失敗重試時 record 已丟，
+    # 共享上傳圖清理會被跳過。
+    # 遠端刪除失敗必須上拋（否則殘留記錄會被 list/load 回源"復活"），由上層報錯重試。
     from . import arca_storage
     if arca_storage.enabled():
         arca_storage.delete_record("personas", char_id)
@@ -1074,8 +1194,8 @@ def delete_character(char_id: str) -> bool:
                 if row.get("key"):
                     arca_storage.delete_record(coll, row["key"])
         deleted_any = True
-        # OSS 图片/目录级联清理（尽力而为）：不清会永久残留并被 /img 回源复活。
-        # 合并成单次调用：只取一次 STS 凭证 + 批量删，避免逐前缀重复取凭证/逐个删。
+        # OSS 圖片/目錄級聯清理（盡力而為）：不清會永久殘留並被 /img 回源復活。
+        # 合併成單次呼叫：只取一次 STS 憑證 + 批次刪，避免逐字首重複取憑證/逐個刪。
         storage.delete_oss_prefixes(
             [f"images/{char_id}_", f"posts/{char_id}/",
              f"landing/{char_id}/", f"chat/{char_id}/"])
@@ -1156,8 +1276,8 @@ def build_cover_spec(char_id: str, ref_override: str | None = None) -> dict:
     main visual anchor. Cover planning stays text-only so the shooting/filter
     schema comes from the character rather than copying the uploaded photo.
 
-    ref_override: 显式指定封面规划参考图（本地路径）。用于"以现有封面为参考重跑
-    封面链路"的场景（source=image 的角色希望远离原图但保留气质）。传入时优先于源图。
+    ref_override: 顯式指定封面規劃參考圖（本地路徑）。用於"以現有封面為參考重跑
+    封面鏈路"的場景（source=image 的角色希望遠離原圖但保留氣質）。傳入時優先於源圖。
     """
     record = load_character(char_id)
     if not record.get("identity"):
@@ -1168,9 +1288,9 @@ def build_cover_spec(char_id: str, ref_override: str | None = None) -> dict:
     cover_ref = ref_override or _first_source_image(record)
     lang = record.get("lang", "ko")
 
-    # 封面规划【喂原图】：real/light（按用户要求，封面锚定原图，让封面像上传的这个人）
-    # 及 adult/nonhuman 都把原图作为参考传入。只有 kdrama 例外——它是"这部剧的第一帧剧照"，
-    # 从人设重新设计场景，喂原图会把镜头拉回自拍快照，故仍纯文本规划。
+    # 封面規劃【喂原圖】：real/light（按使用者要求，封面錨定原圖，讓封面像上傳的這個人）
+    # 及 adult/nonhuman 都把原圖作為參考傳入。只有 kdrama 例外——它是"這部劇的第一幀劇照"，
+    # 從人設重新設計場景，喂原圖會把鏡頭拉回自拍快照，故仍純文字規劃。
     if track == "kdrama":
         cover_ref_uri = None
     else:
@@ -1195,7 +1315,7 @@ def build_cover_spec(char_id: str, ref_override: str | None = None) -> dict:
 @_locked
 def generate_cover(
     char_id: str,
-    style_id: str,
+    style_id: str | None,
     use_reference: bool | None = None,
     mode: str = "fill_missing",
     recook_from_cover: bool = False,
@@ -1203,9 +1323,9 @@ def generate_cover(
     """Generate a cover image.
 
     use_reference:
-    - None (default): auto — use the source image as i2i reference whenever the
-      style is photographic and a source image exists. The cover anchors every
-      later selfie i2i, and covers drawn without a reference are visibly worse.
+    - None (default): auto — use the source image as an i2i reference whenever it
+      exists. This works both for identity consistency and for preserving a supplied
+      illustration's original visual language without inventing a style prompt.
     - True/False: explicit override.
 
     mode:
@@ -1213,9 +1333,9 @@ def generate_cover(
     - "full": regenerate identity and cover_spec before rendering image.
     - "image_only": render image only; fail if identity or cover_spec is missing.
 
-    recook_from_cover: 以角色【当前封面】而非源图作为参考重跑封面链路。用于 source=image
-    的角色——原封面太像上传原图，希望保留气质但漂离原图。开启时：cover_spec 用当前封面
-    做规划参考，i2i 渲染也用当前封面而非源图（源图不再进入任何一步）。会强制重建 cover_spec。
+    recook_from_cover: 以角色【當前封面】而非源圖作為參考重跑封面鏈路。用於 source=image
+    的角色——原封面太像上傳原圖，希望保留氣質但漂離原圖。開啟時：cover_spec 用當前封面
+    做規劃參考，i2i 渲染也用當前封面而非源圖（源圖不再進入任何一步）。會強制重建 cover_spec。
     """
     record = load_character(char_id)
     if mode not in {"fill_missing", "full", "image_only"}:
@@ -1253,9 +1373,9 @@ def generate_cover(
         record = load_character(char_id)
 
     track = record.get("track", "real")
-    # 非人物（nonhuman）链路：不套画风、不拼画风词，纯按 identity + 原图生成。
-    # flirt 链路且未指定画风时同样不拼画风词（写实底座 + 情欲向视觉层 + i2i 参考图）。
-    if track == "nonhuman" or (track == "flirt" and not style_id):
+    # 沒有明確選擇 style_id 時，一律不猜測/不拼畫風詞；由圖生圖參考保持原始視覺。
+    # 顯式選擇的 style_id 才會注入使用者畫風庫中的 prompt。
+    if not style_id:
         style = None
         eff_style_id = None
     else:
@@ -1278,14 +1398,13 @@ def generate_cover(
         track=track,
     )
     if use_reference is None:
-        # 拼入原图做 i2i——原图只锁"神似"（脸/发型/气质），场景/距离/构图/入口由 cover_spec
-        # 文本重新设计（compose_selfie_prompt 里的 I2I_OVERRIDE_GUARD 明确要求不要复刻原图
-        # 构图）。写实画风且有原图时就用；非写实画风不拼原图。nonhuman 无画风=写实底座，会用原图。
-        use_reference = prompts.is_photographic_style(style_prompt)
+        # 不論是否顯式選畫風，都傳原圖作 i2i 參考：它鎖角色設計與原始作畫語言；
+        # 場景/距離/構圖仍由 cover_spec 重新設計。
+        use_reference = True
     image_urls = None
     if use_reference:
-        # recook_from_cover：i2i 参考用当前封面（recook_ref），源图不再进入渲染，
-        # 让新封面漂离上传原图但保留气质。否则维持原行为（源图做参考）。
+        # recook_from_cover：i2i 參考用當前封面（recook_ref），源圖不再進入渲染，
+        # 讓新封面漂離上傳原圖但保留氣質。否則維持原行為（源圖做參考）。
         src = recook_ref or _first_source_image(record)
         if src:
             image_urls = [api_client.file_to_data_uri(src)]
@@ -1320,33 +1439,37 @@ def _posts_dir(char_id: str) -> Path:
     return d
 
 
-def _render_post_image(record: dict, post: dict, style: dict | None) -> dict:
+def _render_post_image(record: dict, post: dict, style: dict | None,
+                       drop_identity_if_ref: bool = False,
+                       image_model: str | None = None) -> dict:
     """Render or re-render one regular post image in-place.
 
-    style 可为 None（nonhuman 非人物链路不套画风），此时 style_prompt=None，
-    compose_image_prompt 不拼画风词。
+    style 可為 None（nonhuman 非人物鏈路不套畫風），此時 style_prompt=None，
+    compose_image_prompt 不拼畫風詞。
+    drop_identity_if_ref=True 且確實傳了參考圖時，省略 [IDENTITY] 靜態長相段
+    （臉交給 i2i 錨圖；如 feed 路透 candid）。無參考圖時仍保留 identity 兜底。
     """
     char_id = record["char_id"]
     identity = record["identity"]
     style_prompt = style["prompt"] if style else None
+    save_path = config.IMAGE_DIR / f"{char_id}_{post['post_id']}.png"
+    image_urls = None
+    # 不論有無 style prompt，都以封面作同一個角色的視覺錨。這裡不推斷或追加畫風詞。
+    ref = _ref_image_uri_for_selfie(record)
+    if ref:
+        image_urls = [ref]
     prompt = prompts.compose_image_prompt(
         identity, post["variable"], post["scene"], style_prompt,
         track=record.get("track", "real"),
+        include_identity=not (drop_identity_if_ref and bool(image_urls)),
     )
-    save_path = config.IMAGE_DIR / f"{char_id}_{post['post_id']}.png"
-    image_urls = None
-    if prompts.is_photographic_style(style_prompt):
-        # 统一取参：real track 走封面锚（绝不直连原图，避免形似泄漏），
-        # 其他 track 维持原行为（封面优先、原图兜底）。
-        ref = _ref_image_uri_for_selfie(record)
-        if ref:
-            image_urls = [ref]
     res = api_client.generate_image(
         prompt,
         size=config.IMAGE_SIZE_POST,
         resolution=config.IMAGE_RESOLUTION,
         image_urls=image_urls,
         save_path=save_path,
+        model=image_model,
     )
     post["image"] = {
         "url": res["url"],
@@ -1369,7 +1492,7 @@ def generate_posts(
     """Generate posts for each selected type, then optionally render images."""
     record = load_character(char_id)
     if track and record.get("track") != track:
-        record["track"] = track  # 界面临时覆盖链路并持久化
+        record["track"] = track  # 介面臨時覆蓋鏈路並持久化
         save_character(record)
     if not record.get("identity"):
         build_identity(char_id)
@@ -1381,7 +1504,7 @@ def generate_posts(
     style_id = style_id or record.get("style_id")
     style = styles.get_style(style_id) if style_id else None
     if track == "nonhuman":
-        style = None  # 非人物链路：不套画风、不拼画风词
+        style = None  # 非人物鏈路：不套畫風、不拼畫風詞
 
     # 1) generate all post text + variable/scene (parallel across types)
     posts: list[dict] = []
@@ -1415,9 +1538,9 @@ def generate_posts(
         for fut in as_completed(futures):
             posts.extend(fut.result())
 
-    # 2) render images (parallel) using identity + variable + scene + style
-    # nonhuman 无画风也要出图（style=None，_render_post_image 会不拼画风词）。
-    if with_images and (style is not None or track == "nonhuman"):
+    # 2) render images (parallel) using identity + variable + scene + optional style.
+    # style=None 仍可走圖生圖參考，且不會憑空追加任何畫風描述。
+    if with_images:
         def _render(post: dict) -> dict:
             try:
                 _render_post_image(record, post, style)
@@ -1457,9 +1580,7 @@ def rerender_post_image(char_id: str, batch_id: str, post_id: str,
     style_id = style_id or batch.get("style_id") or record.get("style_id")
     style = styles.get_style(style_id) if style_id else None
     if record.get("track") == "nonhuman":
-        style = None  # 非人物链路：不套画风
-    elif not style:
-        raise ValueError("style is required to re-render post image")
+        style = None  # 非人物鏈路：不套畫風
     for post in batch.get("posts", []):
         if post.get("post_id") == post_id:
             _render_post_image(record, post, style)
@@ -1485,9 +1606,9 @@ def _delete_post_image(post: dict) -> None:
 @_locked
 def update_post_content(char_id: str, batch_id: str, post_id: str,
                         content, variable=None, scene=None) -> dict:
-    """就地更新一条普通帖子的文本（content），可选 variable/scene。不动图片。
+    """就地更新一條普通帖子的文字（content），可選 variable/scene。不動圖片。
 
-    content 保持与生成时相同的形态（str 或 dict）；variable/scene 传 None 表示不改。
+    content 保持與生成時相同的形態（str 或 dict）；variable/scene 傳 None 表示不改。
     """
     batch = load_batch(char_id, batch_id)
     for post in batch.get("posts", []):
@@ -1519,13 +1640,16 @@ def delete_post_from_batch(char_id: str, batch_id: str, post_id: str) -> dict:
         raise ValueError(f"post {post_id} not found in batch {batch_id}")
     _delete_post_image(deleted)
     batch["posts"] = kept
+    # 刪除類寫入走遠端嚴格模式（同 delete_ig_post）：遠端失敗即拋錯供前端重試，
+    # 不留「本地刪了、遠端沒刪」的隱患。
     storage.save_json("post_batches", f"{char_id}__{batch_id}", batch,
-                      _posts_dir(char_id) / f"{batch_id}.json")
+                      _posts_dir(char_id) / f"{batch_id}.json",
+                      strict_remote=True)
     return {"deleted": post_id, "batch": batch}
 
 
 # --------------------------------------------------------------------------
-# Step 5: landing page (角色主页/展示页) — character -> single-screen HTML
+# Step 5: landing page (角色主頁/展示頁) — character -> single-screen HTML
 # --------------------------------------------------------------------------
 def _landing_dir(char_id: str) -> Path:
     d = config.LANDING_DIR / char_id
@@ -1578,7 +1702,7 @@ def generate_landing(
     content: list[dict] = [{"type": "text", "text": user_text}]
     cover_lp = record.get("cover", {}).get(
         "local_path") if record.get("cover") else None
-    if cover_lp and storage.ensure_file(Path(cover_lp)):  # 冷缓存从 OSS 回源
+    if cover_lp and storage.ensure_file(Path(cover_lp)):  # 冷快取從 OSS 回源
         content.append(
             {"type": "image_url",
              "image_url": {"url": api_client.file_to_data_uri(cover_lp)}}
@@ -1589,7 +1713,7 @@ def generate_landing(
         {"role": "user", "content": content},
     ]
     raw = api_client.chat(messages, temperature=0.85, max_tokens=32000)
-    html = landing.clean_html(raw)
+    html = landing.replace_user_placeholder(landing.clean_html(raw), lang)
     saved_html = landing.absolutize_urls(
         landing.inject_cover(html, cover_url), config.PUBLIC_BASE_URL)
 
@@ -1607,8 +1731,8 @@ def generate_landing(
         "html": html,
         "html_filled": saved_html,  # cover URL baked in for standalone use
     }
-    # 单角色只保留最新一份，重新生成直接覆盖
-    # html 本体不进 storage_hub(单条 256KB 上限)，剥离到 OSS，hub 只存元数据
+    # 單角色只保留最新一份，重新生成直接覆蓋
+    # html 本體不進 storage_hub(單條 256KB 上限)，剝離到 OSS，hub 只存後設資料
     storage.save_json("landings", char_id, page,
                       _landing_dir(char_id) / "landing_latest.json",
                       oss_fields=["html", "html_filled"])
@@ -1617,16 +1741,17 @@ def generate_landing(
 
 @_locked
 def update_landing_html(char_id: str, html: str) -> dict:
-    """用平台里手改的 HTML 覆盖保存该角色的落地页，不重新走 LLM 生成。
+    """用平臺裡手改的 HTML 覆蓋儲存該角色的落地頁，不重新走 LLM 生成。
 
-    存的是"原始 html"（封面槽位留空，读/导出时再注入实际封面 URL/内联图），
-    与 generate_landing 一致，保证导出得到的是这份最新手改内容。
+    存的是"原始 html"（封面槽位留空，讀/匯出時再注入實際封面 URL/內聯圖），
+    與 generate_landing 一致，保證匯出得到的是這份最新手改內容。
     """
     page = storage.load_json("landings", char_id,
                              _landing_dir(char_id) / "landing_latest.json") or {}
     record = load_character(char_id)
     cover_url = _cover_url_for_landing(record)
-    cleaned = landing.clean_html(html)
+    cleaned = landing.replace_user_placeholder(
+        landing.clean_html(html), record.get("lang"))
     page.update({
         "page_id": page.get("page_id") or _new_id("page"),
         "char_id": char_id,
@@ -1653,6 +1778,9 @@ def load_latest_landing(char_id: str) -> dict | None:
     # background-image divs (and pages whose cover changed) still display it.
     raw = page.get("html")
     cover_url = page.get("cover_url")
+    if raw:
+        raw = landing.replace_user_placeholder(raw, page.get("lang"))
+        page["html"] = raw
     if raw and cover_url:
         page["html_filled"] = landing.absolutize_urls(
             landing.inject_cover(raw, cover_url), config.PUBLIC_BASE_URL)
@@ -1668,10 +1796,10 @@ def load_batch(char_id: str, batch_id: str) -> dict:
 
 
 def list_batches(char_id: str) -> list[dict]:
-    """该角色的普通帖子批次（新到旧）。
+    """該角色的普通帖子批次（新到舊）。
 
-    远端键是 "char__batch"，本地文件名是 "batch.json"：query 按 char_id 过滤
-    （避免拉整集合/跨角色污染），远端键剥前缀映射回本地名（避免同批次重复出现）。
+    遠端鍵是 "char__batch"，本地檔名是 "batch.json"：query 按 char_id 過濾
+    （避免拉整集合/跨角色汙染），遠端鍵剝字首對映回本地名（避免同批次重複出現）。
     """
     prefix = f"{char_id}__"
     batches = storage.list_json(
@@ -1690,9 +1818,9 @@ def list_batches(char_id: str) -> list[dict]:
 def _ref_image_uri_for_selfie(record: dict) -> str | None:
     """Prefer the redrawn cover as the i2i reference; fall back to source image.
 
-    real/kdrama/light track 不做原图兜底：封面已与真人原图解耦（形似只能来自封面），
-    没封面时宁可无参考生成，也不把真人的脸直接带进帖子图。
-    adult/flirt 仍保留原图兜底：flirt 的参考图本身自带氛围/张力，允许直接引用。
+    real/kdrama/light track 不做原圖兜底：封面已與真人原圖解耦（形似只能來自封面），
+    沒封面時寧可無參考生成，也不把真人的臉直接帶進帖子圖。
+    adult/flirt 仍保留原圖兜底：flirt 的參考圖本身自帶氛圍/張力，允許直接引用。
     """
     cover = record.get("cover") or {}
     if cover.get("local_path") and storage.ensure_file(Path(cover["local_path"])):
@@ -1716,8 +1844,8 @@ def _render_ig_post_image(record: dict, post: dict, identity: dict,
     char_id = record["char_id"]
     itype = post.get("image_type")
     save_path = config.IMAGE_DIR / f"{char_id}_{post['post_id']}.png"
-    use_reference = prompts.is_photographic_style(style_prompt)
-    selfie_ref = _ref_image_uri_for_selfie(record) if use_reference else None
+    # 封面是角色的純視覺錨；不需要也不應從 source.style 猜一段畫風 prompt。
+    selfie_ref = _ref_image_uri_for_selfie(record)
 
     if itype == "selfie":
         prompt = prompts.compose_selfie_prompt(
@@ -1759,20 +1887,16 @@ def _render_ig_post_image(record: dict, post: dict, identity: dict,
 
 
 def _sibling_used_photo_kinds(record: dict, sample_k: int = 4) -> list[str]:
-    """收集【同 group 其它角色】最新 IG 批次里用过的 photo_kind，随机抽 sample_k 个。
+    """收集【同 group 其它角色】最新 IG 批次裡用過的 photo_kind，隨機抽 sample_k 個。
 
-    随机抽样让每个角色看到的"避开列表"都不同，避免大家被推向同一批替代形式。
+    隨機抽樣讓每個角色看到的"避開列表"都不同，避免大家被推向同一批替代形式。
     """
     group_id = record.get("group_id")
     self_id = record.get("char_id")
     if not group_id:
         return []
     used: set[str] = set()
-    for p in config.PERSONA_DIR.glob("*.json"):
-        try:
-            sib = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
+    for sib in _persona_snapshot():
         if sib.get("group_id") != group_id or sib.get("char_id") == self_id:
             continue
         ig = load_latest_ig(sib.get("char_id")) or {}
@@ -1801,7 +1925,7 @@ def generate_instagram_posts(
     """
     record = load_character(char_id)
     if track and record.get("track") != track:
-        record["track"] = track  # 界面临时覆盖链路并持久化
+        record["track"] = track  # 介面臨時覆蓋鏈路並持久化
         save_character(record)
     if not record.get("identity"):
         build_identity(char_id)
@@ -1813,13 +1937,13 @@ def generate_instagram_posts(
     style = styles.get_style(style_id) if style_id else None
     style_prompt = style["prompt"] if style else None
     if record.get("track") == "nonhuman":
-        style_prompt = None  # 非人物链路：不套画风、不拼画风词
+        style_prompt = None  # 非人物鏈路：不套畫風、不拼畫風詞
 
     # 1) infer the feed (single LLM call, native language)
     avoid_kinds = _sibling_used_photo_kinds(record)
-    # 注：vibe 氛围灵感已下线（SELFIE_SCHEMA 的 filter/shot_size/angle/framing 本就覆盖
-    # 色调·景深·构图，且给的是发散选项清单，再塞检索到的具体调子反而收敛）。
-    # 拼贴范例（collage）仍在 prompts 内注入。若要重开氛围灵感，见 app/inspiration.py。
+    # 注：vibe 氛圍靈感已下線（SELFIE_SCHEMA 的 filter/shot_size/angle/framing 本就覆蓋
+    # 色調·景深·構圖，且給的是發散選項清單，再塞檢索到的具體調子反而收斂）。
+    # 拼貼範例（collage）仍在 prompts 內注入。若要重開氛圍靈感，見 app/inspiration.py。
     feed = api_client.chat_json(
         prompts.build_ig_feed_messages(
             persona, record.get("lang", config.LANGUAGES[0]), n=n,
@@ -1827,8 +1951,8 @@ def generate_instagram_posts(
         ),
         temperature=0.95,
     )
-    # real 链路先输出 {persona_read, posts}：persona_read 是"这个人凭什么有意思"的
-    # 自我判断（reasoning），posts 才是帖子。其它链路仍直接返回数组。
+    # real 鏈路先輸出 {persona_read, posts}：persona_read 是"這個人憑什麼有意思"的
+    # 自我判斷（reasoning），posts 才是帖子。其它鏈路仍直接返回陣列。
     persona_read = None
     if isinstance(feed, dict):
         if isinstance(feed.get("posts"), list):
@@ -1843,6 +1967,8 @@ def generate_instagram_posts(
         posts.append({
             "post_id": _new_id("ig"),
             "content": item.get("content", {}),
+            "mood": item.get("mood", ""),
+            "post_time": item.get("post_time", ""),
             "post_type": item.get("post_type"),
             "post_type_name": prompts.POST_TYPE_BY_ID.get(
                 item.get("post_type"), {}
@@ -1885,7 +2011,7 @@ def generate_instagram_posts(
         "persona_read": persona_read,
         "posts": posts,
     }
-    # 单角色只保留最新一份，重新生成直接覆盖
+    # 單角色只保留最新一份，重新生成直接覆蓋
     storage.save_json("ig_batches", char_id, batch,
                       _posts_dir(char_id) / "ig_latest.json")
     return batch
@@ -1911,7 +2037,7 @@ def rerender_ig_post_image(char_id: str, post_id: str,
     style = styles.get_style(style_id) if style_id else None
     style_prompt = style["prompt"] if style else None
     if record.get("track") == "nonhuman":
-        style_prompt = None  # 非人物链路：不套画风
+        style_prompt = None  # 非人物鏈路：不套畫風
     for post in batch.get("posts", []):
         if post.get("post_id") == post_id:
             _render_ig_post_image(
@@ -1925,7 +2051,7 @@ def rerender_ig_post_image(char_id: str, post_id: str,
 
 @_locked
 def update_ig_post_content(char_id: str, post_id: str, content) -> dict:
-    """就地更新最新 IG 批次里一条帖子的文本（content）。不动图片。"""
+    """就地更新最新 IG 批次裡一條帖子的文字（content）。不動圖片。"""
     batch = load_latest_ig(char_id)
     if not batch:
         raise ValueError("no saved Instagram posts for this character")
@@ -1956,6 +2082,9 @@ def delete_ig_post(char_id: str, post_id: str) -> dict:
     _delete_post_image(deleted)
     batch["posts"] = kept
     batch["n"] = len(kept)
+    # 刪除類寫入走遠端嚴格模式：遠端同步失敗即拋錯，避免本地已刪而遠端仍存舊帖，
+    # 導致匯出/換機回源時把刪掉的帖子「復活」。
     storage.save_json("ig_batches", char_id, batch,
-                      _posts_dir(char_id) / "ig_latest.json")
+                      _posts_dir(char_id) / "ig_latest.json",
+                      strict_remote=True)
     return {"deleted": post_id, "batch": batch}

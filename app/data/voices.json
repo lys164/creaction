@@ -1,7 +1,7 @@
 {
   "zh": [
     {
-      "name": "温柔学长",
+      "name": "溫柔學長",
       "gender": "男",
       "id": "cda2aaa0c8054d8da67458f2dceb2359"
     },
@@ -26,7 +26,7 @@
       "id": "0a5f15a0ec40483aab918d4d916830da"
     },
     {
-      "name": "温婉学姐",
+      "name": "溫婉學姐",
       "gender": "女",
       "id": "faccba1a8ac54016bcfc02761285e67f"
     },
@@ -36,29 +36,29 @@
       "id": "4d3f1f1dcf56457e9cc9229726503cfd"
     },
     {
-      "name": "甜系学妹",
+      "name": "甜系學妹",
       "gender": "女",
       "id": "a5c2d1eb3f324cd280dd590c78c3cb08"
     },
     {
-      "name": "邻家女孩",
+      "name": "鄰家女孩",
       "gender": "女",
       "id": "cab93dd5e1684a648dbfde02bff2c0dc"
     },
     {
-      "name": "文艺女声",
+      "name": "文藝女聲",
       "gender": "女",
       "id": "901be428c02c44a6b42127df1385658e"
     }
   ],
   "ja": [
     {
-      "name": "穏やかな彼氏/温柔男友",
+      "name": "穏やかな彼氏/溫柔男友",
       "gender": "男",
       "id": "d7eefbaa85df42bfb61832b447b21bc4"
     },
     {
-      "name": "クールな声/冷酷青年",
+      "name": "クールな聲/冷酷青年",
       "gender": "男",
       "id": "70e89e8dc9d64327a1b364db2ad8ea4f"
     },
@@ -68,17 +68,17 @@
       "id": "48d330ddc76149078d11ad8ab224b519"
     },
     {
-      "name": "甘い声/甜蜜男声",
+      "name": "甘い聲/甜蜜男聲",
       "gender": "男",
       "id": "fc0e6d126d9748a2aeabad5ec0bf7d58"
     },
     {
-      "name": "落ち着いた兄/沉稳学长",
+      "name": "落ち著いた兄/沉穩學長",
       "gender": "男",
       "id": "fc95667f244e4925a5f933d5125e2ee6"
     },
     {
-      "name": "優しい先輩/温雅前辈",
+      "name": "優しい先輩/溫雅前輩",
       "gender": "男",
       "id": "7d2ec80265624156b18eb9d22663b332"
     },
@@ -93,12 +93,12 @@
       "id": "6b7249f09ef54a8c950ea1f458085b30"
     },
     {
-      "name": "柔らかい彼女/温柔女友",
+      "name": "柔らかい彼女/溫柔女友",
       "gender": "女",
       "id": "55bc9c52bce1499b9105a5b0c748837f"
     },
     {
-      "name": "クールな彼女/冷酷女声",
+      "name": "クールな彼女/冷酷女聲",
       "gender": "女",
       "id": "9653eb0a2a58497988d43c381a0a48c0"
     },
@@ -108,39 +108,39 @@
       "id": "6bb984750d5c4858bb269eb6d5f1683a"
     },
     {
-      "name": "甘えん坊/撒娇女声",
+      "name": "甘えん坊/撒嬌女聲",
       "gender": "女",
       "id": "cc64afacacba4dfc907a4d33542de365"
     },
     {
-      "name": "お姉さん声/知性姐姐",
+      "name": "お姉さん聲/知性姐姐",
       "gender": "女",
       "id": "88477b8f4b574714b1f9a5fef1cecced"
     },
     {
-      "name": "ナレーション/沉静旁白",
+      "name": "ナレーション/沉靜旁白",
       "gender": "女",
       "id": "daceaaf2ab2a4f56968dff2632b66218"
     },
     {
-      "name": "明るい少女/开朗少女",
+      "name": "明るい少女/開朗少女",
       "gender": "女",
       "id": "4904abc000fa4186b24161d919dd72e1"
     },
     {
-      "name": "大人の女性/成熟女声",
+      "name": "大人の女性/成熟女聲",
       "gender": "女",
       "id": "be5710574fd14f0fb27311e9574b164a"
     }
   ],
   "ko": [
     {
-      "name": "따뜻한 오빠/温柔学长",
+      "name": "따뜻한 오빠/溫柔學長",
       "gender": "男",
       "id": "112f907287274feaa73b448fcbe4b42f"
     },
     {
-      "name": "차가운 남자/冷酷男声",
+      "name": "차가운 남자/冷酷男聲",
       "gender": "男",
       "id": "df403f41497840b789c5caec6f14fea9"
     },
@@ -150,7 +150,7 @@
       "id": "299b98bb29fa484ea20f6fdd2d84f34e"
     },
     {
-      "name": "나긋한 형/温雅型男",
+      "name": "나긋한 형/溫雅型男",
       "gender": "男",
       "id": "008d7c9dee6f4816bbee2915e49e03ce"
     },
@@ -180,17 +180,17 @@
       "id": "519d5fb129da4b2eaaeb5264a766badb"
     },
     {
-      "name": "상냥한 왕자/温柔王子",
+      "name": "상냥한 왕자/溫柔王子",
       "gender": "男",
       "id": "58f0289a0b1c4e24bf94a595e2bb4583"
     },
     {
-      "name": "카리스마/霸总男声",
+      "name": "카리스마/霸總男聲",
       "gender": "男",
       "id": "e194d01f228d4fdaac8da132083b0694"
     },
     {
-      "name": "잔잔한 목소리/沉稳暖男",
+      "name": "잔잔한 목소리/沉穩暖男",
       "gender": "男",
       "id": "921e8af6518e426c8bdf8e2f59e4f194"
     },
@@ -200,22 +200,22 @@
       "id": "a9574d6184714eac96a0a892b719289f"
     },
     {
-      "name": "열정적인 남자/舞台系男声",
+      "name": "열정적인 남자/舞臺系男聲",
       "gender": "男",
       "id": "561686c0427b4656b34b960b05b33e56"
     },
     {
-      "name": "깊은 나레이션/沉稳旁白",
+      "name": "깊은 나레이션/沉穩旁白",
       "gender": "男",
       "id": "29da56534ac84ccd81092be4359a1639"
     },
     {
-      "name": "편한 형/邻家哥哥",
+      "name": "편한 형/鄰家哥哥",
       "gender": "男",
       "id": "5a53fa5e9d3147c692abbc9327e588ba"
     },
     {
-      "name": "젖은 목소리/雨夜低语",
+      "name": "젖은 목소리/雨夜低語",
       "gender": "男",
       "id": "23b7d1bf17a34dac82d0c97aab781082"
     },
@@ -225,22 +225,22 @@
       "id": "50e39eaaf046410698c9f803f23474f3"
     },
     {
-      "name": "따뜻한 아이돌/温暖偶像",
+      "name": "따뜻한 아이돌/溫暖偶像",
       "gender": "男",
       "id": "e68a3ba016794b4789f2e08d4793b134"
     },
     {
-      "name": "털털한 남자/松弛酷哥",
+      "name": "털털한 남자/鬆弛酷哥",
       "gender": "男",
       "id": "9ef8f9e435a344568462fc9c274f23b0"
     },
     {
-      "name": "수줍은 남학생/青涩学弟",
+      "name": "수줍은 남학생/青澀學弟",
       "gender": "男",
       "id": "67ede89a20a0433fb4c8d3de046e03ae"
     },
     {
-      "name": "상큼한 여자/元气少女",
+      "name": "상큼한 여자/元氣少女",
       "gender": "女",
       "id": "3856c88f99ad42daa7d0590080501889"
     },
@@ -250,17 +250,17 @@
       "id": "3fcab151b7e94d3e9e7a506ad4013c6a"
     },
     {
-      "name": "귀여운 여자/软萌女声",
+      "name": "귀여운 여자/軟萌女聲",
       "gender": "女",
       "id": "7cf52949f0544560928728276f26fe7e"
     },
     {
-      "name": "편안한 언니/温柔邻家",
+      "name": "편안한 언니/溫柔鄰家",
       "gender": "女",
       "id": "85e442cdbb6e4cfba3991d1d04457132"
     },
     {
-      "name": "나긋한 여자/轻柔女声",
+      "name": "나긋한 여자/輕柔女聲",
       "gender": "女",
       "id": "911944b7e22e4b969d5609dd771d21c7"
     },
@@ -270,7 +270,7 @@
       "id": "5fc52d35f8a94aecbb6d6865f35cb023"
     },
     {
-      "name": "차분한 누나/知性温婉",
+      "name": "차분한 누나/知性溫婉",
       "gender": "女",
       "id": "4e2d09734e224b0da19746675c34e9a4"
     },
@@ -285,49 +285,49 @@
       "id": "9e2d9244e7d24344a9a2ae34bc455f56"
     },
     {
-      "name": "사랑스런 소녀/可爱萝莉",
+      "name": "사랑스런 소녀/可愛蘿莉",
       "gender": "女",
       "id": "cf09ff7c367b48c994c77041af1c44f2"
     },
     {
-      "name": "밝은 여친/阳光女友",
+      "name": "밝은 여친/陽光女友",
       "gender": "女",
       "id": "9aae54921dd944948ee08d35f6b5f984"
     },
     {
-      "name": "시크한 언니/冷艳御姐",
+      "name": "시크한 언니/冷豔御姐",
       "gender": "女",
       "id": "58d18592ae344ce2a9844af90a2505a3"
     },
     {
-      "name": "우아한 언니/温柔大姐姐",
+      "name": "우아한 언니/溫柔大姐姐",
       "gender": "女",
       "id": "13247dc70a3a49dd8b3dacf0a4841b34"
     },
     {
-      "name": "나른한 소녀/猫系少女",
+      "name": "나른한 소녀/貓系少女",
       "gender": "女",
       "id": "f09b24b361bf4199b64b04bf039b7e3b"
     },
     {
-      "name": "쿨한 여자/清冽女声",
+      "name": "쿨한 여자/清冽女聲",
       "gender": "女",
       "id": "3c7ee7e408104d76a777ebaadc201896"
     },
     {
-      "name": "감성적인 목소리/氛围感女声",
+      "name": "감성적인 목소리/氛圍感女聲",
       "gender": "女",
       "id": "259d7fde62cd445fbde3ce2d8d4f2f3b"
     },
     {
-      "name": "풋풋한 여동생/元气妹妹",
+      "name": "풋풋한 여동생/元氣妹妹",
       "gender": "女",
       "id": "99b4b305458e43018c6b75d251584b2e"
     }
   ],
   "en": [
     {
-      "name": "Warm Boyfriend/温暖男友",
+      "name": "Warm Boyfriend/溫暖男友",
       "gender": "男",
       "id": "802e3bc2b27e49c2995d23ef70e6ac89"
     },
@@ -337,12 +337,12 @@
       "id": "92a2600282e547f098b4a8de1bc9a44a"
     },
     {
-      "name": "Gentle Voice/绅士低音",
+      "name": "Gentle Voice/紳士低音",
       "gender": "男",
       "id": "4667172edbf24b81a4e759b85178339c"
     },
     {
-      "name": "Bright Boy/元气男孩",
+      "name": "Bright Boy/元氣男孩",
       "gender": "男",
       "id": "82b71d5ec4f442498c9f11ee1bf2f8f9"
     },
@@ -352,27 +352,27 @@
       "id": "6fb84253b20442fb92298c892e0ff239"
     },
     {
-      "name": "Warm Girlfriend/温暖女友",
+      "name": "Warm Girlfriend/溫暖女友",
       "gender": "女",
       "id": "98655a12fa944e26b274c535e5e03842"
     },
     {
-      "name": "Cool Girl/酷飒女声",
+      "name": "Cool Girl/酷颯女聲",
       "gender": "女",
       "id": "c2623f0c075b4492ac367989aee1576f"
     },
     {
-      "name": "Bubbly Girl/元气少女",
+      "name": "Bubbly Girl/元氣少女",
       "gender": "女",
       "id": "fb43143e46f44cc6ad7d06230215bab6"
     },
     {
-      "name": "Elegant Lady/优雅淑女",
+      "name": "Elegant Lady/優雅淑女",
       "gender": "女",
       "id": "c023b17b38144a60b3984153247d993f"
     },
     {
-      "name": "Narrator/叙事女声",
+      "name": "Narrator/敘事女聲",
       "gender": "女",
       "id": "e80db686476f4ccda758da35cacfb993"
     }

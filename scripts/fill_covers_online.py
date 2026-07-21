@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""给线上「未生成封面、但有源图」的角色补封面（realistic_portrait）。
+"""給線上「未生成封面、但有源圖」的角色補封面（realistic_portrait）。
 
-只补有源图的角色（无源图的跳过——real 链路无源图只能出无来源封面，按需求排除）。
-串行 + 重试/健康门控 + 服务器重启后线上复核，逐个落进度，可断点续跑。
+只補有源圖的角色（無源圖的跳過——real 鏈路無源圖只能出無來源封面，按需求排除）。
+序列 + 重試/健康門控 + 伺服器重啟後線上複核，逐個落進度，可斷點續跑。
 
 用法：
   PYTHONPATH=. python3 scripts/fill_covers_online.py            # 用 /tmp/nocover.json
-  PYTHONPATH=. python3 scripts/fill_covers_online.py ids.json   # 自定义 {"with_src":[...]}
+  PYTHONPATH=. python3 scripts/fill_covers_online.py ids.json   # 自定義 {"with_src":[...]}
 """
 from __future__ import annotations
 
@@ -21,10 +21,10 @@ import requests
 BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 COVER_STYLE = "realistic_portrait"
 POLL_INTERVAL = 8
-# 单个封面任务的最长等待。注意：客户端超时放弃 ≠ 服务器端任务停止（服务器仍会把
-# 该图生图跑完）。若客户端超时过短、watchdog 又重新提交同一角色，会在服务器端制造
-# 重复任务累积、把主机 load 打爆。故超时须 ≥ 服务器端实际耗时上限，给足时间自然完成，
-# 避免重复提交。可用 COVER_TIMEOUT 覆盖。
+# 單個封面任務的最長等待。注意：客戶端超時放棄 ≠ 伺服器端任務停止（伺服器仍會把
+# 該圖生圖跑完）。若客戶端超時過短、watchdog 又重新提交同一角色，會在伺服器端製造
+# 重複任務累積、把主機 load 打爆。故超時須 ≥ 伺服器端實際耗時上限，給足時間自然完成，
+# 避免重複提交。可用 COVER_TIMEOUT 覆蓋。
 COVER_TIMEOUT = int(os.environ.get("COVER_TIMEOUT", "600"))
 STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "fill_covers_state.json"
 IDS_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/nocover.json")
@@ -40,7 +40,7 @@ def _healthy() -> bool:
 def _wait_healthy() -> None:
     delay, waited = 5, 0
     while not _healthy():
-        print(f"      ⏳ 服务器不可用，等待恢复 已等 {waited}s", flush=True)
+        print(f"      ⏳ 伺服器不可用，等待恢復 已等 {waited}s", flush=True)
         time.sleep(delay)
         waited += delay
         delay = min(delay * 2, 60)
@@ -63,7 +63,7 @@ def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Respo
             last = str(e)
             _wait_healthy()
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last}")
 
 
 def _has_cover(char_id: str) -> bool:
@@ -76,7 +76,7 @@ def _has_cover(char_id: str) -> bool:
 
 
 def _gen_cover(char_id: str) -> bool:
-    """提交单角色封面任务并轮询。任务丢失(服务器重启)则线上复核是否已出。"""
+    """提交單角色封面任務並輪詢。任務丟失(伺服器重啟)則線上複核是否已出。"""
     r = _req("POST", f"{BASE}/api/cover", json={
         "char_id": char_id, "style_id": COVER_STYLE, "mode": "fill_missing",
     }, timeout=60)
@@ -86,17 +86,17 @@ def _gen_cover(char_id: str) -> bool:
         tr = _req("GET", f"{BASE}/api/tasks/{tid}", timeout=30, allow_404=True)
         if tr.status_code == 404:
             _wait_healthy()
-            return _has_cover(char_id)  # 重启丢任务→看线上是否已出
+            return _has_cover(char_id)  # 重啟丟任務→看線上是否已出
         t = tr.json()
         if t.get("status") == "done":
             return True
         if t.get("status") == "error":
             err = str(t.get("error") or "")
-            print(f"      任务错误: {err}", flush=True)
+            print(f"      任務錯誤: {err}", flush=True)
             if _has_cover(char_id):
                 return True
-            # 注意：上游的 "safety policy" 报错是非确定性的假阳性——同一角色重试常能成功。
-            # 因此一律当作可重试失败（返回 False），交由外层轮次续跑，不做永久跳过。
+            # 注意：上游的 "safety policy" 報錯是非確定性的假陽性——同一角色重試常能成功。
+            # 因此一律當作可重試失敗（返回 False），交由外層輪次續跑，不做永久跳過。
             return False
         time.sleep(POLL_INTERVAL)
     return _has_cover(char_id)
@@ -131,18 +131,18 @@ def main() -> int:
     targets = ids.get("with_src", []) if isinstance(ids, dict) else list(ids)
     state = _load_state()
     done = set(state["done"])
-    # 每角色最多尝试次数（safety policy 是非确定性假阳性，多试常能过）；超过则本轮记为
-    # 放弃，避免 watchdog 无限重跑极个别真失败角色。可用 GIVEUP_ATTEMPTS 调整。
+    # 每角色最多嘗試次數（safety policy 是非確定性假陽性，多試常能過）；超過則本輪記為
+    # 放棄，避免 watchdog 無限重跑極個別真失敗角色。可用 GIVEUP_ATTEMPTS 調整。
     attempts = state.setdefault("attempts", {})
     giveup = int(os.environ.get("GIVEUP_ATTEMPTS", "6"))
     gaveup = set(state.setdefault("gaveup", []))
     todo = [c for c in targets if c not in done and c not in gaveup]
-    # 按历史尝试次数升序排：没试过/试得少的排前面先跑，反复失败的（多为上游持续
-    # 过滤的 heermeng/chouxiang 类）自然沉到队尾，避免钉子户堵住队首拖慢整体。
+    # 按歷史嘗試次數升序排：沒試過/試得少的排前面先跑，反覆失敗的（多為上游持續
+    # 過濾的 heermeng/chouxiang 類）自然沉到隊尾，避免釘子戶堵住隊首拖慢整體。
     todo.sort(key=lambda c: attempts.get(c, 0))
     total = len(todo)
-    print(f"补封面目标: {len(targets)}（已完成 {len(done)}，放弃 {len(gaveup)}，"
-          f"待跑 {total}）；画风: {COVER_STYLE}；并发: {conc}\n", flush=True)
+    print(f"補封面目標: {len(targets)}（已完成 {len(done)}，放棄 {len(gaveup)}，"
+          f"待跑 {total}）；畫風: {COVER_STYLE}；併發: {conc}\n", flush=True)
 
     lock = threading.Lock()
     counters = {"ok": 0, "err": 0, "skip": 0, "giveup": 0}
@@ -167,7 +167,7 @@ def main() -> int:
             with lock:
                 counters["skip"] += 1
             _mark_done(cid)
-            print(f"[{i}/{total}] {cid} 已有封面，跳过", flush=True)
+            print(f"[{i}/{total}] {cid} 已有封面，跳過", flush=True)
             return
         print(f"[{i}/{total}] {cid} 生成封面…", flush=True)
         try:
@@ -183,22 +183,22 @@ def main() -> int:
                 if n >= giveup:
                     with lock:
                         counters["giveup"] += 1
-                    print(f"      ⊘ 放弃 {cid}（已尝试 {n} 次仍失败）", flush=True)
+                    print(f"      ⊘ 放棄 {cid}（已嘗試 {n} 次仍失敗）", flush=True)
                 else:
-                    print(f"      ✗ 未生成 {cid}（第 {n} 次，稍后续跑重试）", flush=True)
+                    print(f"      ✗ 未生成 {cid}（第 {n} 次，稍後續跑重試）", flush=True)
         except Exception as e:  # noqa: BLE001
             _bump_attempt(cid)
             with lock:
                 counters["err"] += 1
-            print(f"      ✗ 失败 {cid}: {e}", flush=True)
+            print(f"      ✗ 失敗 {cid}: {e}", flush=True)
 
     jobs = list(enumerate(todo, 1))
     with ThreadPoolExecutor(max_workers=conc) as ex:
         list(ex.map(_one, jobs))
 
-    print(f"\n完成: 成功 {counters['ok']}，跳过 {counters['skip']}，失败 {counters['err']}，"
-          f"放弃 {counters['giveup']}。累计已补 {len(state['done'])}，"
-          f"累计放弃 {len(state['gaveup'])}。", flush=True)
+    print(f"\n完成: 成功 {counters['ok']}，跳過 {counters['skip']}，失敗 {counters['err']}，"
+          f"放棄 {counters['giveup']}。累計已補 {len(state['done'])}，"
+          f"累計放棄 {len(state['gaveup'])}。", flush=True)
     return 0 if counters["err"] == 0 else 1
 
 

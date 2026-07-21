@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""备份线上 source=mengnv 且缺封面的角色，并按 group_id 聚合出真名清单。
+"""備份線上 source=mengnv 且缺封面的角色，並按 group_id 聚合出真名清單。
 
-只读，不改任何线上数据。产出：
-  data/_mengnv_online_backup_<ts>/<char_id>.json   每个角色完整详情
-  data/_mengnv_online_backup_<ts>/_groups.json      按 group_id 聚合的名字清单
+只讀，不改任何線上資料。產出：
+  data/_mengnv_online_backup_<ts>/<char_id>.json   每個角色完整詳情
+  data/_mengnv_online_backup_<ts>/_groups.json      按 group_id 聚合的名字清單
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def _get(url, **kw):
         except requests.RequestException as e:
             last = e
             time.sleep(min(3 * (i + 1), 15))
-    raise RuntimeError(f"GET 失败 {url}: {last}")
+    raise RuntimeError(f"GET 失敗 {url}: {last}")
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
     chars = _get(f"{BASE}/api/characters").json()
     targets = [c for c in chars
                if c.get("source") == "mengnv" and not c.get("cover_url")]
-    print(f"目标 mengnv 缺封面角色: {len(targets)}", flush=True)
+    print(f"目標 mengnv 缺封面角色: {len(targets)}", flush=True)
 
     details = {}
 
@@ -69,8 +69,8 @@ def main():
     with open(os.path.join(out, "_groups.json"), "w", encoding="utf-8") as f:
         json.dump(groups, f, ensure_ascii=False, indent=2)
 
-    print(f"\n备份完成: {out}")
-    print(f"角色数: {len(details)}，group 数: {len(groups)}")
+    print(f"\n備份完成: {out}")
+    print(f"角色數: {len(details)}，group 數: {len(groups)}")
 
 
 if __name__ == "__main__":

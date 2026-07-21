@@ -1,4 +1,4 @@
-"""Landing-page (角色主页/展示页) generation.
+"""Landing-page (角色主頁/展示頁) generation.
 
 Reuses the production pipeline's character records (persona authored natively in
 one language + a redrawn cover) and turns them into a single-screen HTML
@@ -27,8 +27,8 @@ _PROMPT_PACKS: dict[str, dict] = _PROMPTS.get("PROMPT_PACKS") or {
     }
 }
 
-# 可切换的落地页 prompt 变体：default = 原长图叙事页；其余变体（如
-# interactive 互动卡片版）自带完整 SYSTEM_PROMPT，输出整份 HTML 文档。
+# 可切換的落地頁 prompt 變體：default = 原長圖敘事頁；其餘變體（如
+# interactive 互動卡片版）自帶完整 SYSTEM_PROMPT，輸出整份 HTML 檔案。
 _VARIANTS: dict[str, dict] = _PROMPTS.get("PROMPT_VARIANTS") or {}
 _DEFAULT_VARIANT = "default"
 
@@ -38,7 +38,7 @@ def _variant(variant: str | None) -> dict:
 
 
 def landing_variants() -> list[dict]:
-    """落地页 prompt 变体清单，供前端做选项切换。"""
+    """落地頁 prompt 變體清單，供前端做選項切換。"""
     out = []
     for vid, v in _VARIANTS.items():
         out.append({
@@ -124,8 +124,8 @@ def build_system_prompt(
 ) -> str:
     """Inject style into the language-specific system prompt.
 
-    非默认变体（如互动卡片版）自带完整、自包含的 SYSTEM_PROMPT，直接返回，
-    不注入 style（其母版已内置全套约束）。"""
+    非預設變體（如互動卡片版）自帶完整、自包含的 SYSTEM_PROMPT，直接返回，
+    不注入 style（其母版已內建全套約束）。"""
     v = _variant(variant)
     if v.get("SYSTEM_PROMPT"):
         return v["SYSTEM_PROMPT"]
@@ -145,37 +145,37 @@ def _default_design_directive(lang: str | None) -> str:
 _MSG_I18N = {
     "zh": {
         "unnamed": "(未命名角色)",
-        "char_info": "# 角色的信息：",
-        "opening_title": "# TA 的开场白与关系钩子（用作页面「勾你来聊天」的素材，提炼成 TA 向你自我呈现/邀请的语气，不要原样照搬整段）：",
-        "opening_note": "开场情境 note",
-        "opening_msgs": "TA 主动对你说的第一句话们",
-        "cover_yes": 'cover: 角色有封面图（渲染器会自动注入到 class="oc-cover" 的元素中，你只需留好槽位，src 留空）',
-        "cover_no": "cover: 无封面图（请用 CSS 渐变/纹理生成抽象视觉占位）",
-        "page_lang": "# 页面文案语言：请用 {name} 撰写页面上所有可见文案。{directive}",
-        "style_prefix": "风格：",
-        "current_html": "\n\n----\n当前 HTML（在此基础上修改）：\n",
-        "current_html_long": "\n\n----\n当前页面已生成（代码较长不重复附上）。请在现有结构基础上修改，保持整体风格一致。",
-        "request": "# 用户要求：",
-        "default_request": "请根据角色信息生成主页",
-        "output_lang": "\n\n⚠️ 页面上所有可见文字（标题、正文、标签、装饰文案等）一律使用简体中文。",
-        "brand_rule": "⚠️ 品牌规则：角色发帖/聊天所在的平台一律称「Popop」，页面文案不得出现 Instagram/ins/Threads/小红书/推特 等真实社交平台名。",
-        "design_keywords": r"交互|互动|滑动|布局|美观|组件|模块|元件",
+        "char_info": "# 角色的資訊：",
+        "opening_title": "# TA 的開場白與關係鉤子（用作頁面「勾你來聊天」的素材，提煉成 TA 向你自我呈現/邀請的語氣，不要原樣照搬整段）：",
+        "opening_note": "開場情境 note",
+        "opening_msgs": "TA 主動對你說的第一句話們",
+        "cover_yes": 'cover: 角色有封面圖（渲染器會自動注入到 class="oc-cover" 的元素中，你只需留好槽位，src 留空）',
+        "cover_no": "cover: 無封面圖（請用 CSS 漸變/紋理生成抽象視覺佔位）",
+        "page_lang": "# 頁面文案語言：請用 {name} 撰寫頁面上所有可見文案。{directive}",
+        "style_prefix": "風格：",
+        "current_html": "\n\n----\n當前 HTML（在此基礎上修改）：\n",
+        "current_html_long": "\n\n----\n當前頁面已生成（程式碼較長不重複附上）。請在現有結構基礎上修改，保持整體風格一致。",
+        "request": "# 使用者要求：",
+        "default_request": "請根據角色資訊生成主頁",
+        "output_lang": "\n\n⚠️ 頁面上所有可見文字（標題、正文、標籤、裝飾文案等）一律使用簡體中文。",
+        "brand_rule": "⚠️ 品牌規則：角色發帖/聊天所在的平臺一律稱「Popop」，頁面文案不得出現 Instagram/ins/Threads/小紅書/推特 等真實社交平臺名。",
+        "design_keywords": r"互動|互動|滑動|佈局|美觀|元件|模組|元件",
     },
     "ja": {
         "unnamed": "(名前未設定)",
         "char_info": "# キャラクター情報：",
-        "opening_title": "# 最初のセリフと関係性のフック（ページで『話してみたい』と思わせる素材。全文をそのまま写さず、自己提示／招待の口調に要約）：",
-        "opening_note": "導入シチュエーション note",
+        "opening_title": "# 最初のセリフと関係性のフック（ページで『話してみたい』と思わせる素材。全文をそのまま寫さず、自己提示／招待の口調に要約）：",
+        "opening_note": "匯入シチュエーション note",
         "opening_msgs": "キャラクターから最初に送られる言葉",
-        "cover_yes": 'cover: カバー画像あり（レンダラーが class="oc-cover" の要素に自動注入するので、src は空のままスロットだけ用意する）',
-        "cover_no": "cover: カバー画像なし（CSS グラデーション／テクスチャで抽象的なビジュアルを作る）",
+        "cover_yes": 'cover: カバー畫像あり（レンダラーが class="oc-cover" の要素に自動注入するので、src は空のままスロットだけ用意する）',
+        "cover_no": "cover: カバー畫像なし（CSS グラデーション／テクスチャで抽象的なビジュアルを作る）",
         "page_lang": "# ページ文言の言語：ページ上の可視テキストはすべて {name} で書くこと。{directive}",
         "style_prefix": "スタイル：",
         "current_html": "\n\n----\n現在の HTML（これをベースに修正）：\n",
-        "current_html_long": "\n\n----\nページは生成済み（コードが長いため再添付しません）。既存の構造をベースに修正し、全体のスタイルを一貫させてください。",
+        "current_html_long": "\n\n----\nページは生成済み（コードが長いため再添付しません）。既存の構造をベースに修正し、全體のスタイルを一貫させてください。",
         "request": "# ユーザーの要望：",
         "default_request": "キャラクター情報をもとにホームページを生成してください",
-        "output_lang": "\n\n⚠️ ページ上のすべての可視テキスト（見出し・本文・ラベル・装飾コピーなど）は必ず日本語で書いてください。",
+        "output_lang": "\n\n⚠️ ページ上のすべての可視テキスト（見出し・本文・ラベル・裝飾コピーなど）は必ず日本語で書いてください。",
         "brand_rule": "⚠️ ブランド規則：キャラクターが投稿・チャットするプラットフォームは必ず「Popop」と呼ぶこと。Instagram/インスタ/Threads/X など実在のSNS名をページ文言に出さない。",
         "design_keywords": r"インタラクション|操作|スライド|レイアウト|デザイン|コンポーネント|モジュール",
     },
@@ -222,8 +222,8 @@ def _msg(lang: str | None) -> dict:
     return _MSG_I18N.get(lang or "") or _MSG_I18N["zh"]
 
 
-# 新旧 schema 键并存（同一角色只带其中一套）：identity/dislikes/worldview/
-# online_chat_style/behavior_patterns/inner_structure/value 为新键，其余旧键兼容存量。
+# 新舊 schema 鍵並存（同一角色只帶其中一套）：identity/dislikes/worldview/
+# online_chat_style/behavior_patterns/inner_structure/value 為新鍵，其餘舊鍵相容存量。
 _FIELD_LABELS = {
     "profile": "profile",
     "tags": "tags",
@@ -269,7 +269,7 @@ def _stringify(value) -> str:
             if isinstance(it, str):
                 parts.append(it.strip())
             elif isinstance(it, dict):
-                # backstory {stage,detail} / 旧 social {name,relation,info,dynamic}
+                # backstory {stage,detail} / 舊 social {name,relation,info,dynamic}
                 # / 新 social {name,relationship,description}
                 if it.get("stage") or it.get("detail"):
                     head = it.get("stage", "")
@@ -398,17 +398,17 @@ def _opening_text(persona: dict, lang: str | None = "zh") -> str:
 
 
 def _cover_note_for_variant(v: dict, has_cover: bool, labels: dict) -> str:
-    """按变体的封面承载方式给出封面说明。
+    """按變體的封面承載方式給出封面說明。
 
-    - cover_placeholder（如互动版 __IMG_BASE64__）：只作有/无声明，勿改占位符。
-    - cover_slot（如 narrative_pro 用 oc-cover）：沿用通用槽位说明，渲染器注入。
+    - cover_placeholder（如互動版 __IMG_BASE64__）：只作有/無宣告，勿改佔位符。
+    - cover_slot（如 narrative_pro 用 oc-cover）：沿用通用槽位說明，渲染器注入。
     """
     if v.get("cover_placeholder"):
         ph = v["cover_placeholder"]
-        return (f"cover: 有封面图（原样保留母版里的封面占位符 {ph}，"
-                f"后处理会填成公网图片 URL，勿自行生成 base64）"
-                if has_cover else f"cover: 无封面图（按母版占位符 {ph} 处理）")
-    # 默认走 oc-cover 槽位说明（与默认变体一致）。
+        return (f"cover: 有封面圖（原樣保留母版裡的封面佔位符 {ph}，"
+                f"後處理會填成公網圖片 URL，勿自行生成 base64）"
+                if has_cover else f"cover: 無封面圖（按母版佔位符 {ph} 處理）")
+    # 預設走 oc-cover 槽位說明（與預設變體一致）。
     return labels["cover_yes"] if has_cover else labels["cover_no"]
 
 
@@ -418,8 +418,8 @@ def _build_self_contained_message(
     request: str, style_text: str | None, current_html: str | None,
     variant_cfg: dict,
 ) -> str:
-    """自包含变体的用户消息：输入只有角色 json + 封面图，
-    不拼接 moments/帖子内容，也不追加品牌/语言/设计指令等额外内容。"""
+    """自包含變體的使用者訊息：輸入只有角色 json + 封面圖，
+    不拼接 moments/帖子內容，也不追加品牌/語言/設計指令等額外內容。"""
     info = labels["char_info"] + "\n" + name + "\n"
     info += f"lang: {lang}\n"
     if profile:
@@ -479,14 +479,14 @@ def build_user_message(persona: dict, lang: str, has_cover: bool,
     moment_text = moments_to_profile_text(moments)
     if moment_text:
         parts.append(
-            "# 角色最近动态 moments（请优先按这些真实数据展示，不要另编空泛动态）：\n"
+            "# 角色最近動態 moments（請優先按這些真實資料展示，不要另編空泛動態）：\n"
             + moment_text
         )
         parts.append(
-            "# moments 展示规则：如果页面包含 Stories / 限时动态 / recent moments 模块，必须展示每条动态的非空结构化字段；"
-            "不要只显示 photo_kind + color_tone。photo/composite 至少展示素材、版式、画面文字、装饰、色调、手机来源、缩略图重点中有值的字段；"
-            "selfie 至少展示拍摄方式、镜头/裁切、角度、滤镜质感、地点、动作、穿搭、表情中有值的字段。"
-            "空字段不要渲染，不要写 null/none/空对象。"
+            "# moments 展示規則：如果頁面包含 Stories / 限時動態 / recent moments 模組，必須展示每條動態的非空結構化欄位；"
+            "不要只顯示 photo_kind + color_tone。photo/composite 至少展示素材、版式、畫面文字、裝飾、色調、手機來源、縮圖重點中有值的欄位；"
+            "selfie 至少展示拍攝方式、鏡頭/裁切、角度、濾鏡質感、地點、動作、穿搭、表情中有值的欄位。"
+            "空欄位不要渲染，不要寫 null/none/空物件。"
         )
 
     parts.append(labels["page_lang"].format(
@@ -536,6 +536,29 @@ def clean_html(out: str) -> str:
     return s
 
 
+# 落地頁裡如果漏出佔位符 {user}/{{user}}（來自 persona 欄位或 prompt 模板），
+# 按頁面語言替換成對應的第二人稱「你」。
+_USER_YOU = {
+    "zh": "你",
+    "zh-CN": "你",
+    "zh-TW": "你",
+    "zh-Hant": "你",
+    "ja": "あなた",
+    "ko": "당신",
+    "en": "you",
+}
+# 相容大小寫 / 花括號數量 / 前後空格：{user}、{{user}}、{ User } 等一併命中。
+_USER_TOKEN_RE = re.compile(r"\{{1,2}\s*user\s*\}{1,2}", re.IGNORECASE)
+
+
+def replace_user_placeholder(html: str, lang: str | None) -> str:
+    """把落地頁文案裡殘留的 {user}/{{user}} 佔位符換成本語種的「你」。"""
+    if not html or "user" not in html.lower():
+        return html
+    you = _USER_YOU.get(lang or "") or _USER_YOU["zh"]
+    return _USER_TOKEN_RE.sub(you, html)
+
+
 def _set_img_src(tag: str, url: str) -> str:
     """Set an <img> tag's src to url. Handles three cases:
     already has a non-empty src (leave it), has an empty src="" (fill it),
@@ -561,8 +584,8 @@ def inject_cover(html: str, cover_url: str | None) -> str:
         return html
     url = cover_url
 
-    # 互动卡片版母版用占位符承载封面（<img src>）。新版占位符是 __IMG_URL__
-    # （填公网/相对 URL，不内联 base64）；老页面里仍是 __IMG_BASE64__，一并兼容。
+    # 互動卡片版母版用佔位符承載封面（<img src>）。新版佔位符是 __IMG_URL__
+    # （填公網/相對 URL，不內聯 base64）；老頁面裡仍是 __IMG_BASE64__，一併相容。
     for placeholder in ("__IMG_URL__", "__IMG_BASE64__"):
         if placeholder in html:
             html = html.replace(placeholder, url)
@@ -634,17 +657,17 @@ def inject_post_images(html: str, post_urls: list[str] | None) -> str:
     return html
 
 
-# 站内相对资源前缀（img/上传/缩略图），改写成绝对 URL 时匹配这些根路径。
+# 站內相對資源字首（img/上傳/縮圖），改寫成絕對 URL 時匹配這些根路徑。
 _REL_ASSET_PREFIXES = ("/img/", "/upload/", "/thumbs/")
 
 
 def absolutize_urls(html: str, base_url: str | None) -> str:
-    """把落地页里 src/url() 引用的站内相对资源改写成带域名的绝对 URL。
+    """把落地頁裡 src/url() 引用的站內相對資源改寫成帶域名的絕對 URL。
 
-    只改以 /img/、/upload/、/thumbs/ 开头的相对路径（站内静态资源），
-    形如 src="/img/x.png" / url('/img/x.png') → base_url + 路径。
-    已是 http(s)/data: 的绝对地址、以及其它相对路径一律不动。base_url
-    为空时原样返回（保持相对路径的历史行为）。"""
+    只改以 /img/、/upload/、/thumbs/ 開頭的相對路徑（站內靜態資源），
+    形如 src="/img/x.png" / url('/img/x.png') → base_url + 路徑。
+    已是 http(s)/data: 的絕對地址、以及其它相對路徑一律不動。base_url
+    為空時原樣返回（保持相對路徑的歷史行為）。"""
     if not base_url or not html:
         return html
     base = base_url.rstrip("/")
@@ -654,7 +677,7 @@ def absolutize_urls(html: str, base_url: str | None) -> str:
         return f'{m.group("attr")}={quote}{base}{path}{quote}'
 
     prefix_alt = "|".join(re.escape(p) for p in _REL_ASSET_PREFIXES)
-    # src="/img/..." 或 href="/img/..."（引号内以受支持前缀开头的相对路径）
+    # src="/img/..." 或 href="/img/..."（引號內以受支援字首開頭的相對路徑）
     html = re.sub(
         rf'(?P<attr>\b(?:src|href))\s*=\s*(?P<q>["\'])(?P<p>(?:{prefix_alt})[^"\']*)(?P=q)',
         _abs, html,
@@ -664,7 +687,7 @@ def absolutize_urls(html: str, base_url: str | None) -> str:
         quote, path = m.group("q") or "", m.group("p")
         return f'url({quote}{base}{path}{quote})'
 
-    # CSS url(/img/...) —— 引号可有可无
+    # CSS url(/img/...) —— 引號可有可無
     html = re.sub(
         rf'url\(\s*(?P<q>["\']?)(?P<p>(?:{prefix_alt})[^"\')]*)(?P=q)\s*\)',
         _abs_css, html,

@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""补跑线上多个 source 缺封面角色的封面 —— 直接打线上服务(HTTP)。
+"""補跑線上多個 source 缺封面角色的封面 —— 直接打線上服務(HTTP)。
 
-扫描线上指定 source(默认 heermeng,image,mengnv；排除"无来源"/空 source)且
-无 cover_url 的角色，调用 /api/characters/batch_cover 逐批补封面。
+掃描線上指定 source(預設 heermeng,image,mengnv；排除"無來源"/空 source)且
+無 cover_url 的角色，呼叫 /api/characters/batch_cover 逐批補封面。
 
-画风(style_id)：
-- 缺封面角色通常 style_id=None（还没出过封面）。按"角色已存画风优先、没存用默认"，
-  默认 realistic_portrait，与各 source 已成功封面一致。
-- nonhuman/flirt 链路服务器内部忽略 style_id，按自身逻辑出图；real/light 用 realistic_portrait。
+畫風(style_id)：
+- 缺封面角色通常 style_id=None（還沒出過封面）。按"角色已存畫風優先、沒存用預設"，
+  預設 realistic_portrait，與各 source 已成功封面一致。
+- nonhuman/flirt 鏈路伺服器內部忽略 style_id，按自身邏輯出圖；real/light 用 realistic_portrait。
 
-断点：每批切走已处理项，避免死循环；上游审核拒绝的重试也未必成功，
-可再次运行本脚本重扫兜底。
+斷點：每批切走已處理項，避免死迴圈；上游稽核拒絕的重試也未必成功，
+可再次執行本指令碼重掃兜底。
 
 用法：
   PYTHONPATH=. python3 scripts/backfill_covers_multi.py [--sources a,b,c] [--batch N] [--dry-run]
@@ -25,7 +25,7 @@ import requests
 
 BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 DEFAULT_SOURCES = ["heermeng", "image", "mengnv"]
-DEFAULT_STYLE = "realistic_portrait"   # 缺封面角色 style_id=None 时的兜底；nonhuman/flirt 忽略
+DEFAULT_STYLE = "realistic_portrait"   # 缺封面角色 style_id=None 時的兜底；nonhuman/flirt 忽略
 POLL_INTERVAL = 8
 BATCH_TIMEOUT = 3600
 DEFAULT_BATCH = 8
@@ -41,7 +41,7 @@ def _healthy() -> bool:
 def _wait_healthy(label: str = "") -> None:
     delay, waited = 5, 0
     while not _healthy():
-        print(f"   ⏳ 服务器不可用，等待恢复{(' ('+label+')') if label else ''} 已等 {waited}s",
+        print(f"   ⏳ 伺服器不可用，等待恢復{(' ('+label+')') if label else ''} 已等 {waited}s",
               flush=True)
         time.sleep(delay)
         waited += delay
@@ -63,11 +63,11 @@ def _req(method: str, url: str, **kw) -> requests.Response:
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 1)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _missing_by_source(sources: set[str]) -> dict[str, list[str]]:
-    """线上扫描指定 source 且无 cover_url 的角色 char_id，按 source 分组。"""
+    """線上掃描指定 source 且無 cover_url 的角色 char_id，按 source 分組。"""
     r = _req("GET", f"{BASE}/api/characters", timeout=60)
     out: dict[str, list[str]] = {s: [] for s in sources}
     for c in r.json():
@@ -90,9 +90,9 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
         if t.get("status") == "done":
             return t.get("result") or {}
         if t.get("status") == "error":
-            raise RuntimeError(f"{label} 任务失败: {t.get('error')}")
+            raise RuntimeError(f"{label} 任務失敗: {t.get('error')}")
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
+    raise TimeoutError(f"{label} 輪詢超時 ({timeout}s)")
 
 
 def _cover_batch(char_ids: list[str], style_id: str,
@@ -102,7 +102,7 @@ def _cover_batch(char_ids: list[str], style_id: str,
         payload["use_reference"] = use_reference
     r = _req("POST", f"{BASE}/api/characters/batch_cover", json=payload, timeout=120)
     task_id = r.json()["task_id"]
-    return _poll(task_id, BATCH_TIMEOUT, "补封面")
+    return _poll(task_id, BATCH_TIMEOUT, "補封面")
 
 
 def main() -> int:
@@ -111,9 +111,9 @@ def main() -> int:
     ap.add_argument("--style", type=str, default=DEFAULT_STYLE)
     ap.add_argument("--batch", type=int, default=DEFAULT_BATCH)
     ap.add_argument("--no-reference", action="store_true",
-                    help="不拼原图做 i2i 参考，纯按文本 identity 出图（用于原图触发上游审核时）")
+                    help="不拼原圖做 i2i 參考，純按文字 identity 出圖（用於原圖觸發上游稽核時）")
     ap.add_argument("--loop", action="store_true",
-                    help="循环重扫：跑完一轮自动重扫线上仍缺的继续补，直到某轮 0 成功才停")
+                    help="迴圈重掃：跑完一輪自動重掃線上仍缺的繼續補，直到某輪 0 成功才停")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     use_ref = False if args.no_reference else None
@@ -121,35 +121,35 @@ def main() -> int:
     sources = {s.strip() for s in args.sources.split(",") if s.strip()}
     grouped = _missing_by_source(sources)
     total = sum(len(v) for v in grouped.values())
-    print(f"线上服务: {BASE}")
-    ref_desc = "不拼原图(纯文本identity)" if args.no_reference else "默认(按画风决定i2i)"
-    print(f"目标 source: {sorted(sources)}；兜底画风: {args.style}；"
-          f"每批 {args.batch} 个；原图参考: {ref_desc}")
+    print(f"線上服務: {BASE}")
+    ref_desc = "不拼原圖(純文字identity)" if args.no_reference else "預設(按畫風決定i2i)"
+    print(f"目標 source: {sorted(sources)}；兜底畫風: {args.style}；"
+          f"每批 {args.batch} 個；原圖參考: {ref_desc}")
     for s in sorted(grouped):
-        print(f"  {s}: 缺封面 {len(grouped[s])} 个")
-    print(f"合计 {total} 个\n")
+        print(f"  {s}: 缺封面 {len(grouped[s])} 個")
+    print(f"合計 {total} 個\n")
 
     if args.dry_run:
-        print(f"[DRY] 将分约 {(total + args.batch - 1)//args.batch} 批补封面。")
+        print(f"[DRY] 將分約 {(total + args.batch - 1)//args.batch} 批補封面。")
         return 0
 
     def _one_pass(pass_ids: list[str]) -> tuple[int, int]:
-        """跑一遍给定 id 列表，返回 (成功数, 失败数)。"""
+        """跑一遍給定 id 列表，返回 (成功數, 失敗數)。"""
         ok, err, bn = 0, 0, 0
         while pass_ids:
             batch = pass_ids[:args.batch]
             pass_ids = pass_ids[args.batch:]
             bn += 1
-            print(f"[批 {bn}] 补 {len(batch)} 个", flush=True)
+            print(f"[批 {bn}] 補 {len(batch)} 個", flush=True)
             try:
                 res = _cover_batch(batch, args.style, use_reference=use_ref)
                 ok += len(res.get("covered", []))
                 errs = res.get("errors", {})
                 err += len(errs)
                 if errs:
-                    print(f"   ⚠ 本批 {len(errs)} 个仍失败(多为上游审核)", flush=True)
+                    print(f"   ⚠ 本批 {len(errs)} 個仍失敗(多為上游稽核)", flush=True)
             except Exception as e:  # noqa: BLE001
-                print(f"   ✗ 本批异常: {e}", flush=True)
+                print(f"   ✗ 本批異常: {e}", flush=True)
         return ok, err
 
     grand_ok = 0
@@ -160,24 +160,24 @@ def main() -> int:
         for s in sorted(grouped):
             ids.extend(grouped[s])
         if not ids:
-            print("没有缺封面的角色，无需补。" if round_no == 1 else "已无缺封面，收工。")
+            print("沒有缺封面的角色，無需補。" if round_no == 1 else "已無缺封面，收工。")
             break
-        print(f"\n===== 第 {round_no} 轮：待补 {len(ids)} 个 =====", flush=True)
+        print(f"\n===== 第 {round_no} 輪：待補 {len(ids)} 個 =====", flush=True)
         ok, err = _one_pass(ids)
         grand_ok += ok
-        print(f"----- 第 {round_no} 轮完成：成功 {ok}, 失败 {err} -----", flush=True)
+        print(f"----- 第 {round_no} 輪完成：成功 {ok}, 失敗 {err} -----", flush=True)
         if not args.loop:
-            print(f"\n完成: 本次成功补 {ok} 个, 失败 {err} 个。")
+            print(f"\n完成: 本次成功補 {ok} 個, 失敗 {err} 個。")
             break
-        # loop 模式：本轮 0 成功说明剩下全是过不了审的硬骨头，停止避免空转
+        # loop 模式：本輪 0 成功說明剩下全是過不了審的硬骨頭，停止避免空轉
         if ok == 0:
-            print(f"\n本轮 0 成功，剩余均为上游审核拒绝的硬骨头，停止。累计成功 {grand_ok} 个。")
+            print(f"\n本輪 0 成功，剩餘均為上游稽核拒絕的硬骨頭，停止。累計成功 {grand_ok} 個。")
             break
         time.sleep(5)
-        # 重新扫描线上，只保留仍缺封面的
+        # 重新掃描線上，只保留仍缺封面的
         grouped = _missing_by_source(sources)
 
-    print("提示: 失败多为上游内容审核拒绝，稍后可再次运行本脚本重扫重试。")
+    print("提示: 失敗多為上游內容稽核拒絕，稍後可再次執行本指令碼重掃重試。")
     return 0
 
 

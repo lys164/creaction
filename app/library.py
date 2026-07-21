@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""灵感库：性格库 + 职业库的领料/销账（仅 real track 使用）。
+"""靈感庫：性格庫 + 職業庫的領料/銷賬（僅 real track 使用）。
 
-设计（与 prompts/pipeline 的分工）：
-- 编排层"发牌"：每次生成前从库里随机发一小手候选（冷却过滤后），模型必须
-  从性格/职业各选恰好一条（"选哪条"由模型按图片咬合度决定，但不能全弃）。
-- 模型"回报"：在输出 JSON 顶层用 used_seeds 数组如实回报真正采用的条目
-  （复用 ig feed 里 topic_seed 的输出义务模式）。
-- 编排层"销账"：只对 used_seeds 里的条目记账进入冷却；没用的原样回池。
-  冷却以"后续生产次数"计（不是时间），保证批量生产时的轮换覆盖。
+設計（與 prompts/pipeline 的分工）：
+- 編排層"發牌"：每次生成前從庫裡隨機發一小手候選（冷卻過濾後），模型必須
+  從性格/職業各選恰好一條（"選哪條"由模型按圖片咬合度決定，但不能全棄）。
+- 模型"回報"：在輸出 JSON 頂層用 used_seeds 陣列如實回報真正採用的條目
+  （複用 ig feed 裡 topic_seed 的輸出義務模式）。
+- 編排層"銷賬"：只對 used_seeds 裡的條目記賬進入冷卻；沒用的原樣回池。
+  冷卻以"後續生產次數"計（不是時間），保證批次生產時的輪換覆蓋。
 
-不做的事：不让模型自由浏览全库（全库进上下文=对所有条目锚定+模型会反复挑
-同几条最顺眼的，造成库内塌缩）；不做硬性组合去重（性格/职业是欠定自由度的
-灵感，同条目在冷却期外复用是允许的，最终去重靠图片 grounding 与动态避让）。
+不做的事：不讓模型自由瀏覽全庫（全庫進上下文=對所有條目錨定+模型會反覆挑
+同幾條最順眼的，造成庫內塌縮）；不做硬性組合去重（性格/職業是欠定自由度的
+靈感，同條目在冷卻期外複用是允許的，最終去重靠圖片 grounding 與動態避讓）。
 """
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ from pathlib import Path
 
 from . import config
 
-# 冷却期：一个条目被采用后，接下来 N 个角色的发牌不再包含它。
+# 冷卻期：一個條目被採用後，接下來 N 個角色的發牌不再包含它。
 COOLDOWNS = {"personality": 15, "occupation": 25}
 
-# 每手牌的张数。
+# 每手牌的張數。
 HAND_SIZE = {"personality": 3, "occupation": 3}
 
-# real track 是面向交友/聊天的真实人物，反派清单不参与发牌。
-_EXCLUDED_GROUPS = {"反派角色分类"}
+# real track 是面向交友/聊天的真實人物，反派清單不參與發牌。
+_EXCLUDED_GROUPS = {"反派角色分類"}
 
 _LIB_FILES = {
     "personality": "personality_library.json",
@@ -40,7 +40,7 @@ _state_lock = threading.Lock()
 
 
 def _flatten(node, path: tuple[str, ...], dim: str, out: list[dict]) -> None:
-    """把 {分类: {子类: [ {序号, 内容} ]}} 的任意嵌套摊平成条目列表。"""
+    """把 {分類: {子類: [ {序號, 內容} ]}} 的任意巢狀攤平成條目列表。"""
     if isinstance(node, dict):
         for key, child in node.items():
             if key in _EXCLUDED_GROUPS:
@@ -50,8 +50,8 @@ def _flatten(node, path: tuple[str, ...], dim: str, out: list[dict]) -> None:
         for item in node:
             if not isinstance(item, dict):
                 continue
-            text = str(item.get("内容") or "").strip()
-            seq = item.get("序号")
+            text = str(item.get("內容") or "").strip()
+            seq = item.get("序號")
             if not text or seq is None:
                 continue
             out.append({
@@ -118,20 +118,20 @@ def _available(dim: str, state: dict) -> list[dict]:
 
 
 def checkout(state_path: Path | None = None) -> list[dict]:
-    """发一手牌：每个维度冷却过滤后随机抽 HAND_SIZE 条。不修改台账。"""
+    """發一手牌：每個維度冷卻過濾後隨機抽 HAND_SIZE 條。不修改臺賬。"""
     with _state_lock:
         state = _load_state(state_path)
     hand: list[dict] = []
     for dim, k in HAND_SIZE.items():
         pool = _available(dim, state)
-        if not pool:  # 全在冷却中时放开限制，宁可复用不可断供
+        if not pool:  # 全在冷卻中時放開限制，寧可複用不可斷供
             pool = _ENTRIES.get(dim, [])
         hand.extend(random.sample(pool, min(k, len(pool))))
     return hand
 
 
 def commit(used_ids: list[str], state_path: Path | None = None) -> list[str]:
-    """销账：生产计数 +1，把真正被采用的条目盖上冷却戳。返回合法的已用 id。"""
+    """銷賬：生產計數 +1，把真正被採用的條目蓋上冷卻戳。返回合法的已用 id。"""
     valid = [i for i in used_ids if isinstance(i, str) and i in _ENTRY_BY_ID]
     with _state_lock:
         state = _load_state(state_path)
@@ -145,16 +145,16 @@ def commit(used_ids: list[str], state_path: Path | None = None) -> list[str]:
 
 
 def hand_block(hand: list[dict], lang: str) -> str:
-    """把手牌渲染成注入人设 prompt 的文本块（随 diversity_block 拼接）。"""
+    """把手牌渲染成注入人設 prompt 的文字塊（隨 diversity_block 拼接）。"""
     if not hand:
         return ""
     lines_zh = [
-        "# 🎴 灵感手牌（本次随机发放；必须各选一条落进人设）",
-        "下面是从性格库/职业库随机发的候选灵感。使用规则：",
-        "- 【必须各选一条】从性格候选里选【恰好 1 条】、职业候选里选【恰好 1 条】，作为这个角色的性格底色与职业方向，不允许全部弃用。",
-        "- 【和图片咬合着选】优先挑与图片观察、气质、创作补充要求最对得上的那条；选定后必须具体化成这个人的可拍事实、与图片信息融为一体，禁止照抄原句措辞、禁止生硬贴标签。",
-        "- 【如实回报】在输出 JSON 顶层额外加字段 \"used_seeds\"：字符串数组，填本次采用的性格与职业条目编号（如 [\"personality:37\",\"occupation:12\"]）。它是生产台账，不是人设内容，其余字段不受影响。",
-        "候选：",
+        "# 🎴 靈感手牌（本次隨機發放；必須各選一條落進人設）",
+        "下面是從性格庫/職業庫隨機發的候選靈感。使用規則：",
+        "- 【必須各選一條】從性格候選裡選【恰好 1 條】、職業候選裡選【恰好 1 條】，作為這個角色的性格底色與職業方向，不允許全部棄用。",
+        "- 【和圖片咬合著選】優先挑與圖片觀察、氣質、創作補充要求最對得上的那條；選定後必須具體化成這個人的可拍事實、與圖片資訊融為一體，禁止照抄原句措辭、禁止生硬貼標籤。",
+        "- 【如實回報】在輸出 JSON 頂層額外加欄位 \"used_seeds\"：字串陣列，填本次採用的性格與職業條目編號（如 [\"personality:37\",\"occupation:12\"]）。它是生產臺賬，不是人設內容，其餘欄位不受影響。",
+        "候選：",
     ]
     lines_ko = [
         "# 🎴 영감 핸드(이번에 무작위로 지급; 각 차원에서 반드시 하나씩 골라 인설에 반영한다)",

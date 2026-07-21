@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把一条命令彻底脱离当前会话跑成守护进程（double-fork + setsid），
-使其父进程变为 init(PPID=1)，IDE/agent 会话回收也不会杀掉它。
+"""把一條命令徹底脫離當前會話跑成守護程式（double-fork + setsid），
+使其父程式變為 init(PPID=1)，IDE/agent 會話回收也不會殺掉它。
 
 用法：
   python3 scripts/daemonize.py <logfile> <cmd> [args...]
-打印子进程 PID 后立即退出；命令的输出重定向到 logfile。
+列印子程式 PID 後立即退出；命令的輸出重定向到 logfile。
 """
 import os
 import sys
@@ -18,7 +18,7 @@ def main() -> int:
     logfile = sys.argv[1]
     cmd = sys.argv[2:]
 
-    # 第一次 fork：父进程记录孙子 PID 后退出
+    # 第一次 fork：父程式記錄孫子 PID 後退出
     r, w = os.pipe()
     pid = os.fork()
     if pid > 0:
@@ -29,14 +29,14 @@ def main() -> int:
         return 0
 
     os.close(r)
-    os.setsid()  # 成为新会话领导者，脱离控制终端与原会话
+    os.setsid()  # 成為新會話領導者，脫離控制終端與原會話
 
-    # 第二次 fork：确保不是会话领导者，无法再获得控制终端
+    # 第二次 fork：確保不是會話領導者，無法再獲得控制終端
     pid2 = os.fork()
     if pid2 > 0:
         os._exit(0)
 
-    # 孙子进程：重定向 IO 到日志，exec 目标命令
+    # 孫子程式：重定向 IO 到日誌，exec 目標命令
     os.write(w, str(os.getpid()).encode())
     os.close(w)
     fd = os.open(logfile, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)

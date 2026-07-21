@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""审计 heermeng+mengnv 线上落地页的「角色图(封面)」是否符合基础卡规范。
+"""審計 heermeng+mengnv 線上落地頁的「角色圖(封面)」是否符合基礎卡規範。
 
-基础卡(C-01)规范:
+基礎卡(C-01)規範:
   - 封面容器 aspect-ratio:4/4.6
   - 容器 border-radius:16px
-  - 图片 object-fit:cover
-  - hero 区留白内嵌(不通栏贴边)
+  - 圖片 object-fit:cover
+  - hero 區留白內嵌(不通欄貼邊)
 
-判定不符合(命中需重跑)的启发式(任一):
-  - no_oc_cover        : 没有 oc-cover 封面槽位
-  - no_aspect_container: 找不到带 aspect-ratio 的封面容器
-  - aspect_off         : 封面容器宽高比不在 4/4.6 附近(0.83~0.90)
-  - radius_missing     : 封面容器无圆角
-  - radius_off         : 圆角明显偏离(<8 或 >24)
-输出命中角色 -> data/cover_style_targets.json ({"heermeng":[],"mengnv":[],"all":[]})。
+判定不符合(命中需重跑)的啟發式(任一):
+  - no_oc_cover        : 沒有 oc-cover 封面槽位
+  - no_aspect_container: 找不到帶 aspect-ratio 的封面容器
+  - aspect_off         : 封面容器寬高比不在 4/4.6 附近(0.83~0.90)
+  - radius_missing     : 封面容器無圓角
+  - radius_off         : 圓角明顯偏離(<8 或 >24)
+輸出命中角色 -> data/cover_style_targets.json ({"heermeng":[],"mengnv":[],"all":[]})。
 """
 import json
 import re
@@ -80,7 +80,7 @@ def main() -> int:
         with ThreadPoolExecutor(max_workers=16) as ex:
             rows = list(ex.map(audit, ids))
         hit = [(cid, iss) for cid, iss in rows if iss]
-        print(f"\n==== {src}: 扫描 {len(ids)}，不符合 {len(hit)} ====")
+        print(f"\n==== {src}: 掃描 {len(ids)}，不符合 {len(hit)} ====")
         c = Counter()
         for _, iss in hit:
             for i in iss:
@@ -92,7 +92,7 @@ def main() -> int:
         result[src] = [cid for cid, _ in hit]
     result["all"] = result["heermeng"] + result["mengnv"]
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n合计不符合 {len(result['all'])}，已写 {OUT}")
+    print(f"\n合計不符合 {len(result['all'])}，已寫 {OUT}")
     return 0
 
 

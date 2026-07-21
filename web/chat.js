@@ -1,4 +1,4 @@
-const LANG_NAMES_FULL = { zh: "简体中文", ja: "日本語", ko: "한국어", en: "English" };
+const LANG_NAMES_FULL = { zh: "簡體中文", ja: "日本語", ko: "한국어", en: "English" };
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -46,6 +46,15 @@ function imgUrl(local_path, url) {
   return url;
 }
 
+// 查手機 demo 的三個角色（與 phone_check_gen.DEMO_CHAR_MAP 對齊）。
+// URL 帶 ?demo=1 時，聊天列表只顯示這三個，避免 demo 裡混入全部角色。
+const DEMO_CHAR_IDS = [
+  "char_1783597290_f0d265", // yuwi 游嶼
+  "char_1784089818_de4be8", // shen 沈先生
+  "char_1783634537_a54d49", // haesu 都海樹
+];
+const DEMO_MODE = new URLSearchParams(location.search).get("demo") === "1";
+
 let CHARS = [];
 let ACTIVE_CHAR = null;
 let ACTIVE_REC = null;
@@ -59,17 +68,46 @@ async function init() {
   try {
     CHARS = await api("/api/characters");
   } catch (e) {
-    toast("角色列表加载失败", "err");
+    toast("角色列表載入失敗", "err");
     return;
   }
+  if (DEMO_MODE) {
+    const h = document.querySelector(".sidebar-head h1");
+    if (h) h.textContent = "查手機 Demo · 角色";
+    const s = $("#search");
+    if (s) { s.placeholder = "搜尋（僅 demo 角色）"; }
+  }
   renderCharList();
+  // 支援 ?char=<char_id> 深鏈（feed demo 頁「去聊天」入口）
+  const params = new URLSearchParams(location.search);
+  const wanted = params.get("char");
+  const wantedSession = params.get("session");
+  const phoneAsk = params.get("phone") === "ask";
+  if (wanted && CHARS.some((c) => c.char_id === wanted)) {
+    await selectChar(wanted);
+    if (wantedSession) await openSession(wantedSession);
+    if (phoneAsk) {
+      $("#input").value = "刚才你手机密码提示……是什么意思？";
+      $("#input").focus();
+      $("#status").textContent = "手机线索已带入这段聊天；自然聊两轮后，角色可能会给出密码线索。";
+    }
+    return;
+  }
   const shown = filterChars();
   if (shown.length) selectChar(shown[0].char_id);
+}
+
+function openPhonePeek() {
+  if (!ACTIVE_CHAR) return toast("请先选择角色", "err");
+  const query = new URLSearchParams({char: ACTIVE_CHAR});
+  if (SESSION_ID) query.set("session", SESSION_ID);
+  location.href = "/phone_check_kr.html?" + query.toString();
 }
 
 function filterChars() {
   const q = ($("#search").value || "").trim().toLowerCase();
   return CHARS.filter((c) => {
+    if (DEMO_MODE && !DEMO_CHAR_IDS.includes(c.char_id)) return false;
     if (!q) return true;
     return `${c.name || ""} ${c.char_id || ""}`.toLowerCase().includes(q);
   });
@@ -80,7 +118,7 @@ function renderCharList() {
   box.innerHTML = "";
   const list = filterChars();
   if (!list.length) {
-    box.innerHTML = '<p style="color:var(--mut);padding:10px;font-size:13px">没有匹配的角色。</p>';
+    box.innerHTML = '<p style="color:var(--mut);padding:10px;font-size:13px">沒有匹配的角色。</p>';
     return;
   }
   list.forEach((c) => {
@@ -110,7 +148,7 @@ async function selectChar(charId, opts = {}) {
   $("#empty").classList.add("hidden");
   $("#panel").classList.remove("hidden");
   $("#messages").innerHTML = "";
-  $("#status").innerHTML = `<span class="spinner"></span> 正在载入角色…`;
+  $("#status").innerHTML = `<span class="spinner"></span> 正在載入角色…`;
   try {
     const [rec, latest] = await Promise.all([
       api("/api/character/" + charId),
@@ -140,10 +178,10 @@ async function selectChar(charId, opts = {}) {
       MESSAGES = openingMessages(latest.opening);
     }
     renderMessages();
-    $("#status").innerHTML = SESSION_ID ? "已载入最近一次对话。" : "已载入角色开场白，可直接开始聊天。";
+    $("#status").innerHTML = SESSION_ID ? "已載入最近一次對話。" : "已載入角色開場白，可直接開始聊天。";
   } catch (e) {
-    $("#status").innerHTML = "载入失败：" + e.message;
-    toast("角色载入失败", "err");
+    $("#status").innerHTML = "載入失敗：" + e.message;
+    toast("角色載入失敗", "err");
   }
 }
 
@@ -171,8 +209,8 @@ function setTemplate(tpl) {
 function updateTplHint() {
   const custom = $("#promptTpl").value.trim().length > 0;
   $("#tplHint").textContent = custom
-    ? (SESSION_ID ? "本会话使用自定义模板" : "将用自定义模板开始新对话")
-    : "当前使用默认模板";
+    ? (SESSION_ID ? "本會話使用自定義模板" : "將用自定義模板開始新對話")
+    : "當前使用預設模板";
 }
 
 const CTX_MAP = {
@@ -196,7 +234,7 @@ function renderMessages() {
   const box = $("#messages");
   box.innerHTML = "";
   if (!MESSAGES.length) {
-    box.innerHTML = '<div class="placeholder">暂无消息，发一句开始。</div>';
+    box.innerHTML = '<div class="placeholder">暫無訊息，發一句開始。</div>';
     return;
   }
   MESSAGES.forEach((m) => {
@@ -208,7 +246,7 @@ function renderMessages() {
     if (m.is_opening) {
       const note = document.createElement("div");
       note.className = "note";
-      note.textContent = "角色开场白";
+      note.textContent = "角色開場白";
       box.appendChild(note);
     }
     items.forEach((it) => box.appendChild(assistantItem(it)));
@@ -235,7 +273,7 @@ function callLogRow(log) {
   row.className = "row assistant";
   const det = document.createElement("details");
   det.className = "raw-output";
-  det.innerHTML = `<summary>模型调用日志</summary><div class="log-body">${sections.join("")}</div>`;
+  det.innerHTML = `<summary>模型呼叫日誌</summary><div class="log-body">${sections.join("")}</div>`;
   row.appendChild(det);
   return row;
 }
@@ -267,7 +305,7 @@ function assistantItem(item) {
   if (type === "html_file") {
     const wrap = document.createElement("div");
     wrap.className = "bubble assistant-bubble html-bubble";
-    wrap.innerHTML = `<span class="type-label">HTML</span><div class="html-title">${escapeHtml(data.file_name || "공유")}</div><div>${escapeHtml(data.description || "HTML")}</div><button class="ghost open-html" type="button">预览 HTML</button>`;
+    wrap.innerHTML = `<span class="type-label">HTML</span><div class="html-title">${escapeHtml(data.file_name || "공유")}</div><div>${escapeHtml(data.description || "HTML")}</div><button class="ghost open-html" type="button">預覽 HTML</button>`;
     wrap.querySelector(".open-html").addEventListener("click", () => {
       const w = window.open("", "_blank");
       w.document.open();
@@ -282,7 +320,7 @@ function assistantItem(item) {
     const parts = [];
     if (data.status) parts.push(`<span class="state-status">${escapeHtml(data.status)}</span>`);
     if (data.emotion) parts.push(`<span class="state-emotion">${escapeHtml(data.emotion)}</span>`);
-    row.innerHTML = `<div class="state-chip">${parts.join("") || "状态已更新"}</div>`;
+    row.innerHTML = `<div class="state-chip">${parts.join("") || "狀態已更新"}</div>`;
     return row;
   }
   if (type === "music") {
@@ -291,12 +329,12 @@ function assistantItem(item) {
   }
   if (type === "dating_card") {
     const meta = [data.location, data.status, data.outfit, data.emotion].filter(Boolean).map(escapeHtml).join(" · ");
-    row.innerHTML = `<div class="bubble assistant-bubble dating-bubble"><span class="type-label">约会邀请</span><div class="dating-title">${escapeHtml(data.title || "见一面")}</div>${meta ? `<div class="extra">${meta}</div>` : ""}${data.description ? `<div>${escapeHtml(data.description)}</div>` : ""}${data.button ? `<button class="ghost" type="button">${escapeHtml(data.button)}</button>` : ""}</div>`;
+    row.innerHTML = `<div class="bubble assistant-bubble dating-bubble"><span class="type-label">約會邀請</span><div class="dating-title">${escapeHtml(data.title || "見一面")}</div>${meta ? `<div class="extra">${meta}</div>` : ""}${data.description ? `<div>${escapeHtml(data.description)}</div>` : ""}${data.button ? `<button class="ghost" type="button">${escapeHtml(data.button)}</button>` : ""}</div>`;
     return row;
   }
   if (type === "match_action") {
     const greeting = data.greeting || data.content || "";
-    row.innerHTML = `<div class="bubble assistant-bubble match-bubble"><span class="type-label">加好友</span><div>对方同意后的第一句</div>${greeting ? `<div class="extra">${escapeHtml(greeting)}</div>` : ""}</div>`;
+    row.innerHTML = `<div class="bubble assistant-bubble match-bubble"><span class="type-label">加好友</span><div>對方同意後的第一句</div>${greeting ? `<div class="extra">${escapeHtml(greeting)}</div>` : ""}</div>`;
     return row;
   }
   const emotionTag = data.emotion && data.emotion !== "default" ? `<div class="extra">${escapeHtml(data.emotion)}</div>` : "";
@@ -305,7 +343,7 @@ function assistantItem(item) {
 }
 
 async function sendMessage() {
-  if (!ACTIVE_CHAR) return toast("请先选择角色", "err");
+  if (!ACTIVE_CHAR) return toast("請先選擇角色", "err");
   const input = $("#input");
   const text = input.value.trim();
   if (!text) return;
@@ -314,7 +352,7 @@ async function sendMessage() {
   renderMessages();
   const btn = $("#btnSend");
   btn.disabled = true;
-  $("#status").innerHTML = `<span class="spinner"></span> 角色正在输入…`;
+  $("#status").innerHTML = `<span class="spinner"></span> 角色正在輸入…`;
   try {
     const payload = {
       char_id: ACTIVE_CHAR,
@@ -338,10 +376,10 @@ async function sendMessage() {
     renderMessages();
     $("#status").innerHTML = "";
   } catch (e) {
-    MESSAGES.push({ role: "assistant", items: [{ type: "text", data: { content: "发送失败：" + e.message } }], created: Math.floor(Date.now() / 1000) });
+    MESSAGES.push({ role: "assistant", items: [{ type: "text", data: { content: "傳送失敗：" + e.message } }], created: Math.floor(Date.now() / 1000) });
     renderMessages();
-    $("#status").innerHTML = "失败：" + e.message;
-    toast("聊天失败", "err");
+    $("#status").innerHTML = "失敗：" + e.message;
+    toast("聊天失敗", "err");
   } finally {
     btn.disabled = false;
     input.focus();
@@ -350,12 +388,12 @@ async function sendMessage() {
 
 async function loadHistory() {
   const list = $("#historyList");
-  list.innerHTML = '<p style="color:var(--mut);font-size:13px">加载中…</p>';
+  list.innerHTML = '<p style="color:var(--mut);font-size:13px">載入中…</p>';
   try {
     const r = await api("/api/chat/" + ACTIVE_CHAR + "/sessions?mode=" + MODE);
     const sessions = r.sessions || [];
     if (!sessions.length) {
-      list.innerHTML = '<p style="color:var(--mut);font-size:13px">暂无历史对话。</p>';
+      list.innerHTML = '<p style="color:var(--mut);font-size:13px">暫無歷史對話。</p>';
       return;
     }
     list.innerHTML = "";
@@ -364,20 +402,20 @@ async function loadHistory() {
       item.type = "button";
       item.className = "history-item" + (s.session_id === SESSION_ID ? " active" : "");
       const when = s.updated ? new Date(s.updated * 1000).toLocaleString() : "";
-      const tag = s.has_custom_template ? '<span class="history-tag">自定义</span>' : "";
-      item.innerHTML = `<div class="history-top">${when}${tag}<span class="history-count">${s.message_count} 条</span></div>
-        <div class="history-preview">${escapeHtml(s.preview || "(无内容)")}</div>`;
+      const tag = s.has_custom_template ? '<span class="history-tag">自定義</span>' : "";
+      item.innerHTML = `<div class="history-top">${when}${tag}<span class="history-count">${s.message_count} 條</span></div>
+        <div class="history-preview">${escapeHtml(s.preview || "(無內容)")}</div>`;
       item.addEventListener("click", () => openSession(s.session_id));
       list.appendChild(item);
     });
   } catch (e) {
-    list.innerHTML = '<p style="color:var(--mut);font-size:13px">加载失败：' + escapeHtml(e.message) + "</p>";
+    list.innerHTML = '<p style="color:var(--mut);font-size:13px">載入失敗：' + escapeHtml(e.message) + "</p>";
   }
 }
 
 async function openSession(sessionId) {
   if (!ACTIVE_CHAR || !sessionId) return;
-  $("#status").innerHTML = `<span class="spinner"></span> 载入历史对话…`;
+  $("#status").innerHTML = `<span class="spinner"></span> 載入歷史對話…`;
   try {
     const r = await api("/api/chat/" + ACTIVE_CHAR + "/session/" + sessionId);
     const session = r.session;
@@ -387,10 +425,10 @@ async function openSession(sessionId) {
     fillContext(session.context || {});
     renderMessages();
     await loadHistory();
-    $("#status").innerHTML = "已载入该历史对话，可继续聊天。";
+    $("#status").innerHTML = "已載入該歷史對話，可繼續聊天。";
   } catch (e) {
-    $("#status").innerHTML = "载入失败：" + e.message;
-    toast("历史对话载入失败", "err");
+    $("#status").innerHTML = "載入失敗：" + e.message;
+    toast("歷史對話載入失敗", "err");
   }
 }
 
@@ -400,12 +438,13 @@ $("#input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 $("#promptTpl").addEventListener("input", updateTplHint);
-$("#btnTplReset").addEventListener("click", () => { setTemplate(""); toast("已恢复默认模板（新对话生效）", "ok"); });
+$("#btnTplReset").addEventListener("click", () => { setTemplate(""); toast("已恢復預設模板（新對話生效）", "ok"); });
 $("#btnNew").addEventListener("click", () => {
   SESSION_ID = null; MESSAGES = [];
   if (ACTIVE_CHAR) selectChar(ACTIVE_CHAR, { forceNew: true });
-  toast("已开始新对话", "ok");
+  toast("已開始新對話", "ok");
 });
+$("#btnPhone").addEventListener("click", openPhonePeek);
 $("#btnHistory").addEventListener("click", async () => {
   const box = $("#historyBox");
   if (!ACTIVE_CHAR) return;
@@ -422,9 +461,8 @@ $("#modeSwitch").addEventListener("click", (e) => {
   SESSION_ID = null;
   MESSAGES = [];
   if (ACTIVE_CHAR) selectChar(ACTIVE_CHAR, { forceNew: true });
-  toast(MODE === "anonymous" ? "已切换到匿名聊天模式" : "已切换到普通聊天模式", "ok");
+  toast(MODE === "anonymous" ? "已切換到匿名聊天模式" : "已切換到普通聊天模式", "ok");
 });
 
 init();
-
 

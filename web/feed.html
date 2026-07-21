@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>第三方視角帖子 · Feed Demo</title>
+  <style>
+    :root {
+      --accent: #6b5bd2; --accent-soft: #ece9fb; --line: #e6e3da;
+      --surface: #fff; --inset: #f5f3ec; --txt: #2b2a28; --mut: #8b877e;
+      --bg: #f3f0e8; --hot: #e64545; --hot-soft: #fdecec; --blue: #3b6fd4;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "PingFang SC", "Apple SD Gothic Neo", sans-serif; background: var(--bg); color: var(--txt); }
+    button { font: inherit; cursor: pointer; }
+    .ghost { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; color: var(--txt); }
+    .ghost:hover { border-color: var(--accent); }
+    .primary { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; }
+    .danger-link { background: none; border: none; color: var(--mut); font-size: 11px; padding: 0; }
+    .danger-link:hover { color: var(--hot); }
+    textarea, input, select { font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--txt); background: var(--surface); width: 100%; }
+
+    .wrap { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+    .sidebar { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+    .sidebar-head { padding: 14px; border-bottom: 1px solid var(--line); }
+    .sidebar-head h1 { font-size: 15px; margin: 0 0 10px; }
+    .sidebar-head .backlink { font-size: 12px; color: var(--mut); text-decoration: none; display: inline-block; margin-bottom: 8px; }
+    .char-list { flex: 1; overflow: auto; padding: 8px; }
+    .char-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+    .char-item:hover { background: var(--inset); }
+    .char-item.active { background: var(--accent-soft); border-color: var(--accent); }
+    .char-avatar { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+    .char-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .char-meta { min-width: 0; }
+    .char-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .char-id { font-size: 11px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lang-badge { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); margin-right: 4px; }
+
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+    .empty { margin: auto; color: var(--mut); }
+    .panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+    .panel.show { display: flex; }
+    .head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
+    .head .char-avatar { width: 42px; height: 42px; }
+    .head-title { font-size: 15px; font-weight: 600; }
+    .head-sub { font-size: 12px; color: var(--mut); }
+    .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .img-model-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--mut); }
+    .img-model-pick select { width: auto; font-size: 12.5px; padding: 5px 8px; }
+    .lang-switch { display: inline-flex; background: var(--inset); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+    .lang-btn { border: none; background: transparent; color: var(--mut); border-radius: 6px; padding: 5px 12px; font-size: 13px; }
+    .lang-btn.active { background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+    a.chatlink { font-size: 13px; color: var(--accent); text-decoration: none; border: 1px solid var(--accent); border-radius: 8px; padding: 6px 12px; }
+
+    .gen-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; padding: 12px 16px; background: var(--inset); border-bottom: 1px solid var(--line); }
+    .gen-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .gen-card h3 { margin: 0; font-size: 13px; }
+    .gen-card h3 .tagchip { font-size: 10px; font-weight: 700; letter-spacing: .05em; border-radius: 999px; padding: 2px 8px; margin-right: 6px; }
+    .t1chip { color: var(--hot); background: var(--hot-soft); }
+    .t2chip { color: var(--accent); background: var(--accent-soft); }
+    .gen-card .desc { font-size: 11.5px; color: var(--mut); line-height: 1.5; margin: 0; }
+    .gen-row { display: flex; gap: 8px; align-items: center; }
+    .gen-row label { font-size: 11px; color: var(--mut); white-space: nowrap; }
+    .gen-row input, .gen-row select { font-size: 12.5px; padding: 6px 8px; }
+    .gen-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+    .gen-hint { font-size: 11px; color: var(--mut); }
+
+    #status { padding: 6px 16px 0; font-size: 13px; color: var(--mut); min-height: 20px; }
+    .feed { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; align-items: center; }
+    .post-shell { width: min(680px, 100%); }
+    .post-toolbar { display: flex; align-items: center; gap: 10px; padding: 0 4px 5px; font-size: 11px; color: var(--mut); }
+    .post-toolbar .spacer { flex: 1; }
+    .img-model-tag { font-size: 10.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 8px; }
+
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .acct { display: flex; align-items: center; gap: 10px; padding: 12px 14px 0; }
+    .acct-avatar { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: var(--hot-soft); color: var(--hot); font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 16px; }
+    .acct-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .acct-name { font-size: 13.5px; font-weight: 700; }
+    .acct-name .verified { color: var(--blue); font-size: 12px; }
+    .acct-sub { font-size: 11px; color: var(--mut); }
+    .acct-chip { margin-left: auto; font-size: 11px; color: var(--hot); border: 1px solid var(--hot); border-radius: 999px; padding: 3px 10px; }
+    .caption { padding: 10px 14px 0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+    .caption .at { color: var(--blue); font-weight: 600; }
+    .hashtags { padding: 6px 14px 0; font-size: 12.5px; color: var(--blue); display: flex; flex-wrap: wrap; gap: 6px; }
+
+    /* 論壇截圖 */
+    .forum-shot { margin: 12px 14px; border: 1px solid #e3e0d8; border-radius: 10px; background: #fcfcfa; overflow: hidden; }
+    .forum-head { padding: 12px 14px 8px; border-bottom: 1px solid #eeece5; }
+    .forum-board { display: inline-block; font-size: 10.5px; font-weight: 700; color: var(--hot); background: var(--hot-soft); border-radius: 4px; padding: 2px 7px; margin-bottom: 7px; }
+    .forum-title { font-size: 15.5px; font-weight: 800; line-height: 1.4; }
+    .forum-meta { margin-top: 6px; font-size: 11px; color: var(--mut); display: flex; gap: 10px; flex-wrap: wrap; }
+    .forum-op { padding: 12px 14px; font-size: 13px; line-height: 1.65; white-space: pre-wrap; border-bottom: 1px solid #eeece5; }
+    .vote-row { display: flex; gap: 14px; justify-content: center; padding: 12px 0; border-bottom: 1px solid #eeece5; }
+    .vote { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--mut); }
+    .vote .pill { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+    .vote.up .pill { background: var(--hot); color: #fff; }
+    .vote.down .pill { background: #f0efe9; color: var(--mut); border: 1px solid var(--line); }
+    .floors-label { padding: 10px 14px 4px; font-size: 12px; font-weight: 700; color: var(--mut); }
+    .floor { padding: 9px 14px; border-bottom: 1px solid #f2f0ea; }
+    .floor:last-child { border-bottom: none; }
+    .floor-top { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--mut); }
+    .floor-no { font-weight: 800; color: var(--hot); }
+    .floor-op-badge { font-size: 9.5px; font-weight: 700; color: #fff; background: var(--hot); border-radius: 3px; padding: 1px 5px; }
+    .floor-likes { margin-left: auto; }
+    .floor-quote { margin: 6px 0 2px; padding: 6px 9px; background: #f4f2ec; border-radius: 6px; font-size: 11.5px; color: var(--mut); }
+    .floor-body { margin-top: 4px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+
+    /* T2 帖子本體 */
+    .t2-title { padding: 10px 14px 0; font-size: 15px; font-weight: 800; line-height: 1.45; }
+    .t2-content { padding: 10px 14px; font-size: 13.5px; line-height: 1.65; white-space: pre-wrap; }
+    .t2-content .at-user { color: var(--hot); font-weight: 700; }
+    .timeline { margin: 0 14px 12px; border-left: 2px solid var(--accent-soft); padding-left: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .tl-item { position: relative; }
+    .tl-item::before { content: ""; position: absolute; left: -19.5px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .tl-date { font-size: 11px; font-weight: 700; color: var(--accent); }
+    .tl-text { font-size: 13px; line-height: 1.5; margin-top: 2px; white-space: pre-wrap; }
+    .subtype-chip { display: inline-block; margin: 10px 14px 0; font-size: 10.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 2px 8px; }
+
+    /* 評論區 */
+    .comments { border-top: 1px solid var(--line); background: #fbfaf6; padding: 10px 14px 12px; }
+    .comments-label { font-size: 12px; font-weight: 700; color: var(--mut); margin-bottom: 8px; }
+    .comment { display: flex; gap: 9px; padding: 6px 0; }
+    .comment.reply { margin-left: 34px; }
+    .cmt-avatar { width: 26px; height: 26px; border-radius: 50%; background: #e8e4f8; color: var(--accent); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .comment.self .cmt-avatar { background: var(--hot-soft); color: var(--hot); }
+    .cmt-main { min-width: 0; flex: 1; }
+    .cmt-top { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--mut); }
+    .cmt-author { font-weight: 700; color: var(--txt); }
+    .cmt-badge { font-size: 9.5px; font-weight: 700; color: var(--hot); background: var(--hot-soft); border-radius: 3px; padding: 1px 5px; }
+    .cmt-body { font-size: 13px; line-height: 1.5; margin-top: 2px; white-space: pre-wrap; }
+    .cmt-likes { font-size: 11px; color: var(--mut); flex-shrink: 0; align-self: center; }
+
+    /* 角色轉發私信 */
+    .dm-box { border-top: 1px dashed var(--line); background: linear-gradient(180deg, #f7f5ff, #fff); padding: 12px 14px; }
+    .dm-label { font-size: 11.5px; color: var(--accent); font-weight: 700; margin-bottom: 8px; }
+    .dm-bubble { display: inline-block; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; border-radius: 14px; padding: 8px 12px; font-size: 13.5px; line-height: 1.5; margin: 3px 0; max-width: 85%; }
+    .dm-cta { display: inline-block; margin-top: 10px; background: var(--accent); color: #fff; border-radius: 999px; padding: 8px 18px; font-size: 13px; text-decoration: none; }
+
+    /* 帖子配圖 + 日程依據 */
+    .post-img { margin-top: 10px; }
+    .post-img img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; }
+    .post-img-err { margin-top: 8px; font-size: 11.5px; color: var(--mut); }
+    .digest-label { font-size: 11px; font-weight: 700; color: var(--accent); margin-top: 8px; }
+    .echo-tag { font-size: 10.5px; color: var(--hot); background: var(--hot-soft); border-radius: 4px; padding: 1px 5px; }
+
+    /* 運營視角：鉤子清單 + call log */
+    .hooks { border-top: 1px solid var(--line); padding: 10px 14px; background: var(--inset); }
+    .hooks summary, .rawlog summary { cursor: pointer; font-size: 11.5px; color: var(--mut); font-weight: 600; }
+    .hooks ul { margin: 8px 0 2px; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+    .rawlog { padding: 8px 14px 12px; background: var(--inset); }
+    .rawlog pre { margin: 6px 0 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; }
+
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: #333; color: #fff; padding: 10px 18px; border-radius: 8px; opacity: 0; transition: .3s; pointer-events: none; z-index: 99; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.ok { background: #2e8b57; } .toast.err { background: #c0392b; }
+    @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } .sidebar { display: none; } .gen-bar { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <a class="backlink" href="/">← 生產鏈路</a>
+        <a class="backlink" href="/stream.html" style="margin-left:8px">發現流(混排) →</a>
+        <a class="backlink" href="/daily.html" style="margin-left:8px">日產 →</a>
+        <h1>第三方視角帖子 Demo</h1>
+        <input id="search" type="text" placeholder="搜尋角色名 / ID" />
+      </div>
+      <div id="charList" class="char-list"></div>
+    </aside>
+    <main class="main">
+      <div id="empty" class="empty">先從左側選擇一個角色。</div>
+      <div id="panel" class="panel">
+        <div class="head">
+          <div class="char-avatar" id="avatar">?</div>
+          <div>
+            <div id="title" class="head-title">未選擇角色</div>
+            <div id="sub" class="head-sub"></div>
+          </div>
+          <div class="head-actions">
+            <label class="img-model-pick" title="配圖使用的生圖模型">
+              <span>生圖模型</span>
+              <select id="imgModel">
+                <option value="image-2">image-2（gpt-image-2）</option>
+                <option value="banana">nanobanana</option>
+              </select>
+            </label>
+            <div class="lang-switch" id="langSwitch">
+              <button type="button" class="lang-btn active" data-lang="zh">中文</button>
+              <button type="button" class="lang-btn" data-lang="ko">한국어</button>
+            </div>
+            <a class="chatlink" id="chatLink" href="/chat.html" target="_blank" rel="noopener">和 TA 聊天 ↗</a>
+          </div>
+        </div>
+        <div class="gen-bar">
+          <div class="gen-card">
+            <h3><span class="tagchip t1chip">T1 · 全體可見</span>平臺媒體號 · 論壇體宣傳帖</h3>
+            <p class="desc">媒體號轉發一條「角色被路人目擊、全樓圍觀」的論壇帖。樓裡的 NPC 要不到聯繫方式，看帖的使用者可以直接去聊——把這種特權感做成鉤子。</p>
+            <div class="gen-row">
+              <label>補充要求</label>
+              <input id="t1Hint" type="text" placeholder="選填：想突出的事件/面向，如 야근 후 목격담…" />
+            </div>
+            <div class="gen-actions">
+              <button id="btnT1" class="primary" type="button">生成 T1 論壇體帖</button>
+              <span id="t1Status" class="gen-hint"></span>
+            </div>
+          </div>
+          <div class="gen-card">
+            <h3><span class="tagchip t2chip">T2 · 僅本人可見</span>角色綁定號 · 關係/劇情帖</h3>
+            <p class="desc">自動讀取該角色最近一次聊天會話作素材（嫂子文學/考古連表/公告體…），帖子帶角色親自轉發的私信，把使用者拉回聊天。</p>
+            <div class="gen-row">
+              <label>體裁</label>
+              <select id="t2Subtype">
+                <option value="auto">auto · 按素材自動選（可自創體裁）</option>
+                <option value="witness">witness · 目擊爆料（活人感）</option>
+                <option value="couple">couple · 커플目擊（嫂子文學）</option>
+                <option value="jealousy">jealousy · 吃醋爆料（輕微不安→安心）</option>
+                <option value="official">official · 公告體聲明</option>
+                <option value="timeline">timeline · 考古/年表（用真實聊天史）</option>
+                <option value="career">career · 行程/成就粉絲帖</option>
+              </select>
+              <label>使用者稱呼</label>
+              <input id="t2UserName" type="text" style="max-width:120px" placeholder="유저" />
+            </div>
+            <div class="gen-row">
+              <label>補充要求</label>
+              <input id="t2Hint" type="text" placeholder="選填：想推進的關係階段/劇情鉤子" />
+            </div>
+            <details>
+              <summary class="gen-hint" style="cursor:pointer">📅 日程素材（選填：貼手帳工坊當日 JSON；留空則自動生成當日日程摘要作事實底座）</summary>
+              <textarea id="t2Schedule" rows="3" style="font-size:12px;margin-top:6px" placeholder='貼入日程 JSON（segments/goal_threads/highlight…）或純文字日程'></textarea>
+            </details>
+            <div class="gen-actions">
+              <button id="btnT2" class="primary" type="button">生成 T2 角色綁定帖</button>
+              <span id="t2Status" class="gen-hint"></span>
+            </div>
+          </div>
+          <div class="gen-card">
+            <h3><span class="tagchip t1chip">熱搜 · 事件</span>一個詞條 × 多方發帖 × 連續劇情</h3>
+            <p class="desc">生成一場圍繞角色的熱搜風波：黑粉/粉絲/路人/營銷號/官方/本人多信源按時間接力發帖（羅生門視角差），收尾角色轉發其中一條給使用者。發現流裡顯示為熱搜組件，點開進聚合頁。</p>
+            <div class="gen-row">
+              <label>事件方向</label>
+              <input id="evtHint" type="text" placeholder="選填：如 疑似耍大牌 / 被拍到深夜買醉…" />
+            </div>
+            <details>
+              <summary class="gen-hint" style="cursor:pointer">📅 日程素材（選填：貼當日日程 JSON；留空自動生成日程摘要作事實底座）</summary>
+              <textarea id="evtSchedule" rows="2" style="font-size:12px;margin-top:6px" placeholder='貼入日程 JSON 或純文字'></textarea>
+            </details>
+            <div class="gen-actions">
+              <button id="btnEvt" class="primary" type="button">生成熱搜事件</button>
+              <label class="gen-hint" style="display:flex;align-items:center;gap:4px"><input id="evtImages" type="checkbox" checked style="width:auto" />配圖（逐帖模型判斷）</label>
+              <span id="evtStatus" class="gen-hint"></span>
+            </div>
+          </div>
+        </div>
+        <div id="status"></div>
+        <div id="feed" class="feed"></div>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="feed.js"></script>
+</body>
+</html>

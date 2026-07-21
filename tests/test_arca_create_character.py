@@ -63,9 +63,9 @@ def test_create_character_failed_status_raises(monkeypatch):
     def fake_post(url, json=None, headers=None, timeout=None, **kw):
         if url.endswith("/character/create"):
             return _Resp({"code": 0, "data": {"task_id": "t1"}})
-        return _Resp({"code": 0, "data": {"status": "failed", "error_message": "余额不足", "error_code": 40402}})
+        return _Resp({"code": 0, "data": {"status": "failed", "error_message": "餘額不足", "error_code": 40402}})
 
     monkeypatch.setattr(ac.requests, "post", fake_post)
     with pytest.raises(ac.ArcaError) as e:
         ac.create_character({"name": "A"}, lang="zh", poll_interval=0)
-    assert "余额不足" in str(e.value)
+    assert "餘額不足" in str(e.value)

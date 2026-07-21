@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>角色聊天 · 轻量版</title>
+  <title>角色聊天 · 輕量版</title>
   <style>
     :root {
       --accent: #6b5bd2; --accent-soft: #ece9fb; --line: #e6e3da;
@@ -116,18 +116,18 @@
   <div class="wrap">
     <aside class="sidebar">
       <div class="sidebar-head">
-        <h1>角色聊天 · 轻量版</h1>
-        <input id="search" type="text" placeholder="搜索角色名 / ID" />
+        <h1>角色聊天 · 輕量版</h1>
+        <input id="search" type="text" placeholder="搜尋角色名 / ID" />
       </div>
       <div id="charList" class="char-list"></div>
     </aside>
     <main class="main">
-      <div id="empty" class="empty">先从左侧选择一个角色。</div>
+      <div id="empty" class="empty">先從左側選擇一個角色。</div>
       <div id="panel" class="panel hidden">
         <div class="head">
           <div class="char-avatar" id="avatar">?</div>
           <div>
-            <div id="title" class="head-title">未选择角色</div>
+            <div id="title" class="head-title">未選擇角色</div>
             <div id="sub" class="head-sub"></div>
           </div>
           <div class="head-actions">
@@ -135,42 +135,43 @@
               <button type="button" class="mode-btn active" data-mode="normal">普通</button>
               <button type="button" class="mode-btn" data-mode="anonymous">匿名</button>
             </div>
-            <button id="btnHistory" class="ghost" type="button">历史</button>
-            <button id="btnNew" class="ghost" type="button">新对话</button>
+            <button id="btnPhone" class="ghost" type="button" title="查看與本次聊天互通的手機線索">📱 查手機</button>
+            <button id="btnHistory" class="ghost" type="button">歷史</button>
+            <button id="btnNew" class="ghost" type="button">新對話</button>
           </div>
         </div>
         <details class="drawer" id="historyBox" hidden>
-          <summary>历史对话</summary>
+          <summary>歷史對話</summary>
           <div id="historyList" class="history-list"></div>
         </details>
         <details class="drawer">
-          <summary>本次聊天 prompt 模板（占位符如 {{name}} 会自动替换，留空用默认）</summary>
+          <summary>本次聊天 prompt 模板（佔位符如 {{name}} 會自動替換，留空用預設）</summary>
           <div class="prompt-box">
-            <textarea id="promptTpl" rows="8" placeholder="留空则使用默认模板。修改只对「新对话」生效。"></textarea>
+            <textarea id="promptTpl" rows="8" placeholder="留空則使用預設模板。修改只對「新對話」生效。"></textarea>
             <div class="prompt-actions">
-              <button id="btnTplReset" class="ghost" type="button">恢复默认模板</button>
+              <button id="btnTplReset" class="ghost" type="button">恢復預設模板</button>
               <span id="tplHint" class="muted"></span>
             </div>
           </div>
         </details>
         <details class="drawer">
-          <summary>对话上下文（选填，会拼进 prompt）</summary>
+          <summary>對話上下文（選填，會拼進 prompt）</summary>
           <div class="ctx-grid">
-            <label class="field"><span>当前关系 relationship</span><input id="ctxRelationship" type="text" /></label>
-            <label class="field"><span>用户设定 user_persona</span><input id="ctxUserPersona" type="text" /></label>
-            <label class="field"><span>对用户印象 user_impression</span><input id="ctxUserImpression" type="text" /></label>
-            <label class="field"><span>一起经历 plot_summary</span><input id="ctxPlotSummary" type="text" /></label>
-            <label class="field"><span>用户位置 location</span><input id="ctxLocation" type="text" /></label>
-            <label class="field"><span>天气 weather</span><input id="ctxWeather" type="text" /></label>
-            <label class="field wide"><span>今天总结 day_summary</span><input id="ctxDaySummary" type="text" /></label>
+            <label class="field"><span>當前關係 relationship</span><input id="ctxRelationship" type="text" /></label>
+            <label class="field"><span>使用者設定 user_persona</span><input id="ctxUserPersona" type="text" /></label>
+            <label class="field"><span>對使用者印象 user_impression</span><input id="ctxUserImpression" type="text" /></label>
+            <label class="field"><span>一起經歷 plot_summary</span><input id="ctxPlotSummary" type="text" /></label>
+            <label class="field"><span>使用者位置 location</span><input id="ctxLocation" type="text" /></label>
+            <label class="field"><span>天氣 weather</span><input id="ctxWeather" type="text" /></label>
+            <label class="field wide"><span>今天總結 day_summary</span><input id="ctxDaySummary" type="text" /></label>
             <label class="field wide"><span>今日日程 day_schedule</span><textarea id="ctxDaySchedule" rows="2"></textarea></label>
           </div>
         </details>
         <div id="status" class="status"></div>
         <div id="messages" class="messages"></div>
         <form id="form" class="input-row">
-          <textarea id="input" rows="2" placeholder="输入要发给角色的话。Enter 发送，Shift+Enter 换行。"></textarea>
-          <button id="btnSend" class="primary" type="submit">发送</button>
+          <textarea id="input" rows="2" placeholder="輸入要發給角色的話。Enter 傳送，Shift+Enter 換行。"></textarea>
+          <button id="btnSend" class="primary" type="submit">傳送</button>
         </form>
       </div>
     </main>

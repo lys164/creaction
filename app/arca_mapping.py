@@ -1,43 +1,43 @@
-"""本地 record → arca 请求体的纯映射（无副作用、无 IO，便于单测）。"""
+"""本地 record → arca 請求體的純對映（無副作用、無 IO，便於單測）。"""
 import json
 
 _MALE = ("男", "male", "남")
 _FEMALE = ("女", "female", "여")
 
-# 已被直接映射的 persona 键，不再重复塞进 customized_settings
-# （inner_structure 并入 disposition，见 persona_to_character_form）
+# 已被直接對映的 persona 鍵，不再重複塞進 customized_settings
+# （inner_structure 併入 disposition，見 persona_to_character_form）
 _MAPPED_KEYS = {"name", "profile", "gender", "species", "personality", "opening",
                 "voice", "tags", "visibility", "anonymous_identities",
                 "inner_structure"}
 
-# persona 英文 schema 键 → 平台 setting_options 的 tag_key（简体中文，跨语言稳定主键）。
-# customized_settings 的最终 key 会再经 page_config 换成角色语言的 tag_name。
-# 新旧 schema 键并存：identity/dislikes/worldview 是新键，social_status/fears/premise/
-# family 兼容存量旧数据；同一角色只会带其中一套，不会撞 tag_key。
+# persona 英文 schema 鍵 → 平臺 setting_options 的 tag_key（簡體中文，跨語言穩定主鍵）。
+# customized_settings 的最終 key 會再經 page_config 換成角色語言的 tag_name。
+# 新舊 schema 鍵並存：identity/dislikes/worldview 是新鍵，social_status/fears/premise/
+# family 相容存量舊資料；同一角色只會帶其中一套，不會撞 tag_key。
 _SETTING_KEY_MAP = {
     "hometown": "出生地",
     "residence": "居住地",
-    "identity": "职业",
-    "social_status": "职业",
+    "identity": "職業",
+    "social_status": "職業",
     "appearance": "外貌",
-    "speech_style": "语言习惯",
+    "speech_style": "語言習慣",
     "relationship_mode": "社交模式",
-    "love_style": "表达爱的方式",
-    "life_details": "生活习惯",
-    "likes": "爱好",
-    "dislikes": "讨厌的东西",
-    "fears": "讨厌的东西",
-    "backstory": "成长经历",
-    "family": "家庭成员",
-    "social_network": "社交关系",
-    "worldview": "特殊背景/世界观",
-    "premise": "特殊背景/世界观",
-    "wishlist": "愿望清单",
+    "love_style": "表達愛的方式",
+    "life_details": "生活習慣",
+    "likes": "愛好",
+    "dislikes": "討厭的東西",
+    "fears": "討厭的東西",
+    "backstory": "成長經歷",
+    "family": "家庭成員",
+    "social_network": "社交關係",
+    "worldview": "特殊背景/世界觀",
+    "premise": "特殊背景/世界觀",
+    "wishlist": "願望清單",
 }
 
 
 def _tag_lookup(items: list | None) -> dict:
-    """由 page_config 的枚举列表建反查表：tag_name→tag_key 且 tag_key→tag_key。"""
+    """由 page_config 的列舉列表建反查表：tag_name→tag_key 且 tag_key→tag_key。"""
     lookup: dict[str, str] = {}
     for t in items or []:
         key = (t or {}).get("tag_key") or ""
@@ -65,9 +65,9 @@ def _stringify(value) -> str:
 
 
 def _naturalize(value) -> str:
-    """把任意 persona 值拼成自然语言文本（customized_settings 的 value 不允许 JSON）。
+    """把任意 persona 值拼成自然語言文字（customized_settings 的 value 不允許 JSON）。
 
-    - 字符串原样；数组每项一行；对象拼成「key: value」用「；」相连（嵌套递归）。
+    - 字串原樣；陣列每項一行；物件拼成「key: value」用「；」相連（巢狀遞迴）。
     """
     if isinstance(value, str):
         return value.strip()
@@ -87,10 +87,10 @@ def _naturalize(value) -> str:
 
 
 def _opening_prologue_item(msg) -> dict | None:
-    """把一条 opening message 归一为 arca OpeningPrologueData。
+    """把一條 opening message 歸一為 arca OpeningPrologueData。
 
     creaction 的 opening.messages 元素形如 {"type":"text|voice","data":{"content":"..."}}，
-    偶尔是纯字符串。取真实文案（而非序列化整个对象），voice → output_type=tts。
+    偶爾是純字串。取真實文案（而非序列化整個物件），voice → output_type=tts。
     """
     if isinstance(msg, str):
         text = msg.strip()
@@ -113,15 +113,15 @@ def persona_to_character_form(persona: dict,
                               lang: str | None = None) -> dict:
     """persona → CharacterCreateForm。
 
-    page_config 为 GET /character/page_config 的 data（可选）：用于把 tags/species
-    归一成平台 tag_key（跨语言主键），并把 customized_settings 的 key 换成
-    平台 setting_options 在该语言下的 tag_name。传 None 则跳过对齐、原样透传。
-    lang 为角色语言（zh/ja/ko/en），决定 disposition 拼接用哪套连接词；缺省 zh。
+    page_config 為 GET /character/page_config 的 data（可選）：用於把 tags/species
+    歸一成平臺 tag_key（跨語言主鍵），並把 customized_settings 的 key 換成
+    平臺 setting_options 在該語言下的 tag_name。傳 None 則跳過對齊、原樣透傳。
+    lang 為角色語言（zh/ja/ko/en），決定 disposition 拼接用哪套連線詞；預設 zh。
     """
     persona = persona or {}
     page_config = page_config or {}
-    # 表单字段的取值一律用 page_config 的 tag_key（平台主键）；
-    # 未传 page_config（降级模式）时宽松透传，不误伤。
+    # 表單欄位的取值一律用 page_config 的 tag_key（平臺主鍵）；
+    # 未傳 page_config（降級模式）時寬鬆透傳，不誤傷。
     strict = bool(page_config)
     tag_lookup = _tag_lookup(page_config.get("character_tags"))
     species_lookup = _tag_lookup(page_config.get("species"))
@@ -136,16 +136,16 @@ def persona_to_character_form(persona: dict,
     if persona.get("species"):
         sp = _naturalize(persona["species"])
         if strict:
-            # 严格模式：species 必须是平台 tag_key；非枚举物种归「其他」
-            # （物种细节在 appearance/正文里，不丢信息）
+            # 嚴格模式：species 必須是平臺 tag_key；非列舉物種歸「其他」
+            # （物種細節在 appearance/正文裡，不丟資訊）
             form["species"] = species_lookup.get(
                 sp, "其他" if "其他" in species_lookup.values() else sp)
         else:
             form["species"] = sp
     pers = persona.get("personality")
     if isinstance(pers, dict):
-        # 旧 schema：personality 按角色语言+性别拼成自然语言段落（healing 有意丢弃）。
-        # 函数内延迟 import：persona_export 顶层引用本模块的 normalize_gender。
+        # 舊 schema：personality 按角色語言+性別拼成自然語言段落（healing 有意丟棄）。
+        # 函式內延遲 import：persona_export 頂層引用本模組的 normalize_gender。
         from .persona_export import build_personality_text
         text = build_personality_text(
             pers, lang or "zh", normalize_gender(persona.get("gender") or ""))
@@ -153,16 +153,16 @@ def persona_to_character_form(persona: dict,
             form["disposition"] = text
     elif isinstance(pers, str) and pers:
         form["disposition"] = pers
-    # 新 schema 的内在结构并入 disposition：旧 schema 拼出的 disposition 本就含
-    # 欲望/底线这层内在信息，新 schema 靠 inner_structure 补齐等价信息量。
+    # 新 schema 的內在結構併入 disposition：舊 schema 拼出的 disposition 本就含
+    # 慾望/底線這層內在資訊，新 schema 靠 inner_structure 補齊等價資訊量。
     inner = persona.get("inner_structure")
     if isinstance(inner, str) and inner.strip():
         form["disposition"] = (form.get("disposition", "") + "\n" + inner.strip()).strip()
-    # arca 建角色硬校验 voice_id 非空(「请选择音色」)；persona.voice 与 arca 音色表同源
+    # arca 建角色硬校驗 voice_id 非空(「請選擇音色」)；persona.voice 與 arca 音色表同源
     if persona.get("voice"):
         form["voice_id"] = str(persona["voice"])
-    # tags 是 CharacterCreateForm 的一等字段([]string)。取值一律用平台 tag_key；
-    # 严格模式下平台词表没有的词直接丢弃（平台本就不识别），降级模式透传。
+    # tags 是 CharacterCreateForm 的一等欄位([]string)。取值一律用平臺 tag_key；
+    # 嚴格模式下平臺詞表沒有的詞直接丟棄（平臺本就不識別），降級模式透傳。
     tags = persona.get("tags")
     if isinstance(tags, str) and tags:
         tags = [tags]
@@ -177,11 +177,11 @@ def persona_to_character_form(persona: dict,
                 normalized.append(key)
         if normalized:
             form["tags"] = normalized
-    # visibility 一等字段，枚举 public|private（非法值会被 go-zero 拒 400，只透传合法值）
+    # visibility 一等欄位，列舉 public|private（非法值會被 go-zero 拒 400，只透傳合法值）
     visibility = (persona.get("visibility") or "").strip().lower()
     if visibility in ("public", "private"):
         form["visibility"] = visibility
-    # persona.anonymous_identities → 表单 anonymous_tags（匿名身份标签）
+    # persona.anonymous_identities → 表單 anonymous_tags（匿名身份標籤）
     anon = persona.get("anonymous_identities")
     if isinstance(anon, str) and anon:
         anon = [anon]
@@ -197,12 +197,12 @@ def persona_to_character_form(persona: dict,
         if prologue:
             form["opening_prologue"] = prologue
 
-    # 兜底：其余字段（appearance/backstory/family/...）进 customized_settings。
-    # 新 IDL 为 []GeneralTagInfo（{tag_key, tag_name, tag_icon, tag_value, index}），
-    # 后端只消费 tag_key+tag_value，且 tag_key 会被 characterPageSettingKeySet
-    # 强校验——非平台设定项的 key 会导致整个 create 被拒，因此平台没有对应
-    # setting 的 persona 字段只能丢弃（不能像旧 map 一样保留原英文键）。
-    # value 一律拼成自然语言文本（不允许 JSON 串）；personality 已拼进 disposition。
+    # 兜底：其餘欄位（appearance/backstory/family/...）進 customized_settings。
+    # 新 IDL 為 []GeneralTagInfo（{tag_key, tag_name, tag_icon, tag_value, index}），
+    # 後端只消費 tag_key+tag_value，且 tag_key 會被 characterPageSettingKeySet
+    # 強校驗——非平臺設定項的 key 會導致整個 create 被拒，因此平臺沒有對應
+    # setting 的 persona 欄位只能丟棄（不能像舊 map 一樣保留原英文鍵）。
+    # value 一律拼成自然語言文字（不允許 JSON 串）；personality 已拼進 disposition。
     setting_names = {t.get("tag_key"): (t.get("tag_name") or t.get("tag_key"))
                      for t in page_config.get("setting_options") or []
                      if t.get("tag_key")}
@@ -212,9 +212,9 @@ def persona_to_character_form(persona: dict,
             continue
         tag_key = _SETTING_KEY_MAP.get(k)
         if not tag_key:
-            continue  # 平台无对应设定项，带上会被后端整单拒绝
+            continue  # 平臺無對應設定項，帶上會被後端整單拒絕
         if setting_names and tag_key not in setting_names:
-            continue  # page_config 可用时二次校验，防静态表与平台漂移
+            continue  # page_config 可用時二次校驗，防靜態表與平臺漂移
         text = _naturalize(v)
         if not text:
             continue

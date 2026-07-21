@@ -46,10 +46,10 @@ def test_headers_region_follows_character_lang(monkeypatch):
                  ARCA_REGION="KR")
     assert ac._headers("ja")["X-Language"] == "ja"
     assert ac._headers("ja")["X-Region"] == "JP"
-    assert ac._headers("zh")["X-Region"] == "TW"  # CN 会被 RegionBlock 拒 403，映射到 TW
+    assert ac._headers("zh")["X-Region"] == "TW"  # CN 會被 RegionBlock 拒 403，對映到 TW
     assert ac._headers("en")["X-Region"] == "US"
     assert ac._headers("ko")["X-Region"] == "KR"
-    # 未知语言回退全局 ARCA_REGION
+    # 未知語言回退全域性 ARCA_REGION
     assert ac._headers("fr")["X-Region"] == "KR"
 
 
@@ -58,13 +58,13 @@ def test_headers_region_zh_hant_and_region_tags(monkeypatch):
     ac = _reload(monkeypatch, ARCA_JWT_MODE="local",
                  ARCA_ACCESS_SECRET=_SECRET, ARCA_UID="u42",
                  ARCA_REGION="KR")
-    # zh-Hant 归属繁中地区
+    # zh-Hant 歸屬繁中地區
     assert ac._headers("zh-Hant")["X-Region"] == "TW"
-    # 语言标签自带地区码 → 直接采用
+    # 語言標籤自帶地區碼 → 直接採用
     assert ac._headers("zh-HK")["X-Region"] == "HK"
     assert ac._headers("zh-Hant-TW")["X-Region"] == "TW"
     assert ac._headers("en-GB")["X-Region"] == "GB"
-    # 未知带脚本标签的语言退语言主码（zh-Hans → zh → TW）
+    # 未知帶指令碼標籤的語言退語言主碼（zh-Hans → zh → TW）
     assert ac._headers("zh-Hans")["X-Region"] == "TW"
 
 
@@ -72,4 +72,4 @@ def test_headers_region_env_override(monkeypatch):
     ac = _reload(monkeypatch, ARCA_JWT_MODE="local",
                  ARCA_ACCESS_SECRET=_SECRET, ARCA_UID="u42",
                  ARCA_REGION_BY_LANG='{"ja": "sg"}')
-    assert ac._headers("ja")["X-Region"] == "SG"  # env 覆盖且强制大写
+    assert ac._headers("ja")["X-Region"] == "SG"  # env 覆蓋且強制大寫

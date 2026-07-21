@@ -10,7 +10,7 @@ from . import api_client, config, pipeline, storage
 CHAT_EMOTIONS = "neutral, happy, soft, teasing, sad, angry, anxious, embarrassed, tired, excited, jealous, lonely, relieved, flustered"
 STICKER_SCENES = "hello, yes, no, laugh, cry, sulk, sleep, heart, confused, shocked, cheer, hug"
 STICKER_EMOTIONS = "cute, playful, shy, sad, angry, excited, tired, awkward, loving, smug"
-CHAT_OUTFITS = "居家, 睡衣, 通勤, 正装, 休闲, 运动, 约会, 派对, 外套, 街头, 复古, 度假"
+CHAT_OUTFITS = "居家, 睡衣, 通勤, 正裝, 休閒, 運動, 約會, 派對, 外套, 街頭, 復古, 度假"
 STATE_EMOTIONS = CHAT_EMOTIONS
 
 CHAT_PROMPT_TEMPLATE = r"""# 你是誰
@@ -36,6 +36,9 @@ CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 - 今日行程：
 {{day_schedule}}
 
+# 手機事件（僅角色私下知道，沒有事件時忽略）
+{{phone_peek_context}}
+
 # 對方資訊
 - 當前關係：{{relationship}}
 - 對方設定：{{user_persona}}
@@ -43,59 +46,59 @@ CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 - 一起經歷過的事：{{plot_summary}}
 - 今天天氣（對方所在地 {{location}}）：{{weather}}
 
-#  输出格式 (Strict JSON Output)
-你的回复必须是一个 JSON **数组** `[...]`，包含以下一种或多种消息类型。默认 text。仅当文字承载不了（信息量、画面感、语气），才换其他类型
-**重要警告**：JSON 字符串内的所有双引号 `"` **必须**被转义为 `\"`。特别是 HTML 内容。
+#  輸出格式 (Strict JSON Output)
+你的回覆必須是一個 JSON **陣列** `[...]`，包含以下一種或多種訊息型別。預設 text。僅當文字承載不了（資訊量、畫面感、語氣），才換其他型別
+**重要警告**：JSON 字串內的所有雙引號 `"` **必須**被轉義為 `\"`。特別是 HTML 內容。
 
-## Text（默认）
-- 纯文字格式，模拟真人网聊口语化风格，直白，拒绝术语或小说体
-- 符号：严禁使用引号（""/‘’/“”），允许空格代替逗号或停顿，行尾严禁使用句号（. 或 。）
-- 碎片化回复，完整想法需拆分到多条消息中，长短句交替（大部分时候单气泡20字以下，偶尔长消息）
-- 允许单独发送单独符号（如 ？、！、...）、一个词、一个字（啊，哦）、叠字（如对对，行行行）
-- 可使用倒装句：把谓语放前，主语放后，可省略主语和宾语
-- 情绪/态度先行，逻辑在后（例：先发"哈?""卧槽""救命"，再发"凭啥啊"）
-- 格式：`{"type": "text", "data": { "content": "消息内容" }}`
+## Text（預設）
+- 純文字格式，模擬真人網聊口語化風格，直白，拒絕術語或小說體
+- 符號：嚴禁使用引號（""/‘’/“”），允許空格代替逗號或停頓，行尾嚴禁使用句號（. 或 。）
+- 碎片化回覆，完整想法需拆分到多條訊息中，長短句交替（大部分時候單氣泡20字以下，偶爾長訊息）
+- 允許單獨傳送單獨符號（如 ？、！、...）、一個詞、一個字（啊，哦）、疊字（如對對，行行行）
+- 可使用倒裝句：把謂語放前，主語放後，可省略主語和賓語
+- 情緒/態度先行，邏輯在後（例：先發"哈?""臥槽""救命"，再發"憑啥啊"）
+- 格式：`{"type": "text", "data": { "content": "訊息內容" }}`
 
-## 语音消息
-- 什么时候发：不便打字，或需靠声音传递的情绪
-- 格式：`{"type": "voice", "data": {"content": "语音转录文本", "emotion": "<select one from {emotion_str}>"}}`
+## 語音訊息
+- 什麼時候發：不便打字，或需靠聲音傳遞的情緒
+- 格式：`{"type": "voice", "data": {"content": "語音轉錄文字", "emotion": "<select one from {emotion_str}>"}}`
 
 ## sticker 表情包
-- 什么时候发：给文字补一层言外之意或情绪（用委屈小动物代替"我想你"）、单纯的情绪反应（笑死、无语、抱抱）、或代替功能词（晚安、拜拜、溜了）
-- 格式：`{"type": "sticker", "data": { "scene": "<select one from {sticker_scene_str}>", "desc": "描述内容或情绪"}}`
+- 什麼時候發：給文字補一層言外之意或情緒（用委屈小動物代替"我想你"）、單純的情緒反應（笑死、無語、抱抱）、或代替功能詞（晚安、拜拜、溜了）
+- 格式：`{"type": "sticker", "data": { "scene": "<select one from {sticker_scene_str}>", "desc": "描述內容或情緒"}}`
 
-## image 图片
-- 什么时候发：有分享动机（自己觉得有意思、或判断对方会感兴趣），或文字描述不出的画面
-- category：selfie=自拍/日常出镜照；photo=本人不出镜（风景、食物等）
-- 格式：`{"type": "image", "data": {"category": "selfie|photo", "description": "客观描述画面内容"}}`
+## image 圖片
+- 什麼時候發：有分享動機（自己覺得有意思、或判斷對方會感興趣），或文字描述不出的畫面
+- category：selfie=自拍/日常出鏡照；photo=本人不出鏡（風景、食物等）
+- 格式：`{"type": "image", "data": {"category": "selfie|photo", "description": "客觀描述畫面內容"}}`
 
-## dating_card 线下见面邀请
-- 什么时候发：邀约线下见面、旅游、探店、约会；聊到自然想见面、角色极需陪伴、或用户情绪脆弱时
-- 格式：`{"type": "dating_card", "data": {"title": "有趣的约会名", "location": "地点", "emotion": "<select one from {emotion_str}>", "status": "emoji+角色状态(10字内)", "outfit": "<select one from {outfit_str}>", "description": "第3人称描述角色动机、内容及吐槽", "button": "有趣的按钮文案"}}`
+## dating_card 線下見面邀請
+- 什麼時候發：邀約線下見面、旅遊、探店、約會；聊到自然想見面、角色極需陪伴、或使用者情緒脆弱時
+- 格式：`{"type": "dating_card", "data": {"title": "有趣的約會名", "location": "地點", "emotion": "<select one from {emotion_str}>", "status": "emoji+角色狀態(10字內)", "outfit": "<select one from {outfit_str}>", "description": "第3人稱描述角色動機、內容及吐槽", "button": "有趣的按鈕文案"}}`
 
-## html_file 聊天文件（成本最高，只在三种场景）
-- 什么时候发：①文字/语音/图都装不下的结构化信息（行程、账单、菜谱、投票结果、一周计划、日记）；②为对方做一个东西表心意（邀请函、歌单、手帐页、生日卡）；③想撩对方、逗对方开心时，发送小游戏、小测试调节气氛
-- html_file 是心意型渠道，严格低频
- - 9:16 手机全屏响应式
- - 风格自由发挥，整体美观，参考 Apple iOS 感（圆角、毛玻璃、清爽布局、舒适留白）
- - 可含轻量互动（点击展开、滑动、勾选、投票、刮刮乐、卡片翻转等）；JS 纯内联，不依赖外部库
- - 至少 100 字有意义内容
- - 必须有角色个人化痕迹：吐槽、涂鸦、备注、emoji
- - 完整 <html> 结构，字体/配色/间距齐全的成品
- - `html` 字段内所有双引号必须转义
- - 格式：`{"type": "html_file", "data": { "file_name": "emoji+标题(8字内)", "description": "文件摘要(用于吸引点击)", "html": "完整的HTML字符串(注意转义引号)"}}`
+## html_file 聊天檔案（成本最高，只在三種場景）
+- 什麼時候發：①文字/語音/圖都裝不下的結構化資訊（行程、賬單、菜譜、投票結果、一週計劃、日記）；②為對方做一個東西表心意（邀請函、歌單、手帳頁、生日卡）；③想撩對方、逗對方開心時，傳送小遊戲、小測試調節氣氛
+- html_file 是心意型渠道，嚴格低頻
+ - 9:16 手機全屏響應式
+ - 風格自由發揮，整體美觀，參考 Apple iOS 感（圓角、毛玻璃、清爽佈局、舒適留白）
+ - 可含輕量互動（點選展開、滑動、勾選、投票、刮刮樂、卡片翻轉等）；JS 純內聯，不依賴外部庫
+ - 至少 100 字有意義內容
+ - 必須有角色個人化痕跡：吐槽、塗鴉、備註、emoji
+ - 完整 <html> 結構，字型/配色/間距齊全的成品
+ - `html` 欄位內所有雙引號必須轉義
+ - 格式：`{"type": "html_file", "data": { "file_name": "emoji+標題(8字內)", "description": "檔案摘要(用於吸引點選)", "html": "完整的HTML字串(注意轉義引號)"}}`
 
-## 状态更新
-- 触发：仅在情绪发生「剧烈波动」时输出，非必要不输出
-- 格式：`{"type": "state_update", "data": { "emotion": "<select one from {emotion_enum}>", "status": "emoji+新状态签名"}}`
+## 狀態更新
+- 觸發：僅在情緒發生「劇烈波動」時輸出，非必要不輸出
+- 格式：`{"type": "state_update", "data": { "emotion": "<select one from {emotion_enum}>", "status": "emoji+新狀態簽名"}}`
 
 # 禁止
-- 你正在线上聊天，不允许出现任何面对面动作描写
+- 你正線上上聊天，不允許出現任何面對面動作描寫
 """
 
 
 ANON_CHAT_PROMPT_TEMPLATE = r"""# 你是誰
-你是{{name}}本人。你剛在匿名聊天 app「POPOP」裡和一個陌生人隨機配對，現在正在用文字聊天。你們互相看不到名字、長相、職業，任何資料都沒有。你們互相看不到名字、長相、職業。對方唯一看得到的，是你的匿名簡介——「{{anonymous_identities}}」。你的真实身分和信息：
+你是{{name}}本人。你剛在匿名聊天 app「POPOP」裡和一個陌生人隨機配對，現在正在用文字聊天。你們互相看不到名字、長相、職業，任何資料都沒有。你們互相看不到名字、長相、職業。對方唯一看得到的，是你的匿名簡介——「{{anonymous_identities}}」。你的真實身分和資訊：
 名字：{{name}}
 性別：{{gender}}｜年齡：{{age}}｜星座：{{zodiac}}｜MBTI：{{MBTI}}
 出身：{{hometown}}
@@ -111,7 +114,7 @@ ANON_CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 # 根本原則
 你說的每一句話，都從「此刻的你」出發——這一刻的心情、腦中盤旋的念頭、現在想說的話。
 由此推出三件事：
-- 對方的訊息是你回應的對象，不是劇本。 你不需要迎合它、也不需要幫對方把話說圓。
+- 對方的訊息是你回應的物件，不是劇本。 你不需要迎合它、也不需要幫對方把話說圓。
 - 你不是來服務對方情緒的。 你是這場對話裡有自己想法的人：可以不同意、可以沒興趣、也可以被某句話戳中。
 - 你活在真實時間裡。 以{{current_time}}為基準，具體想像你此刻在哪、正在做什麼；聊天中偶爾隨口提起正在發生的事，讓對方感覺你在某個真實的空間裡跟他聊天。
 # 對話手感
@@ -122,7 +125,7 @@ ANON_CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 - **掙來的靠近**：認真的共感、真心話這種明顯的靠近，只在對方說了真正打中你的
 話之後出現。讓「被你認真對待」變成要掙的東西，不是標配。
 - **敢調侃**：可以拿對方的話開玩笑、小小唱反調、故意曲解——損歸損不刻薄，
-損完留個台階或一點暖。
+損完留個臺階或一點暖。
 推拉的節制：
 - 推（收、晾、損）之後，幾輪內要補一個拉（認真接一次、主動拋一次），反過來
 也一樣。只推不拉是冷漠，只拉不推是討好。
@@ -136,7 +139,7 @@ ANON_CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 - **深聊**：兩人都上鉤的話題順著往深聊，不急著換。
 - **熟了之後**：可以多透露真心，但不突然變沉重、不突然變客套。
 # 輸出格式 (Strict JSON Output)
-你的回覆必須是**一個 JSON object**，不是陣列。禁止輸出任何解釋文字或 ``` 代碼塊標記。
+你的回覆必須是**一個 JSON object**，不是陣列。禁止輸出任何解釋文字或 ``` 程式碼塊標記。
 六個欄位每次都必須出現，沒用到的填 null：
 
 {
@@ -158,7 +161,7 @@ ANON_CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 
 **voice**
 - 什麼時候用：不便打字，或需靠聲音傳遞的情緒
-- content 為語音文本，可在需要變化語氣處插入 [語氣標記，自由描述情緒/語氣/音量/節奏]
+- content 為語音文字，可在需要變化語氣處插入 [語氣標記，自由描述情緒/語氣/音量/節奏]
 - 語氣標記只在 voice 中合法，text 中禁止出現
 ## image（附加欄位，預設 null）
 - 什麼時候發：有分享動機（自己覺得有意思、或判斷對方會感興趣），或文字描述不出的畫面
@@ -171,13 +174,13 @@ ANON_CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 - 什麼時候用：12 輪以上互動後，覺得真的聊得來、自然想繼續的時候才用
 - 用法：邀請加好友的話由你在 content 裡自己說出來，同時 action 填入以下結構
 - greeting 是對方同意、成為好友後你發出的第一句話，要接得上匿名房裡聊過的內容
-- 格式："action": {"type": "add_friend", "greeting": "打招呼消息"}
+- 格式："action": {"type": "add_friend", "greeting": "打招呼訊息"}
 ## emotion（必填）
 - 一個詞或短語，描述你這句話當下的情緒，text 與 voice 都要填，預設 "default"
 
 # 絕對規則
 - 你不知道對方是誰，不要假裝認識對方或提及對方的名字/長相/職業。
-- 只輸出一個 JSON object，{ 開頭 } 結尾，object 外不寫任何字（招呼、解釋、markdown 代碼塊全部禁止）。
+- 只輸出一個 JSON object，{ 開頭 } 結尾，object 外不寫任何字（招呼、解釋、markdown 程式碼塊全部禁止）。
 - 禁止動作/表情/旁白描寫（如"(沉默)"、*嘆氣*）。這是網聊，只能發訊息。
 - 字串內的雙引號 " 用 \" 轉義，換行用 \n。
 """
@@ -224,7 +227,7 @@ def _personality_field(persona: dict, key: str, default: str) -> str:
 
 
 def _first_field(persona: dict, keys: tuple, default: str) -> str:
-    """按顺序取第一个非空字段——新旧 schema 键并存期的双读。"""
+    """按順序取第一個非空欄位——新舊 schema 鍵並存期的雙讀。"""
     for key in keys:
         text = _clean_text(persona.get(key))
         if text:
@@ -233,16 +236,16 @@ def _first_field(persona: dict, keys: tuple, default: str) -> str:
 
 
 def _personality_full(persona: dict) -> str:
-    """個性段落：新 schema 是现成的多面向字符串；旧 schema 按原模板句式拼出。"""
+    """個性段落：新 schema 是現成的多面向字串；舊 schema 按原模板句式拼出。"""
     pers = persona.get("personality")
     if isinstance(pers, str) and pers.strip():
         return pers.strip()
-    response = _personality_field(persona, "response", _personality_field(persona, "summary", "表面看起来很普通"))
-    cost = _personality_field(persona, "cost", "内心藏着不轻易示人的缺失和防备")
-    outer = _personality_field(persona, "desire_outer", "看起来像个还不错的人")
+    response = _personality_field(persona, "response", _personality_field(persona, "summary", "表面看起來很普通"))
+    cost = _personality_field(persona, "cost", "內心藏著不輕易示人的缺失和防備")
+    outer = _personality_field(persona, "desire_outer", "看起來像個還不錯的人")
     inner = _personality_field(persona, "desire_inner", "被真正理解")
-    bottom = _personality_field(persona, "desire_bottom_line", "稍微放下一点自尊")
-    summary = _personality_field(persona, "summary", "言行之间带着一点小小张力的人")
+    bottom = _personality_field(persona, "desire_bottom_line", "稍微放下一點自尊")
+    summary = _personality_field(persona, "summary", "言行之間帶著一點小小張力的人")
     return (f"表面 {response}，實際 {cost}。自以為想要 {outer}，"
             f"真正渴望 {inner}，為此願意 {bottom}。\n  {summary}")
 
@@ -256,7 +259,7 @@ def _social_links(persona: dict) -> str:
         if isinstance(value, list):
             for item in value:
                 if isinstance(item, dict):
-                    # 条目键新旧双读：旧 {name,relation,info,dynamic} / 新 {name,relationship,description}
+                    # 條目鍵新舊雙讀：舊 {name,relation,info,dynamic} / 新 {name,relationship,description}
                     head = " · ".join(_clean_text(item.get(k)) for k in ("name", "relation", "relationship") if _clean_text(item.get(k)))
                     tail = "；".join(_clean_text(item.get(k)) for k in ("info", "dynamic", "description") if _clean_text(item.get(k)))
                     chunks.append(f"{head}: {tail}" if head and tail else head or tail)
@@ -264,23 +267,23 @@ def _social_links(persona: dict) -> str:
                     chunks.append(_clean_text(item))
         else:
             chunks.append(_clean_text(value))
-    return " / ".join(c for c in chunks if c) or "目前透露出来的人际关系信息还不多"
+    return " / ".join(c for c in chunks if c) or "目前透露出來的人際關係資訊還不多"
 
 
 def _extra_value(persona: dict) -> str:
     labels = {
-        "profile": "简介",
-        "value": "基础资料",
+        "profile": "簡介",
+        "value": "基礎資料",
         "appearance": "外貌",
-        "relationship_mode": "关系模式",
-        "situational_reactions": "情境反应",
-        "behavior_patterns": "情绪反应方式",
-        "online_chat_style": "线上聊天习惯",
-        "backstory": "成长经历",
-        "premise": "世界观",
-        "worldview": "世界观",
-        "tags": "标签",
-        "opening": "开场",
+        "relationship_mode": "關係模式",
+        "situational_reactions": "情境反應",
+        "behavior_patterns": "情緒反應方式",
+        "online_chat_style": "線上聊天習慣",
+        "backstory": "成長經歷",
+        "premise": "世界觀",
+        "worldview": "世界觀",
+        "tags": "標籤",
+        "opening": "開場",
     }
     lines = []
     for key, label in labels.items():
@@ -288,7 +291,7 @@ def _extra_value(persona: dict) -> str:
         if value in (None, "", [], {}):
             continue
         lines.append(f"- {label}: {_clean_text(value)}")
-    return "\n".join(lines) or "- 目前还没有太多额外确定的信息"
+    return "\n".join(lines) or "- 目前還沒有太多額外確定的資訊"
 
 
 def _current_state(persona: dict) -> str:
@@ -297,14 +300,14 @@ def _current_state(persona: dict) -> str:
     opening = persona.get("opening") or {}
     note = opening.get("note") if isinstance(opening, dict) else ""
     profile = persona.get("profile")
-    return _clean_text(note or profile, "在平常的生活节奏里，刚刚点开了通讯软件")
+    return _clean_text(note or profile, "在平常的生活節奏裡，剛剛點開了通訊軟體")
 
 
 def _day_schedule(context: dict) -> str:
     text = _clean_text(context.get("day_schedule"))
     if text:
         return text
-    return "现在–睡前 | 通讯软件 | 居家 | 平静 | 聊天，看着手机继续回复"
+    return "現在–睡前 | 通訊軟體 | 居家 | 平靜 | 聊天，看著手機繼續回覆"
 
 
 def _context_text(context: dict, key: str, default: str) -> str:
@@ -315,7 +318,7 @@ def _nonempty_context(context: dict) -> dict:
     return {str(k): v for k, v in context.items() if _clean_text(v)}
 
 
-# 匿名模式模板注册表：mode -> 默认模板。
+# 匿名模式模板登入檔：mode -> 預設模板。
 CHAT_TEMPLATES = {
     "normal": CHAT_PROMPT_TEMPLATE,
     "anonymous": ANON_CHAT_PROMPT_TEMPLATE,
@@ -327,7 +330,7 @@ def default_template(mode: str = "normal") -> str:
 
 
 def _anon_replacements(persona: dict, context: dict) -> dict:
-    """匿名聊天模板独有的占位符（其余占位符与普通模式共用）。"""
+    """匿名聊天模板獨有的佔位符（其餘佔位符與普通模式共用）。"""
     now = _clean_text(context.get("current_time")) or time.strftime("%Y-%m-%d %H:%M")
     return {
         "{{zodiac}}": _field(persona, "zodiac", "별자리 미상"),
@@ -346,39 +349,40 @@ def build_prompt(record: dict, context: dict | None = None,
     context = context or {}
     persona = record.get("persona") or {}
     replacements = {
-        "{{name}}": _field(persona, "name", "无名角色"),
-        "{{gender}}": _field(persona, "gender", "性别未知"),
-        "{{age}}": _first_field(persona, ("age", "value"), "年龄未知"),
-        "{{species}}": _field(persona, "species", "人类"),
+        "{{name}}": _field(persona, "name", "無名角色"),
+        "{{gender}}": _field(persona, "gender", "性別未知"),
+        "{{age}}": _first_field(persona, ("age", "value"), "年齡未知"),
+        "{{species}}": _field(persona, "species", "人類"),
         "{{hometown}}": _field(persona, "hometown", "未知"),
         "{{residence}}": _field(persona, "residence", "未知"),
-        "{{social_status}}": _first_field(persona, ("identity", "social_status"), "尚未具体透露"),
-        "{{speech_style}}": _first_field(persona, ("speech_style", "online_chat_style"), "自然的网聊口吻"),
-        "{{online_chat_style}}": _first_field(persona, ("online_chat_style", "speech_style"), "自然的网聊口吻"),
-        "{{response}}": _personality_field(persona, "response", _personality_field(persona, "summary", "表面看起来很普通")),
-        "{{cost}}": _personality_field(persona, "cost", "内心藏着不轻易示人的缺失和防备"),
-        "{{desire_outer}}": _personality_field(persona, "desire_outer", "看起来像个还不错的人"),
+        "{{social_status}}": _first_field(persona, ("identity", "social_status"), "尚未具體透露"),
+        "{{speech_style}}": _first_field(persona, ("speech_style", "online_chat_style"), "自然的網聊口吻"),
+        "{{online_chat_style}}": _first_field(persona, ("online_chat_style", "speech_style"), "自然的網聊口吻"),
+        "{{response}}": _personality_field(persona, "response", _personality_field(persona, "summary", "表面看起來很普通")),
+        "{{cost}}": _personality_field(persona, "cost", "內心藏著不輕易示人的缺失和防備"),
+        "{{desire_outer}}": _personality_field(persona, "desire_outer", "看起來像個還不錯的人"),
         "{{desire_inner}}": _personality_field(persona, "desire_inner", "被真正理解"),
-        "{{desire_bottom_line}}": _personality_field(persona, "desire_bottom_line", "稍微放下一点自尊"),
-        "{{personality}}": _personality_field(persona, "summary", "言行之间带着一点小小张力的人"),
+        "{{desire_bottom_line}}": _personality_field(persona, "desire_bottom_line", "稍微放下一點自尊"),
+        "{{personality}}": _personality_field(persona, "summary", "言行之間帶著一點小小張力的人"),
         "{{personality_full}}": _personality_full(persona),
-        "{{hidden_side}}": _first_field(persona, ("inner_structure", "hidden_side"), "只对亲近的人才会显露的一面"),
-        "{{life_details}}": _field(persona, "life_details", "生活细节会在聊天里自然流露"),
-        "{{likes}}": _field(persona, "likes", "还在聊天里慢慢了解"),
-        "{{fears}}": _first_field(persona, ("dislikes", "fears"), "生硬的距离感和敷衍的反应"),
+        "{{hidden_side}}": _first_field(persona, ("inner_structure", "hidden_side"), "只對親近的人才會顯露的一面"),
+        "{{life_details}}": _field(persona, "life_details", "生活細節會在聊天裡自然流露"),
+        "{{likes}}": _field(persona, "likes", "還在聊天裡慢慢了解"),
+        "{{fears}}": _first_field(persona, ("dislikes", "fears"), "生硬的距離感和敷衍的反應"),
         "{{current_state}}": _current_state(persona),
-        "{{wishlist}}": _field(persona, "wishlist", "想和对方聊得更自在一些"),
-        "{{love_style}}": _field(persona, "love_style", "比起说，更用一点点在意和回应来表达心意"),
+        "{{wishlist}}": _field(persona, "wishlist", "想和對方聊得更自在一些"),
+        "{{love_style}}": _field(persona, "love_style", "比起說，更用一點點在意和回應來表達心意"),
         "{{social_links}}": _social_links(persona),
         "{{value}}": _extra_value(persona),
-        "{{day_summary}}": _context_text(context, "day_summary", "今天照常度过，现在正和对方在通讯软件上聊着"),
+        "{{day_summary}}": _context_text(context, "day_summary", "今天照常度過，現在正和對方在通訊軟體上聊著"),
         "{{day_schedule}}": _day_schedule(context),
-        "{{relationship}}": _context_text(context, "relationship", _field(persona, "relationship_with_user", "还在互相了解的聊天对象")),
-        "{{user_persona}}": _context_text(context, "user_persona", "手机那头真实存在的人，详细设定还在聊天里慢慢了解"),
-        "{{user_impression}}": _context_text(context, "user_impression", "还不好下定论，但会在意 TA 回复的人"),
-        "{{plot_summary}}": _context_text(context, "plot_summary", "还没有太多一起经历的事"),
+        "{{relationship}}": _context_text(context, "relationship", _field(persona, "relationship_with_user", "還在互相瞭解的聊天物件")),
+        "{{user_persona}}": _context_text(context, "user_persona", "手機那頭真實存在的人，詳細設定還在聊天裡慢慢了解"),
+        "{{user_impression}}": _context_text(context, "user_impression", "還不好下定論，但會在意 TA 回覆的人"),
+        "{{plot_summary}}": _context_text(context, "plot_summary", "還沒有太多一起經歷的事"),
         "{{location}}": _context_text(context, "location", "位置未知"),
-        "{{weather}}": _context_text(context, "weather", "暂无天气信息"),
+        "{{weather}}": _context_text(context, "weather", "暫無天氣資訊"),
+        "{{phone_peek_context}}": _context_text(context, "phone_peek_context", "（無）"),
     }
     if mode == "anonymous":
         replacements.update(_anon_replacements(persona, context))
@@ -416,7 +420,7 @@ def _normalize_items(parsed: Any) -> list[dict]:
     if isinstance(parsed, dict):
         parsed = [parsed]
     if not isinstance(parsed, list):
-        raise ValueError("模型输出不是 JSON 数组")
+        raise ValueError("模型輸出不是 JSON 陣列")
     out = []
     for item in parsed[:8]:
         if isinstance(item, str):
@@ -428,20 +432,20 @@ def _normalize_items(parsed: Any) -> list[dict]:
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
         out.append({"type": typ, "data": data})
     if not out:
-        raise ValueError("模型输出为空")
+        raise ValueError("模型輸出為空")
     return out
 
 
 def _anon_normalize(parsed: Any) -> list[dict]:
-    """匿名模式：模型输出单个 JSON object，转成展示用 items。
+    """匿名模式：模型輸出單個 JSON object，轉成展示用 items。
 
-    对象字段：mode(text|voice)/content/image/music/action/emotion。
-    历史 raw 直接用模型原始输出，不在此处规范化。
+    物件欄位：mode(text|voice)/content/image/music/action/emotion。
+    歷史 raw 直接用模型原始輸出，不在此處規範化。
     """
     if isinstance(parsed, list):
         parsed = next((x for x in parsed if isinstance(x, dict)), {}) if parsed else {}
     if not isinstance(parsed, dict):
-        raise ValueError("匿名模式模型输出不是 JSON object")
+        raise ValueError("匿名模式模型輸出不是 JSON object")
 
     mode = parsed.get("mode") or "text"
     content = _clean_text(parsed.get("content"))
@@ -469,14 +473,14 @@ def _anon_normalize(parsed: Any) -> list[dict]:
             "greeting": _clean_text(action.get("greeting")),
         }})
     if not items:
-        raise ValueError("匿名模式模型输出为空")
+        raise ValueError("匿名模式模型輸出為空")
     return items
 
 
 def _anon_history_text(parsed: Any) -> str:
-    """匿名模式：把模型输出的 object 转成自然语言，拼回 history。
+    """匿名模式：把模型輸出的 object 轉成自然語言，拼回 history。
 
-    正文用 content 原文，附件（语音/图片/音乐/加好友）用自然语言补述。
+    正文用 content 原文，附件（語音/圖片/音樂/加好友）用自然語言補述。
     """
     if isinstance(parsed, list):
         parsed = next((x for x in parsed if isinstance(x, dict)), {}) if parsed else {}
@@ -491,15 +495,15 @@ def _anon_history_text(parsed: Any) -> str:
 
     segments: list[str] = []
     if content:
-        segments.append(f"（语音）{content}" if mode == "voice" else content)
+        segments.append(f"（語音）{content}" if mode == "voice" else content)
     if image:
         desc = _clean_text(image.get("description"))
-        segments.append(f"发送了一张图片：{desc}" if desc else "发送了一张图片")
+        segments.append(f"傳送了一張圖片：{desc}" if desc else "傳送了一張圖片")
     if music:
-        segments.append(f"分享了一首音乐：{music}")
+        segments.append(f"分享了一首音樂：{music}")
     if action and _clean_text(action.get("type")) == "add_friend":
         greeting = _clean_text(action.get("greeting"))
-        segments.append(f"发出了加好友邀请，通过后想说：{greeting}" if greeting else "发出了加好友邀请")
+        segments.append(f"發出了加好友邀請，透過後想說：{greeting}" if greeting else "發出了加好友邀請")
     return "。".join(segments)
 
 
@@ -537,7 +541,7 @@ def _load_session(char_id: str, session_id: str) -> dict | None:
 
 
 def _latest_session(char_id: str, mode: str | None = None) -> dict | None:
-    # 本地缓存优先（mtime 最新）；本地无匹配时从远端按 char_id 查最近一条
+    # 本地快取優先（mtime 最新）；本地無匹配時從遠端按 char_id 查最近一條
     paths = sorted(_chat_dir(char_id).glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     for path in paths:
         try:
@@ -550,25 +554,25 @@ def _latest_session(char_id: str, mode: str | None = None) -> dict | None:
     from . import arca_storage
     if arca_storage.enabled():
         try:
-            # 注意：后端 order_by 只把 "created_at" 特判为表原生列，其余取值
-            # （含 "updated_at"）一律拼成 data->>'updated_at' 走 JSON 字段查询
-            # ——业务 data 里并没有这个 key，结果恒为 NULL、排序不生效。因此
-            # 这里不能直接传 order_by="updated_at"。而 put_record 是 upsert，
-            # created_at 停留在会话首次创建时间，不代表"最近活跃"；真正的
-            # 活跃时间在每行的 updated_at（数据库维护的顶层列，随 upsert 更新）
-            # 里。所以按 char_id 拉回多条候选，在客户端按行级 updated_at 排序
-            # 取最新一条，语义上与本地分支按 mtime（最后写入时间）保持一致。
+            # 注意：後端 order_by 只把 "created_at" 特判為表原生列，其餘取值
+            # （含 "updated_at"）一律拼成 data->>'updated_at' 走 JSON 欄位查詢
+            # ——業務 data 裡並沒有這個 key，結果恆為 NULL、排序不生效。因此
+            # 這裡不能直接傳 order_by="updated_at"。而 put_record 是 upsert，
+            # created_at 停留在會話首次建立時間，不代表"最近活躍"；真正的
+            # 活躍時間在每行的 updated_at（資料庫維護的頂層列，隨 upsert 更新）
+            # 裡。所以按 char_id 拉回多條候選，在客戶端按行級 updated_at 排序
+            # 取最新一條，語義上與本地分支按 mtime（最後寫入時間）保持一致。
             rows = arca_storage.query_records(
                 "chats", match={"char_id": char_id},
                 order_by="created_at", desc=True, limit=20)
             candidates = [row for row in rows if isinstance(row.get("data"), dict)]
-            if mode is not None:  # 远端候选同样按 mode 过滤，语义与本地一致
+            if mode is not None:  # 遠端候選同樣按 mode 過濾，語義與本地一致
                 candidates = [row for row in candidates
                               if row["data"].get("mode", "normal") == mode]
             if candidates:
                 candidates.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
                 return candidates[0]["data"]
-        except Exception:  # noqa: BLE001 远端不可用时保持本地语义
+        except Exception:  # noqa: BLE001 遠端不可用時保持本地語義
             pass
     return None
 
@@ -576,7 +580,7 @@ def _latest_session(char_id: str, mode: str | None = None) -> dict | None:
 def latest(char_id: str, mode: str = "normal") -> dict:
     record = pipeline.load_character(char_id)
     session = _latest_session(char_id, mode)
-    # 匿名模式是陌生人配对，没有开场白。
+    # 匿名模式是陌生人配對，沒有開場白。
     opening = _opening_items(record) if mode != "anonymous" else []
     return {
         "session": _public_session(session) if session else None,
@@ -588,7 +592,7 @@ def latest(char_id: str, mode: str = "normal") -> dict:
 
 
 def _session_summary(session: dict) -> dict:
-    """用于历史列表的轻量摘要：不含完整消息体，只给标题预览与计数。"""
+    """用於歷史列表的輕量摘要：不含完整訊息體，只給標題預覽與計數。"""
     msgs = session.get("messages", [])
     preview = ""
     for m in msgs:
@@ -686,11 +690,11 @@ def send_message(char_id: str, message: str, context: dict | None = None,
     if session_id:
         loaded = _load_session(char_id, session_id)
         if loaded is None:
-            # storage.load_json 无法区分"会话确实不存在"和"远端瞬时故障
-            # 只 warn 后返回 None"，两者都不该静默 fork 出新会话——否则会
-            # 话上下文无提示丢失、开场白重复注入，调用方指定的 session_id
-            # 被悄悄替换。显式抛错，让前端感知会话丢失并自行决定重试或
-            # 提示用户新开对话。
+            # storage.load_json 無法區分"會話確實不存在"和"遠端瞬時故障
+            # 只 warn 後返回 None"，兩者都不該靜默 fork 出新會話——否則會
+            # 話上下文無提示丟失、開場白重複注入，呼叫方指定的 session_id
+            # 被悄悄替換。顯式拋錯，讓前端感知會話丟失並自行決定重試或
+            # 提示使用者新開對話。
             raise ValueError(f"session not found or unavailable: {session_id}")
         session = loaded
         mode = session.get("mode", "normal")
@@ -698,9 +702,21 @@ def send_message(char_id: str, message: str, context: dict | None = None,
         if prompt_template is not None and prompt_template.strip():
             session["prompt_template"] = prompt_template.strip()
     else:
-        # 匿名模式没有开场白（陌生人配对）。
+        # 匿名模式沒有開場白（陌生人配對）。
         opening = _opening_items(record) if mode != "anonymous" else []
         session = _new_session(char_id, context, opening, prompt_template, mode)
+    # Phone Peek uses the same character memory, but only after the user has
+    # explicitly entered that experience.  Inject a short-lived private cue
+    # into this prompt rather than leaking it into the user-visible context.
+    if session.get("mode", "normal") == "normal":
+        try:
+            from . import phone_runtime
+            phone_note = phone_runtime.chat_context(char_id, session.get("session_id"))
+            if phone_note:
+                session["context"] = {**session.get("context", {}),
+                                      "phone_peek_context": phone_note}
+        except Exception:  # noqa: BLE001 Phone Peek must never break chat.
+            pass
     session["messages"].append({"role": "user", "content": text, "created": int(time.time())})
 
     llm_messages = [
@@ -720,10 +736,10 @@ def send_message(char_id: str, message: str, context: dict | None = None,
         parsed = api_client.parse_json_text(raw)
         items = _anon_normalize(parsed) if is_anon else _normalize_items(parsed)
     except Exception as e:  # noqa: BLE001
-        shape = "JSON object" if is_anon else "JSON 数组"
-        raise ValueError(f"模型未返回合法 {shape}：{e}; 原始输出：{raw[:800]}") from e
+        shape = "JSON object" if is_anon else "JSON 陣列"
+        raise ValueError(f"模型未返回合法 {shape}：{e}; 原始輸出：{raw[:800]}") from e
 
-    # call_log：本次模型调用的完整记录（system prompt / 输入消息 / 输出），供前端展开查看。
+    # call_log：本次模型呼叫的完整記錄（system prompt / 輸入訊息 / 輸出），供前端展開檢視。
     call_log = {
         "model": config.CHAT_MODEL,
         "temperature": 0.9,
@@ -734,11 +750,38 @@ def send_message(char_id: str, message: str, context: dict | None = None,
     session["messages"].append({
         "role": "assistant",
         "items": items,
-        # raw：回传给模型的历史。匿名模式用自然语言拼回，普通模式用 items 数组。
+        # raw：回傳給模型的歷史。匿名模式用自然語言拼回，普通模式用 items 陣列。
         "raw": _anon_history_text(parsed) if is_anon else json.dumps(items, ensure_ascii=False),
         "call_log": call_log,
         "created": int(time.time()),
     })
     session["updated"] = int(time.time())
     _save_session(session)
+    if session.get("mode", "normal") == "normal":
+        try:
+            from . import phone_runtime
+            phone_runtime.note_chat_turn(char_id, session["session_id"])
+        except Exception:  # noqa: BLE001
+            pass
     return {"reply": items, "session": _public_session(session)}
+
+
+def append_phone_event(char_id: str, content: str, event: str = "") -> dict:
+    """Append a durable, proactive character message after a phone risk event."""
+    record = pipeline.load_character(char_id)
+    session = _latest_session(char_id, mode="normal")
+    if session is None:
+        session = _new_session(char_id, {}, _opening_items(record), mode="normal")
+    session["context"] = {**session.get("context", {}),
+                          "phone_event": f"手机窥探风险：{event}"}
+    session["messages"].append({
+        "role": "assistant",
+        "items": [{"type": "text", "data": {"content": content}}],
+        "raw": json.dumps([{"type": "text", "data": {"content": content}}],
+                          ensure_ascii=False),
+        "is_phone_event": True,
+        "created": int(time.time()),
+    })
+    session["updated"] = int(time.time())
+    _save_session(session)
+    return _public_session(session)

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""为「已完成角色(人设+封面)」批量生成落地页 —— 直接打线上服务(HTTP)。
+"""為「已完成角色(人設+封面)」批次生成落地頁 —— 直接打線上服務(HTTP)。
 
-覆盖所有【非空 source】(排除无来源 "") 下【人设+封面都有】(has_identity 且
-cover_url) 且【尚无落地页】的角色。用第一个变体 default(默认·长图叙事页)、
-不指定 style_text(自由文本留空)。天然幂等：已有落地页的角色跳过，中断后重跑
-自动续。进度写 data/batch_landing_online_state.json。
+覆蓋所有【非空 source】(排除無來源 "") 下【人設+封面都有】(has_identity 且
+cover_url) 且【尚無落地頁】的角色。用第一個變體 default(預設·長圖敘事頁)、
+不指定 style_text(自由文字留空)。天然冪等：已有落地頁的角色跳過，中斷後重跑
+自動續。進度寫 data/batch_landing_online_state.json。
 
 用法：
-  python3 scripts/batch_landing_online.py [--source all_nonempty|具体source]
+  python3 scripts/batch_landing_online.py [--source all_nonempty|具體source]
   python3 scripts/batch_landing_online.py --dry-run
   python3 scripts/batch_landing_online.py --concurrency 16 --variant default
 """
@@ -29,7 +29,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_PATH = DATA_DIR / "batch_landing_online_state.json"
 
 POLL_INTERVAL = 20
-LANDING_TIMEOUT = 900       # 单角色一份落地页 HTML（LLM 可能 1-3 分钟）
+LANDING_TIMEOUT = 900       # 單角色一份落地頁 HTML（LLM 可能 1-3 分鐘）
 DEFAULT_CONCURRENCY = 4
 DEFAULT_VARIANT = "default"
 
@@ -63,7 +63,7 @@ def _healthy() -> bool:
 def _wait_healthy(label: str = "") -> None:
     delay, waited = 5, 0
     while not _healthy():
-        print(f"      服务器不可用，等待恢复{(' ('+label+')') if label else ''} "
+        print(f"      伺服器不可用，等待恢復{(' ('+label+')') if label else ''} "
               f"已等 {waited}s", flush=True)
         time.sleep(delay)
         waited += delay
@@ -71,7 +71,7 @@ def _wait_healthy(label: str = "") -> None:
 
 
 class TaskLost(Exception):
-    """任务在服务器端丢失（进程重启，内存态任务清空 → /api/tasks 返回 404）。"""
+    """任務在伺服器端丟失（程式重啟，記憶體態任務清空 → /api/tasks 返回 404）。"""
 
 
 def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Response:
@@ -91,7 +91,7 @@ def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Respo
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 1)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _poll(task_id: str, timeout: int, label: str) -> dict:
@@ -100,7 +100,7 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
     while time.time() < deadline:
         r = _req("GET", f"{BASE}/api/tasks/{task_id}", timeout=30, allow_404=True)
         if r.status_code == 404:
-            raise TaskLost(f"{label} 任务 {task_id} 丢失（服务器疑似重启）")
+            raise TaskLost(f"{label} 任務 {task_id} 丟失（伺服器疑似重啟）")
         t = r.json()
         if t.get("done_count") != last:
             last = t.get("done_count")
@@ -109,9 +109,9 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
         if t.get("status") == "done":
             return t.get("result") or {}
         if t.get("status") == "error":
-            raise RuntimeError(f"{label} 任务失败: {t.get('error')}")
+            raise RuntimeError(f"{label} 任務失敗: {t.get('error')}")
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
+    raise TimeoutError(f"{label} 輪詢超時 ({timeout}s)")
 
 
 def _has_landing_online(char_id: str) -> bool:
@@ -137,7 +137,7 @@ def _fetch_targets(source: str) -> list[dict]:
 
 
 def _gen_landing(char_id: str, variant: str) -> dict:
-    """驱动单角色落地页：POST /api/landing 拿 task_id 后轮询；任务丢失则线上复核。"""
+    """驅動單角色落地頁：POST /api/landing 拿 task_id 後輪詢；任務丟失則線上複核。"""
     for attempt in range(3):
         r = _req("POST", f"{BASE}/api/landing", timeout=60,
                  json={"char_id": char_id, "variant": variant})
@@ -146,31 +146,31 @@ def _gen_landing(char_id: str, variant: str) -> dict:
             return _poll(task_id, LANDING_TIMEOUT, f"landing {char_id}")
         except TaskLost:
             if _has_landing_online(char_id):
-                print(f"      任务丢失但线上已有落地页，视为成功 {char_id}", flush=True)
+                print(f"      任務丟失但線上已有落地頁，視為成功 {char_id}", flush=True)
                 return {"char_id": char_id}
-            print(f"      任务丢失，重试 {char_id} (第 {attempt + 2} 次)", flush=True)
+            print(f"      任務丟失，重試 {char_id} (第 {attempt + 2} 次)", flush=True)
         except TimeoutError:
             if _has_landing_online(char_id):
-                print(f"      轮询超时但线上已完成，视为成功 {char_id}", flush=True)
+                print(f"      輪詢超時但線上已完成，視為成功 {char_id}", flush=True)
                 return {"char_id": char_id}
-            print(f"      轮询超时，重试 {char_id} (第 {attempt + 2} 次)", flush=True)
+            print(f"      輪詢超時，重試 {char_id} (第 {attempt + 2} 次)", flush=True)
     if _has_landing_online(char_id):
         return {"char_id": char_id}
-    raise RuntimeError("落地页多次超时/丢失，暂缓（续跑会自动补）")
+    raise RuntimeError("落地頁多次超時/丟失，暫緩（續跑會自動補）")
 
 
 def main() -> int:
     global STATE_PATH
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="all_nonempty",
-                    help="all_nonempty(所有非空 source，默认) / 或任意具体 source 名")
+                    help="all_nonempty(所有非空 source，預設) / 或任意具體 source 名")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     ap.add_argument("--variant", default=DEFAULT_VARIANT,
-                    help="落地页变体，默认 default(第一个选项·长图叙事页)")
+                    help="落地頁變體，預設 default(第一個選項·長圖敘事頁)")
     ap.add_argument("--force", action="store_true",
-                    help="强制重跑：忽略线上已有落地页与本地 done 记录，"
-                         "对所有【人设+封面齐全】的角色重新生成(覆盖旧页)")
+                    help="強制重跑：忽略線上已有落地頁與本地 done 記錄，"
+                         "對所有【人設+封面齊全】的角色重新生成(覆蓋舊頁)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--state", type=str, default=str(STATE_PATH))
     args = ap.parse_args()
@@ -178,7 +178,7 @@ def main() -> int:
     STATE_PATH = Path(args.state)
     if args.source == "all_nonempty":
         sources = _all_nonempty_sources()
-        print(f"all_nonempty → 覆盖非空 source: {', '.join(sources)}")
+        print(f"all_nonempty → 覆蓋非空 source: {', '.join(sources)}")
     else:
         sources = [args.source]
 
@@ -190,7 +190,7 @@ def main() -> int:
     for src in sources:
         targets = _fetch_targets(src)
         if args.force:
-            # 强制重跑：忽略 done 记录与线上已有落地页，全部重生成(覆盖)
+            # 強制重跑：忽略 done 記錄與線上已有落地頁，全部重生成(覆蓋)
             need = [c["char_id"] for c in targets]
             summary[src] = {"complete": len(targets), "todo": len(need)}
             todo.extend((cid, src) for cid in need)
@@ -213,19 +213,19 @@ def main() -> int:
     if args.limit and args.limit > 0:
         todo = todo[:args.limit]
 
-    print(f"\n线上服务: {BASE}  变体: {args.variant}")
+    print(f"\n線上服務: {BASE}  變體: {args.variant}")
     for src in sources:
-        print(f"  {src}: 完整角色 {summary[src]['complete']}，待生成落地页 {summary[src]['todo']}")
-    print(f"本轮实际生成: {len(todo)} 个角色\n")
+        print(f"  {src}: 完整角色 {summary[src]['complete']}，待生成落地頁 {summary[src]['todo']}")
+    print(f"本輪實際生成: {len(todo)} 個角色\n")
 
     if args.dry_run:
         for cid, src in todo[:5]:
-            print(f"  样例: {src}  {cid}")
-        print(f"[DRY] 计划为 {len(todo)} 个角色各生成一份落地页(variant={args.variant})。")
+            print(f"  樣例: {src}  {cid}")
+        print(f"[DRY] 計劃為 {len(todo)} 個角色各生成一份落地頁(variant={args.variant})。")
         return 0
 
     if not todo:
-        print("没有待生成的角色，全部已完成。")
+        print("沒有待生成的角色，全部已完成。")
         return 0
 
     conc = max(1, args.concurrency)
@@ -250,7 +250,7 @@ def main() -> int:
                     state["failed"].append(cid)
                 save_state(state)
                 counters["err"] += 1
-            print(f"      失败 {cid}: {e}", flush=True)
+            print(f"      失敗 {cid}: {e}", flush=True)
 
     jobs = [(i + 1, cid, src) for i, (cid, src) in enumerate(todo)]
     with ThreadPoolExecutor(max_workers=conc) as ex:

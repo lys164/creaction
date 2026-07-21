@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""补跑线上「source=feiren」缺封面角色的封面 —— 直接打线上服务(HTTP)。
+"""補跑線上「source=feiren」缺封面角色的封面 —— 直接打線上服務(HTTP)。
 
-背景：meme 非人物(nonhuman)批处理跑人设时，部分角色的封面被上游安全策略/
-内容审核拒了(cover_errors)，人设已入账但缺封面。本脚本扫描线上所有
-source=feiren 且无 cover 的角色，调用 /api/characters/batch_cover 逐个补封面。
+背景：meme 非人物(nonhuman)批處理跑人設時，部分角色的封面被上游安全策略/
+內容稽核拒了(cover_errors)，人設已入賬但缺封面。本指令碼掃描線上所有
+source=feiren 且無 cover 的角色，呼叫 /api/characters/batch_cover 逐個補封面。
 
-- nonhuman 链路封面不套画风：generate_cover 内部对 track=nonhuman 忽略 style_id，
-  按 identity+原图生成。这里 style_id 只是占位(服务器会忽略)。
-- mode=fill_missing：缺 identity/cover_spec 会自动补齐再出图。
-- 断点续跑：每轮重新扫描线上，只补仍缺封面的；成功即被下轮扫描排除。
+- nonhuman 鏈路封面不套畫風：generate_cover 內部對 track=nonhuman 忽略 style_id，
+  按 identity+原圖生成。這裡 style_id 只是佔位(伺服器會忽略)。
+- mode=fill_missing：缺 identity/cover_spec 會自動補齊再出圖。
+- 斷點續跑：每輪重新掃描線上，只補仍缺封面的；成功即被下輪掃描排除。
 
 用法：
   PYTHONPATH=. python3 scripts/backfill_meme_covers.py [--batch N] [--dry-run]
@@ -23,10 +23,10 @@ import requests
 
 BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 SOURCE = "feiren"
-STYLE_ID = "realistic_portrait"   # nonhuman 会忽略；仅占位
+STYLE_ID = "realistic_portrait"   # nonhuman 會忽略；僅佔位
 POLL_INTERVAL = 8
 BATCH_TIMEOUT = 3600
-DEFAULT_BATCH = 8                 # 每批补多少个角色(服务器内部再并发)
+DEFAULT_BATCH = 8                 # 每批補多少個角色(伺服器內部再併發)
 
 
 def _healthy() -> bool:
@@ -39,7 +39,7 @@ def _healthy() -> bool:
 def _wait_healthy(label: str = "") -> None:
     delay, waited = 5, 0
     while not _healthy():
-        print(f"   ⏳ 服务器不可用，等待恢复{(' ('+label+')') if label else ''} 已等 {waited}s",
+        print(f"   ⏳ 伺服器不可用，等待恢復{(' ('+label+')') if label else ''} 已等 {waited}s",
               flush=True)
         time.sleep(delay)
         waited += delay
@@ -61,11 +61,11 @@ def _req(method: str, url: str, **kw) -> requests.Response:
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 1)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _missing_cover_ids() -> list[str]:
-    """线上扫描 source=feiren 且无 cover_url 的角色 char_id。"""
+    """線上掃描 source=feiren 且無 cover_url 的角色 char_id。"""
     r = _req("GET", f"{BASE}/api/characters", timeout=60)
     chars = r.json()
     return [c["char_id"] for c in chars
@@ -85,9 +85,9 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
         if t.get("status") == "done":
             return t.get("result") or {}
         if t.get("status") == "error":
-            raise RuntimeError(f"{label} 任务失败: {t.get('error')}")
+            raise RuntimeError(f"{label} 任務失敗: {t.get('error')}")
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
+    raise TimeoutError(f"{label} 輪詢超時 ({timeout}s)")
 
 
 def _cover_batch(char_ids: list[str]) -> dict:
@@ -95,7 +95,7 @@ def _cover_batch(char_ids: list[str]) -> dict:
         "char_ids": char_ids, "style_id": STYLE_ID, "mode": "fill_missing",
     }, timeout=120)
     task_id = r.json()["task_id"]
-    return _poll(task_id, BATCH_TIMEOUT, "补封面")
+    return _poll(task_id, BATCH_TIMEOUT, "補封面")
 
 
 def main() -> int:
@@ -105,15 +105,15 @@ def main() -> int:
     args = ap.parse_args()
 
     ids = _missing_cover_ids()
-    print(f"线上服务: {BASE}")
-    print(f"source={SOURCE} 缺封面角色: {len(ids)} 个；每批 {args.batch} 个\n")
+    print(f"線上服務: {BASE}")
+    print(f"source={SOURCE} 缺封面角色: {len(ids)} 個；每批 {args.batch} 個\n")
     if args.dry_run:
         for cid in ids[:10]:
             print("  ", cid)
-        print(f"[DRY] 将分 {(len(ids)+args.batch-1)//args.batch} 批补封面。")
+        print(f"[DRY] 將分 {(len(ids)+args.batch-1)//args.batch} 批補封面。")
         return 0
     if not ids:
-        print("没有缺封面的角色，无需补。")
+        print("沒有缺封面的角色，無需補。")
         return 0
 
     ok_total, err_total = 0, 0
@@ -123,7 +123,7 @@ def main() -> int:
         if not batch:
             break
         batch_no += 1
-        print(f"[批 {batch_no}] 补 {len(batch)} 个: {', '.join(batch)}", flush=True)
+        print(f"[批 {batch_no}] 補 {len(batch)} 個: {', '.join(batch)}", flush=True)
         try:
             res = _cover_batch(batch)
             covered = res.get("covered", [])
@@ -131,16 +131,16 @@ def main() -> int:
             ok_total += len(covered)
             err_total += len(errors)
             if errors:
-                print(f"   ⚠ 本批 {len(errors)} 个仍失败: "
+                print(f"   ⚠ 本批 {len(errors)} 個仍失敗: "
                       f"{list(errors.items())[:2]}", flush=True)
         except Exception as e:  # noqa: BLE001
-            print(f"   ✗ 本批异常: {e}", flush=True)
-        # 重新扫描：成功的会被排除；失败的仍在，但为避免死循环，
-        # 用「已尝试」集合推进——这里直接从剩余列表切掉已处理的这批。
+            print(f"   ✗ 本批異常: {e}", flush=True)
+        # 重新掃描：成功的會被排除；失敗的仍在，但為避免死迴圈，
+        # 用「已嘗試」集合推進——這裡直接從剩餘列表切掉已處理的這批。
         ids = ids[args.batch:]
 
-    print(f"\n完成: 成功补 {ok_total} 个封面, 失败 {err_total} 个。")
-    print("提示: 失败多为上游内容审核拒绝，可再次运行本脚本重扫重试。")
+    print(f"\n完成: 成功補 {ok_total} 個封面, 失敗 {err_total} 個。")
+    print("提示: 失敗多為上游內容稽核拒絕，可再次執行本指令碼重掃重試。")
     return 0 if err_total == 0 else 1
 
 

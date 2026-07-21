@@ -16,7 +16,7 @@ _STYLES_FILE = config.DATA_DIR / "styles.json"
 DEFAULT_STYLES = [
     {
         "id": "realistic_portrait",
-        "name": "Realistic Portrait 写实杂志感",
+        "name": "Realistic Portrait 寫實雜誌感",
         "prompt": (
             "Contemporary international fashion magazine portrait and premium beauty "
             "campaign photography. A refined close-up or half-body portrait with natural "
@@ -35,7 +35,7 @@ DEFAULT_STYLES = [
     },
     {
         "id": "painterly_anime",
-        "name": "Painterly Anime 厚涂幻想插画",
+        "name": "Painterly Anime 厚塗幻想插畫",
         "prompt": (
             "High-quality 2D painterly fantasy character key art with a rich hand-painted "
             "look. Forms are built primarily through large color masses, layered tones, and "
@@ -52,7 +52,7 @@ DEFAULT_STYLES = [
     },
     {
         "id": "comic_portrait",
-        "name": "Comic Portrait 暗黑暗恋漫画",
+        "name": "Comic Portrait 暗黑暗戀漫畫",
         "prompt": (
             "Moody semi-realistic character illustration with a mature dark romance and indie "
             "graphic novel atmosphere. Face-focused close-up composition with generous "
@@ -71,7 +71,7 @@ DEFAULT_STYLES = [
     },
     {
         "id": "webtoon_lineart",
-        "name": "Webtoon Line Art 韩漫线稿",
+        "name": "Webtoon Line Art 韓漫線稿",
         "prompt": (
             "Clean serialized webcomic character art with strong black ink linework as the "
             "dominant visual element. Crisp pen lines with clear thickness variation, sharp "
@@ -94,7 +94,7 @@ def load_styles() -> list[dict]:
     obj = storage.load_json("styles", "styles", _STYLES_FILE)
     if isinstance(obj, dict) and isinstance(obj.get("styles"), list):
         return obj["styles"]
-    if _STYLES_FILE.exists():  # 兼容旧格式：文件是裸数组
+    if _STYLES_FILE.exists():  # 相容舊格式：檔案是裸陣列
         try:
             return json.loads(_STYLES_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -103,7 +103,7 @@ def load_styles() -> list[dict]:
 
 
 def save_styles(styles: list[dict]) -> None:
-    # 存储中台的 data 须是 JSON 对象，包一层 {styles: [...]}；本地文件同格式
+    # 儲存中臺的 data 須是 JSON 物件，包一層 {styles: [...]}；本地檔案同格式
     storage.save_json("styles", "styles", {"styles": styles}, _STYLES_FILE)
 
 

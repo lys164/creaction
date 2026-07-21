@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""扫缺封面：把线上所有 source=mengnv 且封面为空的角色补出封面。
+"""掃缺封面：把線上所有 source=mengnv 且封面為空的角色補出封面。
 
-用于主批跑完后收尾——部分角色的封面在生成时被生图供应商内容安全拦截
-（kie "content could not be processed"），本脚本重试这些漏掉的封面。
+用於主批跑完後收尾——部分角色的封面在生成時被生圖供應商內容安全攔截
+（kie "content could not be processed"），本指令碼重試這些漏掉的封面。
 
-策略：对每个缺封面角色调 /api/cover（mode=fill_missing）。默认 use_reference=None
-（写实画风+有源图自动 i2i）；失败则依次尝试 use_reference=False（纯文生图，绕开被判
-敏感的原图）再重试。全部数据落线上。
+策略：對每個缺封面角色調 /api/cover（mode=fill_missing）。預設 use_reference=None
+（寫實畫風+有源圖自動 i2i）；失敗則依次嘗試 use_reference=False（純文生圖，繞開被判
+敏感的原圖）再重試。全部資料落線上。
 
 用法：
   PYTHONPATH=. python3 scripts/sweep_missing_covers_online.py [--source mengnv]
@@ -42,7 +42,7 @@ def _req(method: str, url: str, allow_404: bool = False, **kw) -> requests.Respo
         except requests.RequestException as e:
             last_err = str(e)
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _poll(task_id: str, timeout: int, label: str) -> dict:
@@ -50,18 +50,18 @@ def _poll(task_id: str, timeout: int, label: str) -> dict:
     while time.time() < deadline:
         r = _req("GET", f"{BASE}/api/tasks/{task_id}", timeout=30, allow_404=True)
         if r.status_code == 404:
-            raise RuntimeError(f"{label} 任务 {task_id} 丢失（服务器疑似重启）")
+            raise RuntimeError(f"{label} 任務 {task_id} 丟失（伺服器疑似重啟）")
         t = r.json()
         if t.get("status") == "done":
             return t.get("result") or {}
         if t.get("status") == "error":
-            raise RuntimeError(f"{label} 失败: {t.get('error')}")
+            raise RuntimeError(f"{label} 失敗: {t.get('error')}")
         time.sleep(POLL_INTERVAL)
-    raise TimeoutError(f"{label} 轮询超时 ({timeout}s)")
+    raise TimeoutError(f"{label} 輪詢超時 ({timeout}s)")
 
 
 def _list_missing(source: str) -> list[str]:
-    """列出线上 source==source 且 cover 为空的角色 char_id。"""
+    """列出線上 source==source 且 cover 為空的角色 char_id。"""
     r = _req("GET", f"{BASE}/api/characters", timeout=60)
     chars = r.json()
     missing = []
@@ -69,9 +69,9 @@ def _list_missing(source: str) -> list[str]:
         cid = c.get("char_id")
         if not cid:
             continue
-        if c.get("cover_url"):  # 列表已带 cover_url，非空即有封面
+        if c.get("cover_url"):  # 列表已帶 cover_url，非空即有封面
             continue
-        # 需按 source 过滤：拉详情确认 source（列表不含 source）
+        # 需按 source 過濾：拉詳情確認 source（列表不含 source）
         try:
             d = _req("GET", f"{BASE}/api/character/{cid}", timeout=30).json()
         except Exception:  # noqa: BLE001
@@ -84,7 +84,7 @@ def _list_missing(source: str) -> list[str]:
 
 
 def _make_cover(cid: str, style: str) -> None:
-    """补一个角色封面：先 auto(i2i)，失败再退纯文生图(use_reference=False)。"""
+    """補一個角色封面：先 auto(i2i)，失敗再退純文生圖(use_reference=False)。"""
     last = None
     for use_ref in (None, False):
         try:
@@ -97,7 +97,7 @@ def _make_cover(cid: str, style: str) -> None:
         except Exception as e:  # noqa: BLE001
             last = e
             time.sleep(3)
-    raise RuntimeError(f"{cid} 补封面失败: {last}")
+    raise RuntimeError(f"{cid} 補封面失敗: {last}")
 
 
 def main() -> int:
@@ -109,7 +109,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    print(f"线上服务: {BASE}；扫 source={args.source} 缺封面角色…", flush=True)
+    print(f"線上服務: {BASE}；掃 source={args.source} 缺封面角色…", flush=True)
     missing = _list_missing(args.source)
     if args.limit and args.limit > 0:
         missing = missing[:args.limit]
@@ -124,7 +124,7 @@ def main() -> int:
 
     def _run(job):
         idx, cid = job
-        print(f"[{idx}/{total}] 补封面 {cid}", flush=True)
+        print(f"[{idx}/{total}] 補封面 {cid}", flush=True)
         try:
             _make_cover(cid, args.style)
             counters["ok"] += 1
@@ -136,7 +136,7 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as ex:
         list(ex.map(_run, list(enumerate(missing, 1))))
 
-    print(f"\n完成: 成功 {counters['ok']}, 失败 {counters['err']}（失败多为生图内容拦截）")
+    print(f"\n完成: 成功 {counters['ok']}, 失敗 {counters['err']}（失敗多為生圖內容攔截）")
     return 0 if counters["err"] == 0 else 1
 
 

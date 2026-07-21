@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""为【已有帖子但缺图】的 post 批量补图 —— 直接打线上服务(HTTP)。
+"""為【已有帖子但缺圖】的 post 批次補圖 —— 直接打線上服務(HTTP)。
 
-背景：帖子批量判定"完成"只看有没有 posts 记录，不校验每条 post 的图是否真出成功。
-早期出图源不足/失败时，文案生成了但图没出来，照样被记为完成。本脚本扫描所有角色，
-找出 image 缺失(无 image 或 image.url 为空)的 post，逐条调用同步补图接口重出。
+背景：帖子批次判定"完成"只看有沒有 posts 記錄，不校驗每條 post 的圖是否真出成功。
+早期出圖源不足/失敗時，文案生成了但圖沒出來，照樣被記為完成。本指令碼掃描所有角色，
+找出 image 缺失(無 image 或 image.url 為空)的 post，逐條呼叫同步補圖介面重出。
 
-补图接口：POST /api/ig_posts/{char_id}/{post_id}/image （同步，直接返回出好图的 post）。
-出图走服务端的 7 渠道全平摊 round-robin。天然幂等：已有图的 post 跳过；中断重跑自动续。
-进度按 (char_id, post_id) 记在 data/backfill_post_images_state.json。
+補圖介面：POST /api/ig_posts/{char_id}/{post_id}/image （同步，直接返回出好圖的 post）。
+出圖走服務端的 7 渠道全平攤 round-robin。天然冪等：已有圖的 post 跳過；中斷重跑自動續。
+進度按 (char_id, post_id) 記在 data/backfill_post_images_state.json。
 
 用法：
   python3 scripts/backfill_post_images_online.py [--concurrency 48] [--limit N] [--dry-run]
@@ -28,7 +28,7 @@ BASE = "http://popop-pipeline.internal-app.imaginewithu.com"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_PATH = DATA_DIR / "backfill_post_images_state.json"
 DEFAULT_CONCURRENCY = 48
-IMAGE_TIMEOUT = 300         # 单张补图(同步)：含 submit+poll+下载，给足余量
+IMAGE_TIMEOUT = 300         # 單張補圖(同步)：含 submit+poll+下載，給足餘量
 
 
 def load_state() -> dict:
@@ -60,7 +60,7 @@ def _healthy() -> bool:
 def _wait_healthy(label: str = "") -> None:
     delay, waited = 5, 0
     while not _healthy():
-        print(f"      服务器不可用，等待恢复{(' ('+label+')') if label else ''} 已等 {waited}s",
+        print(f"      伺服器不可用，等待恢復{(' ('+label+')') if label else ''} 已等 {waited}s",
               flush=True)
         time.sleep(delay)
         waited += delay
@@ -82,7 +82,7 @@ def _req(method: str, url: str, **kw) -> requests.Response:
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 2)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _post_has_image(post: dict) -> bool:
@@ -91,7 +91,7 @@ def _post_has_image(post: dict) -> bool:
 
 
 def _fetch_targets() -> list[tuple[str, str]]:
-    """扫全部角色，返回所有【缺图】post 的 (char_id, post_id) 列表。"""
+    """掃全部角色，返回所有【缺圖】post 的 (char_id, post_id) 列表。"""
     chars = _req("GET", f"{BASE}/api/characters", timeout=120).json()
     cand = [c["char_id"] for c in chars
             if c.get("has_identity") and c.get("cover_url")]
@@ -112,7 +112,7 @@ def _fetch_targets() -> list[tuple[str, str]]:
 
 
 def _rerender(cid: str, pid: str) -> bool:
-    """对单条 post 补图；返回 True=出图成功。"""
+    """對單條 post 補圖；返回 True=出圖成功。"""
     r = _req("POST", f"{BASE}/api/ig_posts/{cid}/{pid}/image",
              json={}, timeout=IMAGE_TIMEOUT)
     img = (r.json().get("post") or {}).get("image") or {}
@@ -132,22 +132,22 @@ def main() -> int:
     state = load_state()
     done = set(tuple(x) for x in state["done"])
 
-    print("扫描缺图 post ...", flush=True)
+    print("掃描缺圖 post ...", flush=True)
     missing = _fetch_targets()
     todo = [k for k in missing if tuple(k) not in done]
     if args.limit and args.limit > 0:
         todo = todo[:args.limit]
 
-    print(f"\n线上服务: {BASE}")
-    print(f"缺图 post 总数: {len(missing)}；本轮待补: {len(todo)}（已完成 {len(done)}）\n")
+    print(f"\n線上服務: {BASE}")
+    print(f"缺圖 post 總數: {len(missing)}；本輪待補: {len(todo)}（已完成 {len(done)}）\n")
 
     if args.dry_run:
         for cid, pid in todo[:5]:
-            print(f"  样例: {cid}  {pid}")
-        print(f"[DRY] 计划补 {len(todo)} 张。")
+            print(f"  樣例: {cid}  {pid}")
+        print(f"[DRY] 計劃補 {len(todo)} 張。")
         return 0
     if not todo:
-        print("没有待补的 post，全部已有图。")
+        print("沒有待補的 post，全部已有圖。")
         return 0
 
     conc = max(1, args.concurrency)
@@ -167,7 +167,7 @@ def main() -> int:
                     if [cid, pid] not in state["failed"]:
                         state["failed"].append([cid, pid])
                     counters["err"] += 1
-                    tag = "无图返回"
+                    tag = "無圖返回"
                 save_state(state)
             if idx % 20 == 0 or not ok:
                 print(f"[{idx}/{total}] {cid}/{pid} {tag} "
@@ -178,7 +178,7 @@ def main() -> int:
                     state["failed"].append([cid, pid])
                 counters["err"] += 1
                 save_state(state)
-            print(f"[{idx}/{total}] {cid}/{pid} 失败: {str(e)[:80]}", flush=True)
+            print(f"[{idx}/{total}] {cid}/{pid} 失敗: {str(e)[:80]}", flush=True)
 
     jobs = [(i + 1, cid, pid) for i, (cid, pid) in enumerate(todo)]
     with ThreadPoolExecutor(max_workers=conc) as ex:

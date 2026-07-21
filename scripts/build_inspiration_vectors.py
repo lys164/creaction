@@ -1,13 +1,13 @@
-"""为精简灵感库预计算检索向量（火山 Ark），存为 numpy .npy。
+"""為精簡靈感庫預計算檢索向量（火山 Ark），存為 numpy .npy。
 
-给每条 item 的 vibe+event+mood 作检索文本算 embedding，输出到
-app/data/inspiration_vectors.npy（float32，行序与 items 一一对应）。
+給每條 item 的 vibe+event+mood 作檢索文字算 embedding，輸出到
+app/data/inspiration_vectors.npy（float32，行序與 items 一一對應）。
 
-Ark 向量模型不支持真批量，用线程池并发单条请求，支持断点续跑
-（.ckpt.npy 保存进度，中断后重跑跳过已完成）。
+Ark 向量模型不支援真批次，用執行緒池併發單條請求，支援斷點續跑
+（.ckpt.npy 儲存進度，中斷後重跑跳過已完成）。
 
 用法：
-  POPOP_EMBED_KEY=ark-xxx python scripts/build_inspiration_vectors.py [并发数]
+  POPOP_EMBED_KEY=ark-xxx python scripts/build_inspiration_vectors.py [併發數]
 """
 import json
 import sys
@@ -40,7 +40,7 @@ def main():
     if not items:
         print("no items; run build_inspiration_library.py first")
         return
-    # 先探一条拿维度
+    # 先探一條拿維度
     probe = api_client.embed([_text(items[0])])[0]
     dim = len(probe)
     n_items = len(items)
@@ -61,7 +61,7 @@ def main():
     def _one(i):
         try:
             return i, api_client.embed([_text(items[i])])[0]
-        except Exception as e:  # noqa: BLE001 单条失败不拖垮整批
+        except Exception as e:  # noqa: BLE001 單條失敗不拖垮整批
             return i, ("__err__", str(e)[:120])
 
     t0 = time.time()
@@ -90,7 +90,7 @@ def main():
     n_done = int(done.sum())
     print(f"embedded {n_done}/{n_items} (errs this pass={errs})", flush=True)
     if n_done < n_items:
-        # 保留 checkpoint，重跑本脚本会自动续跑未完成的条目
+        # 保留 checkpoint，重跑本指令碼會自動續跑未完成的條目
         np.save(CKPT, mat)
         np.save(DONE, done)
         print(f"incomplete: {n_items - n_done} left; re-run to continue "

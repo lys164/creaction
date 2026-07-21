@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""清理线上 source=feiren 的「孤儿组」重复角色。
+"""清理線上 source=feiren 的「孤兒組」重複角色。
 
-安全保护（白名单）：
-- 只删除既不在萌宠 state(batch_nonhuman_mengchong_state.json)、
-  也不在 meme state(batch_nonhuman_online_state.json) 记录组内的角色。
-- 萌宠 52 组 + meme 58 组 = 110 组永远不动。
+安全保護（白名單）：
+- 只刪除既不在萌寵 state(batch_nonhuman_mengchong_state.json)、
+  也不在 meme state(batch_nonhuman_online_state.json) 記錄組內的角色。
+- 萌寵 52 組 + meme 58 組 = 110 組永遠不動。
 
 流程：
-1. 实时拉线上，算出孤儿组 char_ids。
-2. 把待删清单存成带时间戳的备份 JSON（可追溯）。
-3. --dry-run 只导出清单；不带则分批调 /api/characters/delete 删除。
-4. 删除后复核白名单组完好。
+1. 實時拉線上，算出孤兒組 char_ids。
+2. 把待刪清單存成帶時間戳的備份 JSON（可追溯）。
+3. --dry-run 只匯出清單；不帶則分批調 /api/characters/delete 刪除。
+4. 刪除後複核白名單組完好。
 
 用法：
   PYTHONPATH=. python3 scripts/cleanup_orphan_feiren.py --dry-run
@@ -60,17 +60,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--confirm", action="store_true",
-                    help="真正执行删除（不加则默认 dry-run）")
+                    help="真正執行刪除（不加則預設 dry-run）")
     args = ap.parse_args()
 
     orphan, mc_gids, meme_gids = _compute_orphans()
     orphan_gids = sorted(set(c["group_id"] for c in orphan))
     ids = [c["char_id"] for c in orphan]
 
-    print(f"保护白名单：萌宠 {len(mc_gids)} 组 + meme {len(meme_gids)} 组")
-    print(f"孤儿组：{len(orphan_gids)} 组 / {len(ids)} 角色（待删）")
+    print(f"保護白名單：萌寵 {len(mc_gids)} 組 + meme {len(meme_gids)} 組")
+    print(f"孤兒組：{len(orphan_gids)} 組 / {len(ids)} 角色（待刪）")
 
-    # 备份清单
+    # 備份清單
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup = DATA / f"orphan_cleanup_{ts}.json"
     backup.write_text(json.dumps(
@@ -79,10 +79,10 @@ def main() -> int:
                            "lang": c.get("lang"), "name": c.get("name")}
                           for c in orphan]},
         ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"待删清单已备份：{backup}")
+    print(f"待刪清單已備份：{backup}")
 
     if not args.confirm or args.dry_run:
-        print("\n[DRY-RUN] 未删除。确认无误后加 --confirm 执行。")
+        print("\n[DRY-RUN] 未刪除。確認無誤後加 --confirm 執行。")
         return 0
 
     deleted, errors = 0, {}
@@ -95,20 +95,20 @@ def main() -> int:
             res = r.json()
             deleted += len(res.get("deleted", []))
             errors.update(res.get("errors", {}))
-            print(f"  批 {i//BATCH+1}: 删除 {len(res.get('deleted', []))} / {len(chunk)}",
+            print(f"  批 {i//BATCH+1}: 刪除 {len(res.get('deleted', []))} / {len(chunk)}",
                   flush=True)
         except requests.RequestException as e:
-            print(f"  批 {i//BATCH+1} 失败: {e}", flush=True)
+            print(f"  批 {i//BATCH+1} 失敗: {e}", flush=True)
             time.sleep(5)
 
-    print(f"\n删除完成：成功 {deleted} 个，失败 {len(errors)} 个。")
+    print(f"\n刪除完成：成功 {deleted} 個，失敗 {len(errors)} 個。")
 
-    # 复核白名单完好
+    # 複核白名單完好
     f2 = _fetch_feiren()
     gids2 = set(c.get("group_id") for c in f2)
-    print(f"复核：萌宠组仍在 {len(gids2 & mc_gids)}/{len(mc_gids)}，"
-          f"meme组仍在 {len(gids2 & meme_gids)}/{len(meme_gids)}")
-    print(f"复核：线上 feiren 现存 {len(f2)} 角色 / {len(gids2)} 组")
+    print(f"複核：萌寵組仍在 {len(gids2 & mc_gids)}/{len(mc_gids)}，"
+          f"meme組仍在 {len(gids2 & meme_gids)}/{len(meme_gids)}")
+    print(f"複核：線上 feiren 現存 {len(f2)} 角色 / {len(gids2)} 組")
     return 0
 
 

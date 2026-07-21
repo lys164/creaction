@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""批量去掉互动卡片版落地页顶部的页眉块（`.page-h`：标签+名字+副标+cue），
-让顶部直接是角色图卡片 `.card`。
+"""批次去掉互動卡片版落地頁頂部的頁首塊（`.page-h`：標籤+名字+副標+cue），
+讓頂部直接是角色圖卡片 `.card`。
 
-只改存量落地页的原始 HTML（不重新走 LLM）：拉取 /api/landing/{cid} 的 html，
-正则删除 <div class="page-h">…</div> 整段（含内部 .cue 等嵌套 div），
-再 PUT /api/landing 覆盖保存。封面占位符（__IMG_URL__/__IMG_BASE64__）保持不动，
-读取/导出时照常注入封面。
+只改存量落地頁的原始 HTML（不重新走 LLM）：拉取 /api/landing/{cid} 的 html，
+正則刪除 <div class="page-h">…</div> 整段（含內部 .cue 等巢狀 div），
+再 PUT /api/landing 覆蓋儲存。封面佔位符（__IMG_URL__/__IMG_BASE64__）保持不動，
+讀取/匯出時照常注入封面。
 
-安全策略（每个角色）：
-- 只处理 variant==interactive 且 html 里确实含 page-h 的页；
-- 删除必须“恰好命中 1 段”且删后 page-h DOM 消失，否则跳过并计入 skipped（人工复核）；
-- 幂等：已无 page-h 的页视为完成、跳过。
-天然可续跑，进度写 data/strip_pageheader_state.json。
+安全策略（每個角色）：
+- 只處理 variant==interactive 且 html 裡確實含 page-h 的頁；
+- 刪除必須“恰好命中 1 段”且刪後 page-h DOM 消失，否則跳過並計入 skipped（人工複核）；
+- 冪等：已無 page-h 的頁視為完成、跳過。
+天然可續跑，進度寫 data/strip_pageheader_state.json。
 
 用法：
   python3 scripts/strip_landing_pageheader.py --dry-run
@@ -39,9 +39,9 @@ STATE_PATH = DATA_DIR / "strip_pageheader_state.json"
 DEFAULT_SOURCES = ["chouxiang", "feiren", "image"]
 DEFAULT_CONCURRENCY = 8
 
-# <div ... class="... page-h ...">…</div> 直到紧邻 <div class="... card ..."> 之前。
-# 锚定 card 作为结束边界，避免 page-h 内部 .cue 等嵌套 </div> 造成误截断。
-# page-h 与 card 之间可能夹着 HTML 注释（如「<!-- 卡片… -->」），一并吃掉。
+# <div ... class="... page-h ...">…</div> 直到緊鄰 <div class="... card ..."> 之前。
+# 錨定 card 作為結束邊界，避免 page-h 內部 .cue 等巢狀 </div> 造成誤截斷。
+# page-h 與 card 之間可能夾著 HTML 註釋（如「<!-- 卡片… -->」），一併吃掉。
 _PAGE_H_RE = re.compile(
     r'(?:<!--.*?-->\s*)*'
     r'<div\b[^>]*\bclass="[^"]*\bpage-h\b[^"]*"[^>]*>.*?</div>\s*'
@@ -82,7 +82,7 @@ def _healthy() -> bool:
 def _wait_healthy(label: str = "") -> None:
     delay, waited = 5, 0
     while not _healthy():
-        print(f"      服务器不可用，等待恢复{(' ('+label+')') if label else ''} "
+        print(f"      伺服器不可用，等待恢復{(' ('+label+')') if label else ''} "
               f"已等 {waited}s", flush=True)
         time.sleep(delay)
         waited += delay
@@ -104,7 +104,7 @@ def _req(method: str, url: str, **kw) -> requests.Response:
             last_err = str(e)
             _wait_healthy(url.rsplit("/", 1)[-1])
             time.sleep(min(5 * (attempt + 1), 30))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last_err}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last_err}")
 
 
 def _fetch_targets(source: str) -> list[str]:
@@ -115,13 +115,13 @@ def _fetch_targets(source: str) -> list[str]:
 
 
 def _strip(html: str) -> tuple[str, int]:
-    """返回 (新 html, 删除段数)。只删 1 段，删后应无 page-h DOM。"""
+    """返回 (新 html, 刪除段數)。只刪 1 段，刪後應無 page-h DOM。"""
     new, n = _PAGE_H_RE.subn("", html, count=1)
     return new, n
 
 
 def _process_one(char_id: str) -> str:
-    """返回状态：done / skipped-nohead / skipped-badmatch / notinteractive / nohtml。"""
+    """返回狀態：done / skipped-nohead / skipped-badmatch / notinteractive / nohtml。"""
     page = _req("GET", f"{BASE}/api/landing/{char_id}", timeout=30).json()
     if not (page and page.get("html")):
         return "nohtml"
@@ -129,10 +129,10 @@ def _process_one(char_id: str) -> str:
         return "notinteractive"
     html = page["html"]
     if not _HAS_PAGE_H.search(html):
-        return "done"  # 幂等：已经没有页眉块了
+        return "done"  # 冪等：已經沒有頁首塊了
     new, n = _strip(html)
     if n != 1 or _HAS_PAGE_H.search(new):
-        return "skipped-badmatch"  # 结构异常，留待人工复核，不动它
+        return "skipped-badmatch"  # 結構異常，留待人工複核，不動它
     _req("PUT", f"{BASE}/api/landing", timeout=60,
          json={"char_id": char_id, "html": new})
     return "done"
@@ -142,7 +142,7 @@ def main() -> int:
     global STATE_PATH
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", action="append", dest="sources",
-                    help="要处理的 source，可多次传；默认 chouxiang/feiren/image")
+                    help="要處理的 source，可多次傳；預設 chouxiang/feiren/image")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     ap.add_argument("--dry-run", action="store_true")
@@ -151,7 +151,7 @@ def main() -> int:
 
     STATE_PATH = Path(args.state)
     sources = args.sources or DEFAULT_SOURCES
-    print(f"去页眉 source: {', '.join(sources)}")
+    print(f"去頁首 source: {', '.join(sources)}")
 
     state = load_state()
     done = set(state["done"])
@@ -168,22 +168,22 @@ def main() -> int:
     if args.limit and args.limit > 0:
         todo = todo[:args.limit]
 
-    print(f"\n线上服务: {BASE}")
-    print(f"待检查角色: {len(todo)}（已完成 {len(done)} 个跳过）\n")
+    print(f"\n線上服務: {BASE}")
+    print(f"待檢查角色: {len(todo)}（已完成 {len(done)} 個跳過）\n")
 
     if args.dry_run:
-        # 抽样看看会删成什么样
+        # 抽樣看看會刪成什麼樣
         for cid in todo[:3]:
             page = _req("GET", f"{BASE}/api/landing/{cid}", timeout=30).json()
             html = page.get("html") or ""
             _, n = _strip(html)
-            print(f"  样例 {cid}: variant={page.get('variant')} "
-                  f"has_page_h={bool(_HAS_PAGE_H.search(html))} 删除段数={n}")
-        print(f"[DRY] 计划检查/去页眉 {len(todo)} 个角色。")
+            print(f"  樣例 {cid}: variant={page.get('variant')} "
+                  f"has_page_h={bool(_HAS_PAGE_H.search(html))} 刪除段數={n}")
+        print(f"[DRY] 計劃檢查/去頁首 {len(todo)} 個角色。")
         return 0
 
     if not todo:
-        print("没有待处理的角色，全部已完成。")
+        print("沒有待處理的角色，全部已完成。")
         return 0
 
     conc = max(1, args.concurrency)
@@ -212,7 +212,7 @@ def main() -> int:
                     state["failed"].append(cid)
                 counters["err"] += 1
                 save_state(state)
-            print(f"[{idx}/{total}] {cid} 失败: {e}", flush=True)
+            print(f"[{idx}/{total}] {cid} 失敗: {e}", flush=True)
 
     jobs = [(i + 1, cid) for i, cid in enumerate(todo)]
     with ThreadPoolExecutor(max_workers=conc) as ex:
@@ -221,7 +221,7 @@ def main() -> int:
     print(f"\n完成: done={counters['done']} skipped={counters['skipped']} "
           f"err={counters['err']} / 共 {total}")
     if state["skipped"]:
-        print(f"跳过(结构异常/待复核) {len(state['skipped'])} 个，见 state 文件 skipped 列表")
+        print(f"跳過(結構異常/待複核) {len(state['skipped'])} 個，見 state 檔案 skipped 列表")
     return 0 if counters["err"] == 0 else 1
 
 

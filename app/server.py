@@ -14,7 +14,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import arca_sync, chat, config, landing, pipeline, prompts, styles, tasks, storage
+from . import (arca_storage, arca_sync, chat, config, daily, feed_posts,
+               landing, phone_check, phone_check_gen, pipeline, prompts,
+               phone_runtime, schedule_pipeline, styles, tasks, storage)
 
 app = FastAPI(title="POPOP Pipeline")
 
@@ -33,6 +35,16 @@ def _file_not_found_handler(request: Request, exc: FileNotFoundError):
     return JSONResponse(status_code=404, content={"detail": str(exc) or "not found"})
 
 
+@app.exception_handler(arca_storage.StorageError)
+def _storage_error_handler(request: Request, exc: arca_storage.StorageError):
+    """遠端儲存同步失敗（如刪帖時 put 遠端失敗）：返回 503 讓前端提示可重試。
+    這類失敗下本地可能已改、遠端未同步，客戶端應重試直至兩端一致。"""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"雲端同步失敗，請重試：{exc}"},
+    )
+
+
 # ---------- models ----------
 class IdentityReq(BaseModel):
     char_id: str
@@ -41,10 +53,10 @@ class IdentityReq(BaseModel):
 class CoverReq(BaseModel):
     char_id: str
     style_id: str
-    # None = auto：写实画风且有源图时自动用 i2i 参考（见 pipeline.generate_cover）
+    # None = auto：寫實畫風且有源圖時自動用 i2i 參考（見 pipeline.generate_cover）
     use_reference: bool | None = None
     mode: str = "fill_missing"
-    # True = 以当前封面而非源图为参考重跑封面链路（source=image 远离原图用）
+    # True = 以當前封面而非源圖為參考重跑封面鏈路（source=image 遠離原圖用）
     recook_from_cover: bool = False
 
 
@@ -54,7 +66,7 @@ class PostsReq(BaseModel):
     count_per_type: int = 2
     style_id: str | None = None
     with_images: bool = True
-    # 链路：real=真实人设 / light=轻剧情 / flirt=轻剧情+荷尔蒙张力 / adult=成人向；
+    # 鏈路：real=真實人設 / light=輕劇情 / flirt=輕劇情+荷爾蒙張力 / adult=成人向；
     # None=沿用角色已存 track
     track: str | None = None
 
@@ -100,7 +112,7 @@ class PersonaUpdateReq(BaseModel):
 
 
 class PostContentUpdateReq(BaseModel):
-    # content 可为字符串或多语言 dict，与生成时形态一致，故用宽松类型
+    # content 可為字串或多語言 dict，與生成時形態一致，故用寬鬆型別
     content: Any = None
     variable: Any = None
     scene: Any = None
@@ -121,7 +133,7 @@ class CharIdsReq(BaseModel):
 
 class RegenPersonaReq(BaseModel):
     char_ids: list[str]
-    # 链路覆盖：None=沿用角色已存 track（默认 real）
+    # 鏈路覆蓋：None=沿用角色已存 track（預設 real）
     track: str | None = None
 
 
@@ -152,11 +164,93 @@ class ChatReq(BaseModel):
     mode: str = "normal"
 
 
+class FeedPostReq(BaseModel):
+    char_id: str
+    kind: str  # t1=平臺媒體號論壇體宣傳帖 / t2=角色綁定號帖子
+    subtype: str = "auto"  # t2：witness/couple/…/auto；t1：T1_GENRES 鍵名，auto=服務端輪換指派
+    user_name: str = ""
+    hint: str = ""
+    session_id: str | None = None  # 僅 t2：指定聊天會話作素材，預設取最近一次
+    schedule_text: str = ""  # 僅 t2：貼入日程素材(手帳工坊 JSON/文字)；空=自動生成當日摘要
+    image_model: str | None = None  # 生圖模型：image-2(gpt-image-2)/banana(nanobanana)
+
+
+class DailyRunReq(BaseModel):
+    char_id: str
+    user_name: str = ""
+    weather: str = ""
+    season: str = ""
+    city: str = ""
+    hint: str = ""
+    t2_subtype: str = "auto"       # 第三方帖子體裁（複用 T2 引擎）
+    session_id: str | None = None  # 指定聊天會話作 echo/消息素材，預設取最近一次
+    with_images: bool = True       # 限動 selfie + 帖子配圖走正式生圖鏈路
+    with_t2_post: bool = True      # 是否伴生第三方帖子（落 feed 存檔，發現流可見）
+
+
+class ScheduleMonthReq(BaseModel):
+    char_id: str
+    season: str = ""
+    city: str = ""
+    month_start_date: str = ""
+    weather: str = ""
+    dialogue: str = ""
+    continue_month: bool = False
+
+
+class ScheduleWeekReq(BaseModel):
+    char_id: str
+    week_no: int = Field(ge=1, le=4)
+
+
+class ScheduleDaysReq(BaseModel):
+    char_id: str
+    week_no: int = Field(ge=1, le=4)
+    days: list[str] = Field(min_length=1, max_length=7)
+
+
+class ScheduleWorkspaceReq(BaseModel):
+    workspace: dict
+
+
+class PhoneEnterReq(BaseModel):
+    char_id: str
+    session_id: str = ""
+
+
+class PhoneEventReq(BaseModel):
+    char_id: str
+    event: str
+    detail: str = ""
+
+
+class PhoneUnlockReq(BaseModel):
+    char_id: str
+    app_id: str
+
+
+class FeedReplyReq(BaseModel):
+    comment_index: int          # -1=發新主評論；否則為主評論索引
+    text: str
+    reply_to: str = ""          # 被回覆人暱稱（顯示「回覆 @xxx」用）
+    user_name: str = ""
+
+
+class FeedEventReq(BaseModel):
+    char_id: str
+    hint: str = ""
+    user_name: str = ""
+    session_id: str | None = None
+    with_images: bool = True   # True=事件內每帖必配圖，同 T1/T2；False=純文
+    schedule_text: str = ""    # 日程素材；空=自動生成當日日程摘要作事實底座
+    image_model: str | None = None  # 生圖模型：image-2(gpt-image-2)/banana(nanobanana)
+
+
 class ArcaSyncReq(BaseModel):
     char_ids: list[str]
     force: bool = False
     sync_landing: bool | None = None
-    sync_posts: bool = False  # 默认只同步角色本体；帖子入口传 True 才发帖
+    sync_posts: bool = False  # 預設只同步角色本體；帖子入口傳 True 才發帖
 
 
 # ---------- meta ----------
@@ -219,6 +313,7 @@ def create_personas(
     cover_style_id: str = Form(""),
     track: str = Form("real"),
     source: str = Form(""),
+    style: str = Form("real"),
 ):
     """Upload images (optional) → one native character per selected language.
 
@@ -227,6 +322,10 @@ def create_personas(
     - langs: comma-separated subset of zh,ja,ko,en.
     """
     lang_list = [s.strip() for s in langs.split(",") if s.strip()]
+    try:
+        style = pipeline.normalize_production_style(style)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     saved = []
     for f in files:
         if not (f.filename or getattr(f, "size", None)):
@@ -235,12 +334,12 @@ def create_personas(
         dest = config.UPLOAD_DIR / \
             f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{len(saved)}{ext}"
         data = f.file.read()
-        storage.save_file(dest, data)  # 本地 + OSS 双写
+        storage.save_file(dest, data)  # 本地 + OSS 雙寫
         saved.append(str(dest))
 
-    # 纯文字模式：没有图片时必须有补充要求，否则无依据可生成。
+    # 純文字模式：沒有圖片時必須有補充要求，否則無依據可生成。
     if not saved and not user_hint.strip():
-        raise HTTPException(400, "请上传图片，或在『创作补充要求』里填写文字用于生成人设")
+        raise HTTPException(400, "請上傳圖片，或在『創作補充要求』裡填寫文字用於生成人設")
 
     if not saved:
         groups = [[]]  # one text-only group
@@ -256,15 +355,15 @@ def create_personas(
                 results.extend(
                     pipeline.create_personas_from_images(
                         group, lang_list, user_hint=user_hint, track=track,
-                        source=source
+                        source=source, style=style
                     )
                 )
-            except Exception as e:  # noqa: BLE001 单组失败不丢弃其它组已生成的角色
+            except Exception as e:  # noqa: BLE001 單組失敗不丟棄其它組已生成的角色
                 group_errors.append(str(e))
             tasks.bump(tid)
 
         cover_errors = {}
-        # nonhuman/flirt 链路允许不选画风也自动生成封面（generate_cover 内部会不套画风）
+        # nonhuman/flirt 鏈路允許不選畫風也自動生成封面（generate_cover 內部會不套畫風）
         if with_cover and (cover_style_id or track in ("nonhuman", "flirt")):
             def _cover(rec: dict):
                 cid = rec.get("char_id")
@@ -304,6 +403,7 @@ def import_personas_from_json(
     limit: int = Form(0),
     track: str = Form("real"),
     source: str = Form(""),
+    style: str = Form("real"),
 ):
     """Import existing character JSON files. Each source object becomes one
     character group; one native record is created per selected language.
@@ -331,6 +431,10 @@ def import_personas_from_json(
         return _json.loads(text)
 
     lang_list = [s.strip() for s in langs.split(",") if s.strip()]
+    try:
+        style = pipeline.normalize_production_style(style)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     sources: list[dict] = []
     for f in files:
         try:
@@ -341,7 +445,7 @@ def import_personas_from_json(
         sources.extend(pipeline.extract_source_objects(payload))
 
     if not sources:
-        raise HTTPException(400, "未从上传的 JSON 中解析出任何角色对象")
+        raise HTTPException(400, "未從上傳的 JSON 中解析出任何角色物件")
     if limit and limit > 0:
         sources = sources[:limit]
 
@@ -355,7 +459,7 @@ def import_personas_from_json(
                     pipeline.create_personas_from_json_obj(
                         obj, lang_list, user_hint=user_hint,
                         download_image=download_image, track=track,
-                        source=source,
+                        source=source, style=style,
                     )
                 )
             except Exception as e:  # noqa: BLE001 keep batch resilient
@@ -367,7 +471,7 @@ def import_personas_from_json(
                   for i, r in enumerate(results) if r.get("error")}
 
         cover_errors = {}
-        # nonhuman/flirt 链路允许不选画风也自动生成封面（generate_cover 内部会不套画风）
+        # nonhuman/flirt 鏈路允許不選畫風也自動生成封面（generate_cover 內部會不套畫風）
         if with_cover and (cover_style_id or track in ("nonhuman", "flirt")):
             def _cover(rec: dict):
                 cid = rec.get("char_id")
@@ -398,7 +502,7 @@ def import_personas_from_json(
 
 @app.put("/api/persona")
 def update_persona(req: PersonaUpdateReq):
-    with pipeline.char_lock(req.char_id):  # 与后台任务的读改写互斥
+    with pipeline.char_lock(req.char_id):  # 與後臺任務的讀改寫互斥
         rec = pipeline.load_character(req.char_id)
         rec["persona"] = req.persona
         pipeline.save_character(rec)
@@ -407,8 +511,8 @@ def update_persona(req: PersonaUpdateReq):
 
 @app.post("/api/characters/regenerate_persona")
 def regenerate_personas(req: RegenPersonaReq):
-    """批量重新生成人设：长耗时 LLM 调用改后台任务，返回 task_id 轮询，
-    避免同步等待撞反代读超时(502 假报失败而服务端仍在跑)。"""
+    """批次重新生成人設：長耗時 LLM 呼叫改後臺任務，返回 task_id 輪詢，
+    避免同步等待撞反代讀超時(502 假報失敗而服務端仍在跑)。"""
     tid = tasks.create_task("regen_personas", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -437,14 +541,14 @@ def regenerate_personas(req: RegenPersonaReq):
 
 @app.post("/api/opening")
 def regenerate_opening(req: RegenOpeningReq):
-    """单独重写一个角色的开场白（依据其它人设信息），不动其它字段。"""
+    """單獨重寫一個角色的開場白（依據其它人設資訊），不動其它欄位。"""
     return pipeline.regenerate_opening(req.char_id, user_hint=req.user_hint)
 
 
 @app.post("/api/characters/regenerate_opening")
 def batch_regenerate_opening(req: BatchOpeningReq):
-    """批量重写开场白：长耗时 LLM 调用改后台任务，返回 task_id 轮询，
-    避免同步等待撞反代读超时(502 假报失败而服务端仍在跑)。"""
+    """批次重寫開場白：長耗時 LLM 呼叫改後臺任務，返回 task_id 輪詢，
+    避免同步等待撞反代讀超時(502 假報失敗而服務端仍在跑)。"""
     tid = tasks.create_task("regen_opening", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -473,11 +577,11 @@ def batch_regenerate_opening(req: BatchOpeningReq):
 
 @app.post("/api/characters/delete")
 def delete_characters(req: CharIdsReq):
-    """批量删除角色（后台并发任务）。
+    """批次刪除角色（後臺併發任務）。
 
-    删除会联动远端存储/OSS 清理，单个角色可能耗时数秒；同步串行执行整批时极易
-    撞反代读超时(504)，前端误报失败而后台仍在删。改为后台任务：立即返回 task_id，
-    前端轮询进度。单个失败(如远端删除失败)不中断其余，错误逐个返回可重试。"""
+    刪除會聯動遠端儲存/OSS 清理，單個角色可能耗時數秒；同步序列執行整批時極易
+    撞反代讀超時(504)，前端誤報失敗而後臺仍在刪。改為後臺任務：立即返回 task_id，
+    前端輪詢進度。單個失敗(如遠端刪除失敗)不中斷其餘，錯誤逐個返回可重試。"""
     tid = tasks.create_task("delete_characters", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -487,7 +591,7 @@ def delete_characters(req: CharIdsReq):
             try:
                 pipeline.delete_character(cid)
                 return cid, None
-            except Exception as e:  # noqa: BLE001 远端删除失败需暴露并允许重试
+            except Exception as e:  # noqa: BLE001 遠端刪除失敗需暴露並允許重試
                 return cid, str(e)
 
         if req.char_ids:
@@ -504,11 +608,11 @@ def delete_characters(req: CharIdsReq):
     return {"task_id": tid}
 
 
-_EXPORT_TTL = 6 * 3600  # 导出 zip 落盘保留时长（秒），过期自动清理
+_EXPORT_TTL = 6 * 3600  # 匯出 zip 落盤保留時長（秒），過期自動清理
 
 
 def _gc_old_exports() -> None:
-    """清理过期的导出 zip，避免磁盘无限增长。"""
+    """清理過期的匯出 zip，避免磁碟無限增長。"""
     try:
         cutoff = time.time() - _EXPORT_TTL
         for p in config.EXPORT_DIR.glob("*.zip"):
@@ -523,10 +627,10 @@ def _gc_old_exports() -> None:
 
 @app.post("/api/characters/export")
 def export_characters(req: CharIdsReq):
-    """批量导出角色为 zip（异步）：立刻返回 task_id，后台并行打包并落盘。
+    """批次匯出角色為 zip（非同步）：立刻返回 task_id，後臺並行打包並落盤。
 
-    大批量（几百个）同步生成会超过反代读超时导致 504，故改为后台任务：
-    完成后 result 带下载 token，前端凭 token 走 /export/download 拉取 zip。
+    大批次（幾百個）同步生成會超過反代讀超時導致 504，故改為後臺任務：
+    完成後 result 帶下載 token，前端憑 token 走 /export/download 拉取 zip。
     """
     if not req.char_ids:
         raise HTTPException(400, "no characters selected")
@@ -552,7 +656,7 @@ def export_characters(req: CharIdsReq):
 
 @app.get("/api/characters/export/download/{token}")
 def download_export(token: str):
-    """下载异步导出生成的 zip。token 来自导出任务的 result。"""
+    """下載非同步匯出生成的 zip。token 來自匯出任務的 result。"""
     if not re.fullmatch(r"[0-9a-f]{16}", token):
         raise HTTPException(400, "bad token")
     path = config.EXPORT_DIR / f"{token}.zip"
@@ -595,7 +699,7 @@ def make_cover(req: CoverReq):
 
 @app.post("/api/characters/batch_cover")
 def make_batch_cover(req: BatchCoverReq):
-    """批量为选中的角色生成封面（同一画风），后台并发执行，返回 task_id。"""
+    """批次為選中的角色生成封面（同一畫風），後臺併發執行，返回 task_id。"""
     task_id = tasks.create_task("batch_cover", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -627,8 +731,8 @@ def make_batch_cover(req: BatchCoverReq):
 # ---------- step 4: posts ----------
 @app.post("/api/posts")
 def make_posts(req: PostsReq):
-    """长耗时(LLM+批量生图)改后台任务：立即返回 task_id，前端轮询 /api/tasks/{id}。
-    同步等待会撞反代读超时(504)，而生成仍在继续、结果丢失。"""
+    """長耗時(LLM+批次生圖)改後臺任務：立即返回 task_id，前端輪詢 /api/tasks/{id}。
+    同步等待會撞反代讀超時(504)，而生成仍在繼續、結果丟失。"""
     tid = tasks.create_task("posts")
 
     def _job(tid: str):
@@ -661,7 +765,7 @@ def rerender_post_image(char_id: str, batch_id: str, post_id: str,
 @app.put("/api/posts/{char_id}/{batch_id}/{post_id}")
 def update_post(char_id: str, batch_id: str, post_id: str,
                 req: PostContentUpdateReq):
-    """编辑保存一条普通帖子的文本（可选 variable/scene），不重新生成。"""
+    """編輯儲存一條普通帖子的文字（可選 variable/scene），不重新生成。"""
     return pipeline.update_post_content(
         char_id, batch_id, post_id,
         content=req.content, variable=req.variable, scene=req.scene,
@@ -675,7 +779,7 @@ def delete_post(char_id: str, batch_id: str, post_id: str):
 
 @app.post("/api/ig_posts")
 def make_ig_posts(req: IGPostsReq):
-    """同上：后台任务化，返回 task_id。"""
+    """同上：後臺任務化，返回 task_id。"""
     tid = tasks.create_task("ig_posts")
 
     def _job(tid: str):
@@ -690,7 +794,7 @@ def make_ig_posts(req: IGPostsReq):
 
 @app.post("/api/ig_posts/batch")
 def make_batch_ig_posts(req: BatchIGPostsReq):
-    """批量为选中的角色生成 INS 帖子，后台并发执行，返回 task_id。"""
+    """批次為選中的角色生成 INS 帖子，後臺併發執行，返回 task_id。"""
     task_id = tasks.create_task("batch_ig_posts", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -733,7 +837,7 @@ def rerender_ig_post_image(char_id: str, post_id: str, req: RerenderImageReq):
 
 @app.put("/api/ig_posts/{char_id}/{post_id}")
 def update_ig_post(char_id: str, post_id: str, req: IgPostContentUpdateReq):
-    """编辑保存最新 IG 批次里一条帖子的文本，不重新生成。"""
+    """編輯儲存最新 IG 批次裡一條帖子的文字，不重新生成。"""
     return pipeline.update_ig_post_content(char_id, post_id, content=req.content)
 
 
@@ -775,7 +879,7 @@ def make_landing(req: LandingReq):
 
 @app.post("/api/landing/batch")
 def make_batch_landing(req: BatchLandingReq):
-    """批量为选中的角色生成落地页（同一风格，从零生成），后台并发，返回 task_id。"""
+    """批次為選中的角色生成落地頁（同一風格，從零生成），後臺併發，返回 task_id。"""
     task_id = tasks.create_task("batch_landing", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -807,13 +911,309 @@ def make_batch_landing(req: BatchLandingReq):
 
 @app.put("/api/landing")
 def update_landing(req: LandingHtmlUpdateReq):
-    """保存平台里手改的落地页 HTML（覆盖最新一份），不重新走 LLM。导出即用这份。"""
+    """儲存平臺裡手改的落地頁 HTML（覆蓋最新一份），不重新走 LLM。匯出即用這份。"""
     return pipeline.update_landing_html(req.char_id, req.html)
 
 
 @app.get("/api/landing/{char_id}")
 def get_latest_landing(char_id: str):
     return pipeline.load_latest_landing(char_id) or {}
+
+
+# ---------- third-party feed posts (demo) ----------
+@app.post("/api/feed_posts")
+def make_feed_post(req: FeedPostReq):
+    """生成一條第三方視角帖子（T1 論壇體宣傳 / T2 角色綁定帖）。
+    單次 LLM 呼叫可能超過反代讀超時，走後臺任務 + 輪詢。"""
+    if req.kind not in ("t1", "t2"):
+        raise HTTPException(400, "kind must be t1 or t2")
+    tid = tasks.create_task("feed_post", total=1)
+
+    def _job(tid: str):
+        post = feed_posts.generate_feed_post(
+            req.char_id, req.kind, subtype=req.subtype,
+            user_name=req.user_name, hint=req.hint,
+            session_id=req.session_id,
+            schedule_text=req.schedule_text,
+            image_model=req.image_model,
+        )
+        tasks.bump(tid)
+        return post
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.post("/api/feed_events")
+def make_feed_event(req: FeedEventReq):
+    """生成一場熱搜事件（詞條+多方帖子+角色轉發私信），走後臺任務+輪詢。"""
+    tid = tasks.create_task("feed_event", total=1)
+
+    def _job(tid: str):
+        try:
+            event = feed_posts.generate_feed_event(
+                req.char_id, hint=req.hint, user_name=req.user_name,
+                session_id=req.session_id, with_images=req.with_images,
+                schedule_text=req.schedule_text, image_model=req.image_model)
+        except feed_posts.EventAbstain as e:
+            tasks.bump(tid)
+            return {"abstain": True, "reason": str(e)}
+        tasks.bump(tid)
+        return event
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.delete("/api/feed_events/{char_id}/{event_id}")
+def delete_feed_event(char_id: str, event_id: str):
+    return feed_posts.delete_feed_event(char_id, event_id)
+
+
+@app.post("/api/feed_posts/{char_id}/{post_id}/reply")
+def reply_feed_comment(char_id: str, post_id: str, req: FeedReplyReq):
+    """使用者回覆評論 → NPC 續寫接話（LLM 一次小呼叫，走後臺任務+輪詢）。"""
+    tid = tasks.create_task("feed_reply", total=1)
+
+    def _job(tid: str):
+        post = feed_posts.continue_comment_thread(
+            char_id, post_id, req.comment_index, req.text,
+            reply_to=req.reply_to, user_name=req.user_name)
+        tasks.bump(tid)
+        return post
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.get("/api/feed_characters")
+def get_feed_characters():
+    """Feed demo 的策展角色列表（每語種 5 個），不返回全量角色。"""
+    return feed_posts.list_feed_characters()
+
+
+# ---------- daily run（完整日產：日程+主動消息+生活動態+第三方帖子） ----------
+@app.post("/api/daily_runs")
+def make_daily_run(req: DailyRunReq):
+    """一次生產角色完整的一天。LLM + 多張生圖較慢，走後臺任務 + 輪詢。"""
+    tid = tasks.create_task("daily_run", total=1)
+
+    def _job(tid: str):
+        run = daily.generate_daily_run(
+            req.char_id, user_name=req.user_name,
+            weather=req.weather, season=req.season, city=req.city,
+            hint=req.hint, t2_subtype=req.t2_subtype,
+            session_id=req.session_id,
+            with_images=req.with_images, with_t2_post=req.with_t2_post,
+        )
+        tasks.bump(tid)
+        return run
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.get("/api/daily_runs/{char_id}")
+def get_daily_runs(char_id: str):
+    return daily.list_daily_runs(char_id)
+
+
+@app.delete("/api/daily_runs/{char_id}/{run_id}")
+def delete_daily_run(char_id: str, run_id: str):
+    return daily.delete_daily_run(char_id, run_id)
+
+
+# ---------- schedule pipeline (month → week → day → notebook) ----------
+@app.get("/api/schedule_pipeline/{char_id}")
+def get_schedule_pipeline(char_id: str):
+    # Validate character early so a stale URL does not create an orphan plan.
+    pipeline.load_character(char_id)
+    return schedule_pipeline.load_workspace(char_id)
+
+
+@app.put("/api/schedule_pipeline/{char_id}")
+def save_schedule_pipeline(char_id: str, req: ScheduleWorkspaceReq):
+    pipeline.load_character(char_id)
+    workspace = dict(req.workspace or {})
+    workspace["char_id"] = char_id
+    return schedule_pipeline.save_workspace(workspace)
+
+
+@app.post("/api/schedule_pipeline/month")
+def make_schedule_month(req: ScheduleMonthReq):
+    tid = tasks.create_task("schedule_month", total=1)
+
+    def _job(tid: str):
+        result = schedule_pipeline.generate_month(
+            req.char_id,
+            {"season": req.season, "city": req.city,
+             "month_start_date": req.month_start_date, "weather": req.weather,
+             "dialogue": req.dialogue},
+            continue_month=req.continue_month,
+        )
+        tasks.bump(tid)
+        return result
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.post("/api/schedule_pipeline/week")
+def make_schedule_week(req: ScheduleWeekReq):
+    tid = tasks.create_task("schedule_week", total=1)
+
+    def _job(tid: str):
+        result = schedule_pipeline.generate_week(req.char_id, req.week_no)
+        tasks.bump(tid)
+        return result
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.post("/api/schedule_pipeline/days")
+def make_schedule_days(req: ScheduleDaysReq):
+    tid = tasks.create_task("schedule_days", total=len(req.days))
+
+    def _job(tid: str):
+        result = schedule_pipeline.generate_days(req.char_id, req.week_no, req.days)
+        tasks.bump(tid, len(req.days))
+        return result
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.get("/api/feed_stream")
+def get_feed_stream(limit: int = 60, offset: int = 0, kind: str | None = None):
+    """發現流：聚合所有角色的第三方帖子，消費者視角混排展示。"""
+    return feed_posts.list_feed_stream(limit=limit, offset=offset, kind=kind)
+
+
+@app.get("/api/feed_posts/{char_id}")
+def get_feed_posts(char_id: str):
+    return feed_posts.list_feed_posts(char_id)
+
+
+@app.get("/api/phone_check/enrich")
+def get_phone_check_enrich():
+    """查手機 Demo 的真實素材補給：真封面 + 最近聊天 + feed 帖子摘要。
+    read-only，缺資料時對應欄位為空，前端保留自帶 mock。"""
+    return phone_check.enrich()
+
+
+@app.get("/api/phone_check/content")
+def get_phone_check_content():
+    """查手機 Demo 的 LLM 生成內容（17 功能 × 角色），讀快取。
+    未生成時 chars 為空，前端保留自帶 mock。"""
+    return phone_check_gen.load_all()
+
+
+@app.get("/api/phone_check/runtime/{char_id}")
+def get_phone_runtime(char_id: str):
+    pipeline.load_character(char_id)
+    return phone_runtime.runtime(char_id)
+
+
+@app.post("/api/phone_check/enter")
+def enter_phone(req: PhoneEnterReq):
+    pipeline.load_character(req.char_id)
+    return phone_runtime.enter(req.char_id, req.session_id)
+
+
+@app.post("/api/phone_check/event")
+def phone_event(req: PhoneEventReq):
+    pipeline.load_character(req.char_id)
+    return phone_runtime.record_event(req.char_id, req.event, req.detail)
+
+
+@app.get("/api/phone_check/tiers")
+def get_phone_check_tiers():
+    """前端用：哪些 App 免費、哪些付費鎖。"""
+    return phone_check_gen.tiers()
+
+
+@app.post("/api/phone_check/generate")
+def post_phone_check_generate(demo_id: str | None = None, layer: str = "all"):
+    """生成整支手機內容（走後臺任務）。
+    layer=all（免費+付費，demo 自動觸發用）/ free（只免費層）/ paid（只付費層）。
+    demo_id 省略＝全部角色。單次 LLM 呼叫較久，回 task_id 供輪詢。"""
+    tid = tasks.create_task("phone_check_gen", total=1)
+
+    def _one(demo: str):
+        real = phone_check_gen.DEMO_CHAR_MAP.get(demo)
+        if not real:
+            raise ValueError(f"unknown demo_id: {demo}")
+        if layer == "free":
+            return phone_check_gen.generate_free(demo, real)
+        if layer == "paid":
+            return phone_check_gen.generate_paid(demo, real, None)
+        return phone_check_gen.generate_one(demo, real)
+
+    def _job(tid: str):
+        if demo_id:
+            out = _one(demo_id)
+        elif layer == "all":
+            out = phone_check_gen.generate_all()
+        else:
+            out = {"results": [{"demo_id": d, "ok": True, "result": _one(d)}
+                               for d in phone_check_gen.DEMO_CHAR_MAP]}
+        tasks.bump(tid)
+        return out
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
+
+
+@app.post("/api/phone_check/unlock")
+def post_phone_check_unlock(req: PhoneUnlockReq):
+    """付費解鎖某個 App：若尚未生成，用中心秘密單次生成該 App 並落盤。
+    app_id 可為前端 app（會映射到付費生成鍵，sns 小號用 sns_alt）。同步回傳生成內容。"""
+    pipeline.load_character(req.char_id)
+    demo_id = None
+    for d, real in phone_check_gen.DEMO_CHAR_MAP.items():
+        if real == req.char_id:
+            demo_id = d
+            break
+    if not demo_id:
+        return {"ok": False, "error": "unknown char"}
+    gen_key = "sns_alt" if req.app_id in ("sns", "sns_alt") else req.app_id
+    if gen_key not in phone_check_gen.PAID_APP_IDS:
+        return {"ok": False, "error": f"not a paid app: {req.app_id}"}
+    existing = phone_check_gen.load_one(demo_id) or {}
+    if gen_key in (existing.get("paid_apps") or {}):
+        return {"ok": True, "cached": True, "result": existing}
+    result = phone_check_gen.generate_paid(demo_id, req.char_id, [gen_key])
+    return {"ok": True, "cached": False, "result": result}
+
+
+@app.post("/api/phone_check/apply_schedule/{char_id}")
+def post_phone_check_apply_schedule(char_id: str):
+    """把最新日程的 phone_update 併進免費層 dossier（chat/動線/推薦 + 紅點）。"""
+    pipeline.load_character(char_id)
+    return phone_runtime.apply_schedule_to_dossier(char_id)
+
+
+@app.delete("/api/feed_posts/{char_id}/{post_id}")
+def delete_feed_post(char_id: str, post_id: str):
+    return feed_posts.delete_feed_post(char_id, post_id)
+
+
+@app.post("/api/feed_posts/{char_id}/{post_id}/image")
+def rerender_feed_post_image(char_id: str, post_id: str,
+                             image_model: str | None = None):
+    """按帖子已有的 image spec 重出配圖（生圖較慢，走後臺任務）。
+    image_model：可選，image-2/banana；不傳則沿用該帖生成時的選擇。"""
+    tid = tasks.create_task("feed_post_image", total=1)
+
+    def _job(tid: str):
+        post = feed_posts.rerender_feed_post_image(
+            char_id, post_id, image_model=image_model)
+        tasks.bump(tid)
+        return post
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
 
 
 # ---------- character chat ----------
@@ -856,7 +1256,7 @@ def arca_sync_batch(req: ArcaSyncReq):
                 rows.append(arca_sync.sync_character(
                     cid, force=req.force, sync_landing=req.sync_landing,
                     sync_posts=req.sync_posts))
-            except Exception as e:  # noqa: BLE001 单角色失败不中断整批
+            except Exception as e:  # noqa: BLE001 單角色失敗不中斷整批
                 rows.append({"char_id": cid, "arca_character_id": None,
                              "posts": [], "errors": [str(e)], "skipped": False,
                              "landing_url": None})
@@ -869,7 +1269,7 @@ def arca_sync_batch(req: ArcaSyncReq):
 
 @app.post("/api/arca/storage/migrate")
 def arca_storage_migrate():
-    """把本地 data/ 存量全量迁移到 arca 通用存储（JSON→存储中台，图片→OSS）。幂等可重跑。"""
+    """把本地 data/ 存量全量遷移到 arca 通用儲存（JSON→儲存中臺，圖片→OSS）。冪等可重跑。"""
     tid = tasks.create_task("arca_storage_migrate")
 
     def _job(tid: str):
@@ -881,7 +1281,7 @@ def arca_storage_migrate():
 
 @app.post("/api/arca/delete")
 def arca_delete_batch(req: CharIdsReq):
-    """删除 arca 上的已同步角色并清空本地映射（本地角色数据不动）。"""
+    """刪除 arca 上的已同步角色並清空本地對映（本地角色資料不動）。"""
     tid = tasks.create_task("arca_delete", total=len(req.char_ids))
 
     def _job(tid: str):
@@ -889,7 +1289,7 @@ def arca_delete_batch(req: CharIdsReq):
         for cid in req.char_ids:
             try:
                 rows.append(arca_sync.remove_from_arca(cid))
-            except Exception as e:  # noqa: BLE001 单角色失败不中断整批
+            except Exception as e:  # noqa: BLE001 單角色失敗不中斷整批
                 rows.append({"char_id": cid, "arca_character_id": None,
                              "deleted": False, "skipped": False, "errors": [str(e)]})
             tasks.bump(tid)
@@ -907,11 +1307,11 @@ def replace_styles(new_styles: list[dict]):
 
 
 # ---------- serve generated images ----------
-# 内容寻址缓存：图片一旦生成内容基本不变，重绘会换新文件名/mtime，
-# 因此可安全地长缓存并用 ETag 做协商，避免每次刷新重下几百 MB 原图。
+# 內容定址快取：圖片一旦生成內容基本不變，重繪會換新檔名/mtime，
+# 因此可安全地長快取並用 ETag 做協商，避免每次重新整理重下幾百 MB 原圖。
 _THUMB_DIR = config.DATA_DIR / "thumbs"
 _THUMB_DIR.mkdir(parents=True, exist_ok=True)
-_THUMB_WIDTHS = (200, 400, 800)  # 允许的缩略宽度，防止任意尺寸打爆磁盘
+_THUMB_WIDTHS = (200, 400, 800)  # 允許的縮略寬度，防止任意尺寸打爆磁碟
 
 
 def _file_etag(p: Path) -> str:
@@ -920,9 +1320,17 @@ def _file_etag(p: Path) -> str:
 
 
 def _cached_file_response(p: Path, request: Request, immutable: bool = True) -> Response:
-    """带 ETag 协商 + 长缓存的文件响应；命中则回 304。"""
+    """帶 ETag 協商的檔案響應；命中則回 304。
+
+    immutable=True 用於檔名唯一、內容永不變的資源（如帶時間戳的上傳原圖），
+    可長快取 + immutable，瀏覽器不再回源校驗。
+    immutable=False 用於會"原地重繪"的資源（封面/帖圖等檔名固定但內容會被覆蓋），
+    必須用 no-cache 強制每次帶 ETag 回源協商：內容沒變回 304（幾乎零開銷），
+    內容變了則返回新圖——否則瀏覽器會一直顯示快取舊圖，表現為"重新生成點了沒用"。
+    """
     etag = _file_etag(p)
-    cache = "public, max-age=31536000" + (", immutable" if immutable else "")
+    cache = ("public, max-age=31536000, immutable" if immutable
+             else "no-cache")
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cache})
     return FileResponse(str(p), headers={"ETag": etag, "Cache-Control": cache})
@@ -935,7 +1343,7 @@ def _thumb_path(src: Path, width: int) -> Path:
 
 
 def _make_thumb(src: Path, width: int) -> Path | None:
-    """按需生成 webp 缩略图并落盘缓存；失败返回 None（回退原图）。"""
+    """按需生成 webp 縮圖並落盤快取；失敗返回 None（回退原圖）。"""
     dst = _thumb_path(src, width)
     if dst.exists():
         return dst
@@ -943,7 +1351,7 @@ def _make_thumb(src: Path, width: int) -> Path | None:
         from PIL import Image
 
         with Image.open(src) as im:
-            if im.width <= width:  # 原图already比目标小，不放大
+            if im.width <= width:  # 原圖already比目標小，不放大
                 return None
             im = im.convert("RGB")
             h = round(im.height * width / im.width)
@@ -956,14 +1364,16 @@ def _make_thumb(src: Path, width: int) -> Path | None:
 
 @app.get("/img/{name}")
 def serve_image(name: str, request: Request, w: int | None = None):
+    # 生成類圖片（封面/帖圖等）檔名固定但會被"原地重繪"覆蓋，不能用 immutable，
+    # 否則重繪後瀏覽器仍顯示快取舊圖。統一走 no-cache + ETag 協商。
     p = config.IMAGE_DIR / name
-    if not storage.ensure_file(p):  # 本地缺失时从 arca OSS 回源
+    if not storage.ensure_file(p):  # 本地缺失時從 arca OSS 回源
         raise HTTPException(404, "image not found")
     if w and w in _THUMB_WIDTHS:
         thumb = _make_thumb(p, w)
         if thumb is not None:
-            return _cached_file_response(thumb, request)
-    return _cached_file_response(p, request)
+            return _cached_file_response(thumb, request, immutable=False)
+    return _cached_file_response(p, request, immutable=False)
 
 
 @app.get("/upload/{name}")

@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
-"""翻包组件（In My Bag）第 4 个物品批量删除（确定性修复）。
+"""翻包元件（In My Bag）第 4 個物品批次刪除（確定性修復）。
 
-背景：翻包九宫格固定 3 列（.baggrid grid-template-columns:repeat(3,1fr)）。当一个
-页面正好放了 4 个物品时，就会变成 3+1——第 4 个孤零零掉到第二行，视觉不齐。6 个
-（3+3 满两行）或 3 个都没问题，只有"恰好 4 个"需要删到 3 个。
+背景：翻包九宮格固定 3 列（.baggrid grid-template-columns:repeat(3,1fr)）。當一個
+頁面正好放了 4 個物品時，就會變成 3+1——第 4 個孤零零掉到第二行，視覺不齊。6 個
+（3+3 滿兩行）或 3 個都沒問題，只有"恰好 4 個"需要刪到 3 個。
 
-处理（仅当页面恰好 4 个 bagcell 时动手，其它数量原样跳过）：
-  1) 删 <input class="bagin" ... id="bg4"> 那一行
-  2) 删 flatlay 里 <label class="bagcell" for="bg4">...</label>
-  3) 删 <div class="bagdetail d4">...</div> 整块
-  4) 若 In My Bag 小标是"数字+量词"计数形态（4 件/4 items/04 ITEMS 等）→ 改成 3；
-     自由文案（别乱碰/Top Secret 等）不动。
-CSS 里 #bg4/.d4 的通用规则保留（母版就带 bg1~bg6，物品删掉后这些选择器永不命中，
-无害死规则）。走 PUT /api/landing 保存，不走 LLM、天然幂等、可续跑。
+處理（僅當頁面恰好 4 個 bagcell 時動手，其它數量原樣跳過）：
+  1) 刪 <input class="bagin" ... id="bg4"> 那一行
+  2) 刪 flatlay 裡 <label class="bagcell" for="bg4">...</label>
+  3) 刪 <div class="bagdetail d4">...</div> 整塊
+  4) 若 In My Bag 小標是"數字+量詞"計數形態（4 件/4 items/04 ITEMS 等）→ 改成 3；
+     自由文案（別亂碰/Top Secret 等）不動。
+CSS 裡 #bg4/.d4 的通用規則保留（母版就帶 bg1~bg6，物品刪掉後這些選擇器永不命中，
+無害死規則）。走 PUT /api/landing 儲存，不走 LLM、天然冪等、可續跑。
 
 用法：
   python3 scripts/fix_landing_bag_four_items.py --dry-run
-  python3 scripts/fix_landing_bag_four_items.py                 # 全量实跑
+  python3 scripts/fix_landing_bag_four_items.py                 # 全量實跑
   python3 scripts/fix_landing_bag_four_items.py --source feiren --source chouxiang
   python3 scripts/fix_landing_bag_four_items.py --concurrency 8 --limit 20
 """
@@ -42,18 +42,18 @@ REQ_TIMEOUT = 60
 _CELL_RE = re.compile(
     r'<label[^>]*class="[^"]*\bbagcell\b[^"]*"[^>]*for="bg\d+"')
 _COUNT_RE = re.compile(
-    r'^(0?4)(\s*(?:件|个|個|점|개|品|コ|items?|ITEMS?|pcs)\s*)$', re.I)
+    r'^(0?4)(\s*(?:件|個|個|점|개|品|コ|items?|ITEMS?|pcs)\s*)$', re.I)
 
 _STATE_LOCK = threading.Lock()
 
 
-# ----------------------------------------------------------------- 核心变换
+# ----------------------------------------------------------------- 核心變換
 def _count_cells(html: str) -> int:
     return len(_CELL_RE.findall(html))
 
 
 def remove_fourth_bag_item(html: str):
-    """返回 (new_html, changed)。仅当恰好 4 个 bagcell 时删第 4 个，否则不动。"""
+    """返回 (new_html, changed)。僅當恰好 4 個 bagcell 時刪第 4 個，否則不動。"""
     if "bagcell" not in html or "baggrid" not in html:
         return html, False
     if _count_cells(html) != 4:
@@ -61,17 +61,17 @@ def remove_fourth_bag_item(html: str):
 
     orig = html
 
-    # 1) 删 id="bg4" 的 input
+    # 1) 刪 id="bg4" 的 input
     html = re.sub(
         r'[ \t]*<input\b[^>]*\bclass="bagin"[^>]*\bid="bg4"[^>]*>\s*\n?',
         "", html, count=1,
     )
-    # 2) 删 flatlay 里 for="bg4" 的 label
+    # 2) 刪 flatlay 裡 for="bg4" 的 label
     html = re.sub(
         r'[ \t]*<label\b[^>]*\bclass="[^"]*\bbagcell\b[^"]*"[^>]*\bfor="bg4"[^>]*>.*?</label>\s*\n?',
         "", html, count=1, flags=re.S,
     )
-    # 3) 删 bagdetail d4 整块（div 配平）
+    # 3) 刪 bagdetail d4 整塊（div 配平）
     m = re.search(r'<div\b[^>]*\bclass="[^"]*\bbagdetail\b[^"]*\bd4\b[^"]*"[^>]*>', html)
     if m:
         start = m.start()
@@ -94,7 +94,7 @@ def remove_fourth_bag_item(html: str):
                 tail += 1
             html = html[:lead] + html[tail:]
 
-    # 4) 小标计数 4→3（仅计数形态）
+    # 4) 小標計數 4→3（僅計數形態）
     def _fix_count(mm):
         head, body, tl = mm.group(1), mm.group(2), mm.group(3)
         cm = _COUNT_RE.match(body.strip())
@@ -107,7 +107,7 @@ def remove_fourth_bag_item(html: str):
 
     changed = html != orig
     if changed:
-        # 安全校验：删完恰好剩 3 cell / 3 detail、无 bg4 物品残留
+        # 安全校驗：刪完恰好剩 3 cell / 3 detail、無 bg4 物品殘留
         assert _count_cells(html) == 3, "cell count after != 3"
         assert len(re.findall(r'class="bagdetail d\d', html)) == 3, "detail != 3"
         assert 'for="bg4"' not in html, "residual label bg4"
@@ -151,7 +151,7 @@ def _req(method: str, url: str, **kw) -> requests.Response:
         except requests.RequestException as e:
             last = str(e)
             time.sleep(min(3 * (attempt + 1), 20))
-    raise RuntimeError(f"请求多次失败 {method} {url}: {last}")
+    raise RuntimeError(f"請求多次失敗 {method} {url}: {last}")
 
 
 def _fetch_ids(sources: list[str] | None) -> list[str]:
@@ -183,39 +183,39 @@ def _classify(cid: str):
 def _apply(cid: str, html: str) -> None:
     new_html, changed = remove_fourth_bag_item(html)
     if not changed:
-        raise RuntimeError("删除未生效（结构异常）")
+        raise RuntimeError("刪除未生效（結構異常）")
     _req("PUT", f"{BASE}/api/landing", json={"char_id": cid, "html": new_html})
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", action="append", dest="sources",
-                    help="限定 source，可多次传；缺省=全部来源")
+                    help="限定 source，可多次傳；預設=全部來源")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     sources = args.sources
-    print(f"扫描 source: {', '.join(sources) if sources else '全部'} "
-          f"→ 目标：翻包恰好 4 个物品的页面，删掉第 4 个")
+    print(f"掃描 source: {', '.join(sources) if sources else '全部'} "
+          f"→ 目標：翻包恰好 4 個物品的頁面，刪掉第 4 個")
 
     state = load_state()
     done = set(state["done"])
 
     ids = _fetch_ids(sources)
     todo_ids = [c for c in ids if c not in done]
-    print(f"完整角色 {len(ids)}，已完成 {len(ids) - len(todo_ids)}，待分类 {len(todo_ids)}")
+    print(f"完整角色 {len(ids)}，已完成 {len(ids) - len(todo_ids)}，待分類 {len(todo_ids)}")
 
     with ThreadPoolExecutor(max_workers=max(8, args.concurrency)) as ex:
         results = list(ex.map(_classify, todo_ids))
 
     to_fix = [(cid, html) for cid, (v, html) in zip(todo_ids, results) if v == "fix"]
     skips = [cid for cid, (v, _) in zip(todo_ids, results) if v == "skip"]
-    print(f"  需要删第4个: {len(to_fix)}")
-    print(f"  跳过(非4个/非互动): {len(skips)}")
+    print(f"  需要刪第4個: {len(to_fix)}")
+    print(f"  跳過(非4個/非互動): {len(skips)}")
 
-    # 跳过项归档进 done，续跑不重复分类
+    # 跳過項歸檔進 done，續跑不重複分類
     with _STATE_LOCK:
         for cid in skips:
             if cid not in done:
@@ -228,12 +228,12 @@ def main() -> int:
 
     if args.dry_run:
         for cid, _ in to_fix[:8]:
-            print(f"  [DRY] 将删除第4个物品 {cid}")
-        print(f"[DRY] 计划处理 {len(to_fix)} 个页面。")
+            print(f"  [DRY] 將刪除第4個物品 {cid}")
+        print(f"[DRY] 計劃處理 {len(to_fix)} 個頁面。")
         return 0
 
     if not to_fix:
-        print("没有需要处理的页面。")
+        print("沒有需要處理的頁面。")
         return 0
 
     total = len(to_fix)
@@ -256,7 +256,7 @@ def main() -> int:
                     state["failed"].append(cid)
                 save_state(state)
                 counters["err"] += 1
-            print(f"      失败 {cid}: {e}", flush=True)
+            print(f"      失敗 {cid}: {e}", flush=True)
 
     jobs = [(i + 1, cid, html) for i, (cid, html) in enumerate(to_fix)]
     with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as ex:
