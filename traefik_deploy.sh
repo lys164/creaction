@@ -12,6 +12,14 @@ PUBLIC_DOMAIN=""
 IMAGE_NAME="popop-pipeline:latest"
 TAR_NAME="popop-pipeline-image.tar.gz"
 
+# SSH 连接复用：整个部署只建立一条 TCP 连接，避免触发服务器端 MaxStartups 限制
+SSH_CTRL="$(mktemp -d)/deploy.sock"
+SSH_OPTS="-o ControlMaster=auto -o ControlPath=$SSH_CTRL -o ControlPersist=300 -o ConnectTimeout=15 -o ServerAliveInterval=15"
+ssh() { command ssh $SSH_OPTS "$@"; }
+scp() { command scp $SSH_OPTS "$@"; }
+cleanup_ssh() { command ssh -O exit -o ControlPath="$SSH_CTRL" "$SERVER" 2>/dev/null || true; rm -f "$SSH_CTRL" 2>/dev/null || true; }
+trap cleanup_ssh EXIT
+
 echo "=========================================="
 echo "POPOP Pipeline Traefik 一键部署"
 echo "=========================================="

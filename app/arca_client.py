@@ -166,6 +166,24 @@ def create_character(form: dict, lang: str, idempotency_key: str | None = None,
             time.sleep(poll_interval)
 
 
+def import_character(request: dict, lang: str) -> dict:
+    """POST /internal/import/character（SKILL 的內部導入接口，同步返回）。
+
+    request 為完整 ImportCharacterReq {external_character_id, provider,
+    character_create_form}。該路由組無簽名校驗，但仍必須帶創建者 JWT——全局
+    OptionalJWT 中間件把 uid 注入 context，缺失會報「未授權：無法獲取用戶ID」。
+    (provider, external_character_id) 是導入幂等鍵：重複導入命中同一角色，
+    new_created=false。返回 data：{character_id, new_created, character:{...}}。
+    """
+    if not config.ARCA_BASE_URL:
+        raise ArcaError("ARCA_BASE_URL 未配置")
+    r = _post(
+        f"{config.ARCA_BASE_URL}/internal/import/character",
+        request, headers=_headers(lang), timeout=120,
+    )
+    return _data(r)
+
+
 def _get(url: str, headers: dict, timeout: int):
     """GET 請求收口：ARCA_DEBUG=1 時列印原始請求/響應（脫敏）。"""
     if config.ARCA_DEBUG:

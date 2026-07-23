@@ -131,6 +131,11 @@ class CharIdsReq(BaseModel):
     char_ids: list[str]
 
 
+class SetStyleReq(BaseModel):
+    char_ids: list[str]
+    style: str  # real | cute | fantasy
+
+
 class RegenPersonaReq(BaseModel):
     char_ids: list[str]
     # 鏈路覆蓋：None=沿用角色已存 track（預設 real）
@@ -227,6 +232,13 @@ class PhoneEventReq(BaseModel):
 class PhoneUnlockReq(BaseModel):
     char_id: str
     app_id: str
+
+
+class PhonePhotoGenReq(BaseModel):
+    char_id: str
+    photo_id: str = ""          # 相册照片的稳定标识（tab+index），用于命名与缓存
+    caption: str = ""           # 照片文字描述（cap / c1 / c2 合并），作为生图指导
+    image_model: str | None = None
 
 
 class FeedReplyReq(BaseModel):
@@ -670,6 +682,139 @@ def download_export(token: str):
     )
 
 
+@app.post("/api/characters/import")
+def import_characters(req: CharIdsReq):
+    """按 SKILL 契約直推角色到後端 POST /internal/import/character（非同步）。
+
+    每個角色構建完整 ImportCharacterReq、上傳資產、全量契約校驗後直接導入，
+    (provider, external_character_id) 幂等：重複導入命中同一角色 new_created=false。
+    契約違約/導入報錯逐角色記入 errors，不影響其它角色。返回 task_id 供前端輪詢。
+    """
+    from .arca_import_export import ImportCharacterContractError
+
+    if not req.char_ids:
+        raise HTTPException(400, "no characters selected")
+    char_ids = list(req.char_ids)
+    task_id = tasks.create_task("import", total=len(char_ids))
+
+    def _job(tid: str):
+        imported, errors = [], {}
+
+        def _one(cid: str):
+            try:
+                return cid, pipeline.import_character_to_arca(cid), None
+            except ImportCharacterContractError as e:
+                return cid, None, "契約校驗未通過：\n" + "\n".join(
+                    f"- {v}" for v in e.violations)
+            except Exception as e:  # noqa: BLE001 單角色失敗不影響其它
+                return cid, None, str(e)
+
+        with ThreadPoolExecutor(max_workers=config.EXPORT_CONCURRENCY) as ex:
+            for cid, result, err in ex.map(_one, char_ids):
+                if err is None:
+                    imported.append(result)
+                else:
+                    errors[cid] = err
+                tasks.bump(tid)
+        return {"imported": imported, "errors": errors}
+
+    tasks.run(task_id, _job)
+    return {"task_id": task_id}
+
+
+@app.post("/api/characters/export_table")
+def export_characters_table(req: CharIdsReq):
+    """把勾選角色導出成 CSV 表格（含本地 character_id 與 arca 平台 character_id）。
+
+    同步返回 text/csv（UTF-8 BOM，Excel 可直接開）。單個角色讀取失敗不中斷，
+    以空行標記錯誤原因，保證選中數量與行數對應。"""
+    import csv
+    import io
+
+    if not req.char_ids:
+        raise HTTPException(400, "no characters selected")
+
+    def _flat(value: Any) -> str:
+        """把可能是多語言 dict / list 的欄位壓成單一可讀字串。"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+        if isinstance(value, list):
+            return " / ".join(_flat(v) for v in value if _flat(v))
+        if isinstance(value, dict):
+            # 多語言欄位：優先中文，否則取第一個非空值
+            for k in ("zh", "zh-Hant", "en"):
+                if _flat(value.get(k)):
+                    return _flat(value[k])
+            for v in value.values():
+                if _flat(v):
+                    return _flat(v)
+        return ""
+
+    buf = io.StringIO()
+    buf.write("\ufeff")  # UTF-8 BOM：Excel 正確識別中文
+    writer = csv.writer(buf)
+    writer.writerow([
+        "char_id", "arca_character_id", "name", "lang", "species",
+        "gender", "style", "tags", "arca_synced", "exported", "error",
+    ])
+    for cid in req.char_ids:
+        try:
+            rec = pipeline.load_character(cid)
+            p = rec.get("persona") or {}
+            writer.writerow([
+                rec.get("char_id", cid),
+                rec.get("arca_character_id", ""),
+                _flat(p.get("name") or rec.get("name")),
+                rec.get("lang", ""),
+                _flat(p.get("species")),
+                _flat(p.get("gender")),
+                rec.get("style", ""),
+                _flat(p.get("tags")),
+                "yes" if rec.get("arca_character_id") else "no",
+                "yes" if rec.get("exported") else "no",
+                "",
+            ])
+        except Exception as e:  # noqa: BLE001 單個失敗不中斷整表
+            writer.writerow([cid, "", "", "", "", "", "", "", "", "", str(e)])
+
+    fname = f"characters_{int(time.time())}.csv"
+    return Response(
+        content=buf.getvalue().encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.post("/api/characters/set_style")
+def set_characters_style(req: SetStyleReq):
+    """批次給勾選角色打業務 style 標籤（real|cute|fantasy），同步小量、直接返回。
+
+    只寫記錄頂層 style 欄位（匯出/帖子鏈路的業務 style 選擇），不改人設內容。
+    單個角色失敗不影響其它，逐個記入 errors 供重試。"""
+    try:
+        style = pipeline.normalize_production_style(req.style)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not req.char_ids:
+        raise HTTPException(400, "no characters selected")
+    updated, errors = [], {}
+    for cid in req.char_ids:
+        try:
+            rec = pipeline.load_character(cid)
+            rec["style"] = style
+            if isinstance(rec.get("persona"), dict):
+                rec["persona"]["style"] = style
+            pipeline.save_character(rec)
+            updated.append(cid)
+        except Exception as e:  # noqa: BLE001 單個失敗不中斷其餘
+            errors[cid] = str(e)
+    return {"updated": updated, "errors": errors, "style": style}
+
+
 # ---------- step 2: identity ----------
 @app.post("/api/identity")
 def make_identity(req: IdentityReq):
@@ -695,6 +840,21 @@ def make_cover(req: CoverReq):
 
     tasks.run(task_id, _job)
     return {"task_id": task_id}
+
+
+@app.post("/api/cover/replace")
+def replace_cover(char_id: str = Form(...), file: UploadFile = File(...)):
+    """手動替換角色封面：上傳的原圖原樣落庫，匯出時以原圖（原始解析度）作主圖。"""
+    data = file.file.read()
+    if not data:
+        raise HTTPException(400, "空的圖片檔案")
+    try:
+        pipeline.replace_cover(char_id, data, file.filename or "")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "角色不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
 
 
 @app.post("/api/characters/batch_cover")
@@ -1127,6 +1287,26 @@ def phone_event(req: PhoneEventReq):
     return phone_runtime.record_event(req.char_id, req.event, req.detail)
 
 
+@app.post("/api/phone_check/reset_caught")
+def post_phone_check_reset_caught(req: PhoneEnterReq):
+    """重置被抓狀態：清掉聊天裡殘留的「你是不是動我手機了」等 phone_event 訊息 +
+    空 assistant 佔位，並重置 runtime 的 risk/caught（重新 enter 一個偷看 session）。"""
+    pipeline.load_character(req.char_id)
+    cleared = chat.clear_phone_events(req.char_id, mode="normal")
+    rt = phone_runtime.enter(req.char_id, "")
+    return {"ok": True, "cleared": cleared, "risk": rt.get("risk"), "caught": rt.get("caught")}
+
+
+@app.post("/api/phone_check/reset_demo")
+def post_phone_check_reset_demo(req: PhoneEnterReq):
+    """demo 乾淨重來：刪掉本次偷看留下的真實聊天會話並重置風險/被抓狀態。
+    不動預生成的付費 App 內容與相冊生圖（那些是作者預生成、成本高，刷新只需重新上鎖/付費即可）。"""
+    pipeline.load_character(req.char_id)
+    cleared = chat.clear_sessions(req.char_id, mode="normal")
+    rt = phone_runtime.enter(req.char_id, "")
+    return {"ok": True, "cleared": cleared, "risk": rt.get("risk"), "caught": rt.get("caught")}
+
+
 @app.get("/api/phone_check/tiers")
 def get_phone_check_tiers():
     """前端用：哪些 App 免費、哪些付費鎖。"""
@@ -1185,6 +1365,59 @@ def post_phone_check_unlock(req: PhoneUnlockReq):
         return {"ok": True, "cached": True, "result": existing}
     result = phone_check_gen.generate_paid(demo_id, req.char_id, [gen_key])
     return {"ok": True, "cached": False, "result": result}
+
+
+@app.post("/api/phone_check/regenerate")
+def post_phone_check_regenerate(req: PhoneUnlockReq):
+    """重新生成某個已解鎖付費 App 的內容（「生成新動態」）：即使已緩存也強制重跑，
+    產出新一批內容併入落盤。舊批次由前端保存快照供回看。"""
+    pipeline.load_character(req.char_id)
+    demo_id = None
+    for d, real in phone_check_gen.DEMO_CHAR_MAP.items():
+        if real == req.char_id:
+            demo_id = d
+            break
+    if not demo_id:
+        return {"ok": False, "error": "unknown char"}
+    gen_key = "sns_alt" if req.app_id in ("sns", "sns_alt") else req.app_id
+    if gen_key not in phone_check_gen.PAID_APP_IDS:
+        return {"ok": False, "error": f"not a paid app: {req.app_id}"}
+    result = phone_check_gen.generate_paid(demo_id, req.char_id, [gen_key])
+    return {"ok": True, "regenerated": True, "result": result}
+
+
+@app.post("/api/phone_check/photo")
+def post_phone_check_photo(req: PhonePhotoGenReq):
+    """相册单张照片解锁生图：以角色封面作 i2i 参考、照片描述作指导，生成一张真实生活照。
+    异步走后台任务，返回 task_id；前端轮询 /api/tasks/{id}，done 后从 result.url 取图。"""
+    record = pipeline.load_character(req.char_id)
+    tid = tasks.create_task("phone_photo", total=1)
+
+    def _job(_tid: str):
+        ref = pipeline._ref_image_uri_for_selfie(record)
+        cap = (req.caption or "").strip() or "夜晚的日常生活随手拍"
+        prompt = (
+            "一张真实自然的生活照，手机相册质感，随手拍风格，非摆拍。"
+            f"画面内容：{cap}。"
+            "氛围：安静、温暖；自然光或室内暖光；轻微胶片颗粒感与手持轻微抖动，"
+            "像是日常随手记录的一张生活照。干净构图，不要文字、不要浮水印、不要拼贴。"
+        )
+        safe = re.sub(r"[^a-zA-Z0-9_]+", "_", req.photo_id or uuid.uuid4().hex)[:40]
+        save_path = config.IMAGE_DIR / f"{req.char_id}_album_{safe}.png"
+        out = api_client.generate_image(
+            prompt=prompt,
+            size=config.IMAGE_SIZE_POST,
+            resolution=config.IMAGE_RESOLUTION,
+            image_urls=[ref] if ref else None,
+            save_path=save_path,
+            model=config.resolve_image_model(req.image_model or config.DEFAULT_IMAGE_MODEL_CHOICE),
+        )
+        tasks.bump(_tid)
+        url = pipeline._served_image_url(out) if out else None
+        return {"url": url, "local_path": out.get("local_path") if out else None}
+
+    tasks.run(tid, _job)
+    return {"task_id": tid}
 
 
 @app.post("/api/phone_check/apply_schedule/{char_id}")

@@ -16,8 +16,8 @@ from . import chat, config, feed_posts, pipeline
 # 前端 demo 角色 id -> 平台真實 char_id（素材最豐富的三個第三方帖子角色）
 DEMO_CHAR_MAP: dict[str, str] = {
     "yuwi": "char_1783597290_f0d265",   # 游嶼 / 深夜便利店音效師（治癒·纯爱）
-    "shen": "char_1784089818_de4be8",   # 203號沈先生 / 旅行攝影師（懸疑·危險鄰居）
-    "haesu": "char_1783634537_a54d49",  # 都海樹 / 望遠洞高冷藥師（日常·反差）
+    # 單角色 demo：只保留游嶼，把打磨集中在一次完整的深夜體驗上。
+    # 沈先生 / 都海樹的映射先下線（素材仍在，需要時可恢復）。
 }
 
 

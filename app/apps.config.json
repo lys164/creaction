@@ -1,0 +1,42 @@
+{
+  "_doc": "查手機框架 App 單一數據源。前端 APP_REGISTRY 與後端 App 清單都以本檔為準。上下架 App = 在 apps[] 增刪一項。",
+  "_derive": {
+    "frontend": {
+      "APP_META": "map [id,type,icon,name,bg]",
+      "STORE_IDS": "surface==store 的 id",
+      "PAID_LOCK": "pay in (bundle,granular) 的 id (離線兜底; 線上被 tiers().paid_lock 覆蓋)",
+      "GRANULAR_PAY": "pay==granular 的 id"
+    },
+    "backend": {
+      "FREE_LAYER_KEYS": "gen.layers 含 free 的 id",
+      "PAID_APP_IDS": "gen.layers 含 paid 的 (gen.key_paid || id)",
+      "PAID_LOCK_IDS": "pay in (bundle,granular) 且 gen.layers 含 paid 的 id",
+      "APP_BRIEF": "gen.brief, 鍵用 id"
+    }
+  },
+  "apps": [
+    {"id": "talk", "type": "chat", "type_backend": "chat", "name": {"ko": "메신저", "zh": "通訊"}, "icon": "💬", "bg": "#ffe94a", "surface": "home", "pay": "chat", "gen": {"layers": ["free"], "brief": "메신저: 4-5 聊天室, 每室 msgs 4-8 條真實推進, 首室為玩家房含未發送 draft, profiles 兩檔人設反差(對外的臉 vs 沒人看的臉), 備註名即人設。"}},
+    {"id": "memo", "type": "memo", "type_backend": "memo", "name": {"ko": "메모", "zh": "備忘錄"}, "icon": "📝", "bg": "#fff3c4", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "備忘錄: 內心 OS/計劃/收藏 3-6 條, 關鍵是刪改痕跡(edited/strike), 至少 1 條與玩家或中心秘密相關, 1 條置頂。"}},
+    {"id": "sns", "type": "sns", "type_backend": "sns", "name": {"ko": "SNS 부계", "zh": "SNS"}, "icon": "📷", "bg": "#e8f0ec", "surface": "home", "pay": "free", "gen": {"layers": ["free", "paid"], "key_paid": "sns_alt", "brief": "大號=給世界看的人設; 小號=真我(深夜 0 讚 emo), 小號至少 1 條標 clue, 付費層以 sns_alt 生成併入 apps.sns.alt。"}},
+    {"id": "forum", "type": "forum", "type_backend": "forum", "name": {"ko": "커뮤니티", "zh": "論壇"}, "icon": "🗣", "bg": "#eaf0f6", "surface": "home", "pay": "bundle", "gen": null, "_note": "匿名論壇 目前 demo-only(前端 mock), 接入後端需補 SCHEMA.apps.forum + brief。"},
+    {"id": "purchase", "type": "purchase", "type_backend": "list", "name": {"ko": "쇼핑", "zh": "購物"}, "icon": "🛍", "bg": "#eaf3e4", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "購買記錄: 已購+購物車(躺很久沒下單那件更有戲), 物流狀態可劇透未來(收貨日=你生日前)。"}},
+    {"id": "ledger", "type": "ledger", "type_backend": "list", "name": {"ko": "가계부", "zh": "記帳"}, "icon": "💳", "bg": "#e7effb", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "記帳錢包: 收支兩邊清晰。total_balance+accounts(含證券)+income/total+incomes+txns+pending+refunds+autopay(埋每月同日同額模糊收款)+installments+stocks(韓國散戶愛炒股)。線索走 memo 手寫備註, 與其他 App 對帳。"}},
+    {"id": "health", "type": "health", "type_backend": "health", "name": {"ko": "건강", "zh": "健康"}, "icon": "🩺", "bg": "#e8efe9", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "健康: 多天多指標可滑很久。summary+sleep(7天曲線+分期+入睡起床)+metrics 5-7個各帶 trend+hr_events 心率x消息關聯 3-5 條(靈魂)+dreams 3-5 條。飆高時刻與聊天/動線/搜尋對得上。"}},
+    {"id": "folder", "type": "folder", "type_backend": "folder", "name": {"ko": "파일", "zh": "文件"}, "icon": "🗂", "bg": "#efece6", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "文件夾: 洋蔥結構套三層, 其中一個二級密碼名字曖昧, 裡面是最深秘密(沒寄出的信)。"}},
+    {"id": "gallery", "type": "gallery", "type_backend": "gallery", "name": {"ko": "사진첩", "zh": "相簿"}, "icon": "🎞", "bg": "#eceae6", "surface": "home", "pay": "granular", "gen": {"layers": ["paid"], "brief": "相冊: recent 3-5 張/deleted 3-4 張(30日倒計時)。每張須勾住 內心真實想法/和玩家有關/中心秘密 之一, 禁純風景噪音。刪除區是靈魂。與其他 App 對帳。"}},
+    {"id": "taxi", "type": "taxi", "type_backend": "list", "name": {"ko": "이동", "zh": "行程"}, "icon": "🚕", "bg": "#e7effb", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "打車: trips 3-5 筆, 大多通勤噪音但必埋一個高價值疑點(到附近沒聯絡/深夜陌生地址/輸地址後取消/吵架後去初見地/與說法矛盾/出發後改目的地), hot+d 講清。"}},
+    {"id": "screen", "type": "screentime", "type_backend": "screentime", "name": {"ko": "스크린타임", "zh": "螢幕"}, "icon": "⏱", "bg": "#eceaf3", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "螢幕時間: 統計儀表板非流水帳。total+pickups+notis+last_use+bars 排行+hourly 24格(深夜飆高)+most_contact+insights 2-3 條心事+downloads。不要 timeline 行為時間線。"}},
+    {"id": "calls", "type": "calls", "type_backend": "list", "name": {"ko": "통화", "zh": "通話"}, "icon": "📞", "bg": "#e8efe9", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "通話統計: 時長即親密度。stats 排行(dur 含次數), 0회 對象踢出排行改成通話없음小卡並用 d 說清。recent 流水 dir=in/out/miss/cancel。"}},
+    {"id": "fortune", "type": "fortune", "type_backend": "fortune", "name": {"ko": "운세", "zh": "運勢"}, "icon": "🔮", "bg": "#f3eefa", "surface": "home", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "運勢: today+sections 四段命盤(애정 必影射與玩家關係)+궁합(生日組合對上秘密)+logs 查詢記錄(靈魂,願望恐懼糾結,埋切身問題,體現關係進度)。塔羅可展開抽到的卡與解讀。"}},
+    {"id": "footprints", "type": "footprints", "type_backend": "footprints", "name": {"ko": "동선", "zh": "足跡"}, "icon": "🗺", "bg": "#e8efe9", "surface": "store", "pay": "free", "gen": {"layers": ["free"], "brief": "動線: 大多通勤噪音, 偶爾陌生地點或固定週期反覆的同一陌生地址(每週四連續四週)。pins 給地圖坐標。"}},
+    {"id": "market", "type": "market", "type_backend": "market", "name": {"ko": "당근", "zh": "二手"}, "icon": "🥕", "bg": "#fbeee2", "surface": "store", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "二手: 收/賣兩方向(收絕版=挽回/賣情侶物=告別), 砍價語氣 vs 對玩家語氣反差。"}},
+    {"id": "delivery", "type": "delivery", "type_backend": "list", "name": {"ko": "배달", "zh": "外賣"}, "icon": "🛵", "bg": "#eaf6f5", "surface": "store", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "外賣: 份數+地址+備註拼出和誰在哪怎麼吃, 口味異常(不吃辣卻點辣=有人在場)。"}},
+    {"id": "music", "type": "music", "type_backend": "music", "name": {"ko": "음악", "zh": "音樂"}, "icon": "🎵", "bg": "#eafaf0", "surface": "store", "pay": "bundle", "gen": {"layers": ["paid"], "brief": "音樂: 歌單標題常用日期或一句話, 至少 1 個對上中心秘密時間線, 最近播放第一名可為老歌反覆重播(replay 暴露強迫性), 可選함께듣기共享歌單。"}},
+    {"id": "search", "type": "search", "type_backend": "search", "name": {"ko": "검색", "zh": "搜尋"}, "icon": "🔍", "bg": "#e8f3ea", "surface": "store", "pay": "granular", "gen": {"layers": ["paid"], "brief": "搜索記錄: items 連成一個心理過程, 至少1條凌晨1條標 clue。給 browse 瀏覽記錄 3-4 條(比搜尋更誠實), 用 site+visits 體現行為。"}},
+    {"id": "feed", "type": "feed", "type_backend": "feed", "name": {"ko": "추천 피드", "zh": "推薦Feed"}, "icon": "📺", "bg": "#eef0ec", "surface": "store", "pay": "free", "gen": {"layers": ["free"], "brief": "推薦 Feed: 混合算法被動推送(暴露潛意識)與自己的觀看行為(同影片重複看), 至少各 1 張。"}},
+    {"id": "voice", "type": "voice", "type_backend": "voice", "name": {"ko": "음성 메모", "zh": "語音"}, "icon": "🎙", "bg": "#efece6", "surface": "store", "pay": "granular", "gen": {"layers": ["paid"], "brief": "錄音: 元數據先曝光(檔名+時長+錄音時間), 至少 1 條甜向 1 條懸疑向, 載體從職業人設長出來。"}},
+    {"id": "calendar", "type": "calendar", "type_backend": "calendar", "name": {"ko": "캘린더", "zh": "行事曆"}, "icon": "📅", "bg": "#fdecec", "surface": "store", "pay": "free", "gen": {"layers": ["paid"], "brief": "行事曆: 日程標題即線索。events 5-7 條大多噪音, 埋 1-2 條可疑(縮寫/每年紀念日/與他 App 對得上)。secret=true 標題模糊要點開 d。給 1-2 條 countdowns。"}},
+    {"id": "mail", "type": "mail", "type_backend": "mail", "name": {"ko": "메일", "zh": "郵件"}, "icon": "✉️", "bg": "#e8f0fb", "surface": "store", "pay": "free", "gen": {"layers": ["paid"], "brief": "郵件: mails 5-7 封靠寄件人網域+主旨當線索, 分 inbox/draft/sent, 草稿箱未寄出郵件最狠, 1-2 封重磅對帳。"}},
+    {"id": "stay", "type": "stay", "type_backend": "stay", "name": {"ko": "숙박", "zh": "住宿"}, "icon": "🏩", "bg": "#fbe9f1", "surface": "store", "pay": "free", "gen": {"layers": ["paid"], "brief": "住宿預訂: 嚴守不實錘的曖昧, 每筆都能往壞想也能往好想(出差/家人/場勘)。bookings 2-4 筆埋 1 筆可疑, guests 人數是關鍵信號, d 留解釋空間禁寫死出軌實錘。"}}
+  ]
+}

@@ -948,26 +948,43 @@ def _post_image_desc(post: dict) -> str:
     return ""
 
 
+_COVER_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif",
+}
+_MIME_EXT = {
+    "image/png": "png", "image/jpeg": "jpg",
+    "image/webp": "webp", "image/gif": "gif",
+}
+
+
 def _import_main_image(char_id: str, lang: str, provider: str,
-                       cover_bytes: bytes | None) -> list[dict]:
+                       cover_bytes: bytes | None, *,
+                       content_type: str = "image/png",
+                       image_type: str = "aigc") -> list[dict]:
     """Upload the required import main image to the private bucket.
 
     ImportCharacterReq consumes a StorageObject and resolves its primary image
     by bucket/object_key.  It is intentionally separate from the public landing
     asset upload: character images may stay private, while landing assets must
     be public.
+
+    The original bytes are uploaded verbatim (never a resized/re-encoded copy),
+    so a manually replaced cover ships at full source resolution.  image_type is
+    ``upload`` for a user-supplied cover and ``aigc`` for a generated one.
     """
     if not cover_bytes:
         return []
     from . import arca_client
+    ext = _MIME_EXT.get(content_type, "png")
     obj = arca_client.tos_upload(
         cover_bytes,
-        f"character_import/{provider}/{char_id}/main.png",
-        "image/png",
+        f"character_import/{provider}/{char_id}/main.{ext}",
+        content_type,
         lang,
         public=False,
     )
-    return [{"image_type": "aigc", "is_main_pic": True, "media": obj}]
+    return [{"image_type": image_type, "is_main_pic": True, "media": obj}]
 
 
 def _build_import_landing(
@@ -1005,13 +1022,20 @@ def _build_import_landing(
     return landing_url, landing_html
 
 
-def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | str]], dict]:
-    """Build exactly one importing-arca-character delivery JSON.
+def build_validated_import_request(
+    char_id: str,
+) -> tuple[dict, str | None, dict]:
+    """Build one fully validated ImportCharacterReq for a character.
 
-    Persona generation is deliberately left unchanged.  This export boundary
-    fetches the live enum configuration, uploads contract assets, maps the
-    stored persona to ImportCharacterReq, then rejects the entire file on any
-    contract violation.
+    This is the single source of truth shared by the zip export and the direct
+    ``POST /internal/import/character`` push: it fetches the live enum config,
+    uploads the contract assets (private main image + public landing page), maps
+    the stored persona, and asserts the whole request against the contract.  Any
+    violation raises ImportCharacterContractError; no content is invented.
+
+    Returns ``(request, landing_html, report)`` where ``landing_html`` is the
+    optional source copy of the uploaded landing page (already public-bucket
+    rewritten) and ``report`` carries folder/name/image bookkeeping.
     """
     record = load_character(char_id)
     persona = record.get("persona", {})
@@ -1064,7 +1088,12 @@ def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | s
     # Obtain the public bucket/CDN identity only after persona preflight.  The
     # host set is required to prove landing assets are final public URLs.
     public_asset_hosts = arca_client.public_tos_hosts(lang)
-    images = _import_main_image(char_id, lang, provider, cover_bytes)
+    cover_meta = record.get("cover") or {}
+    is_manual = bool(cover_meta.get("manual"))
+    images = _import_main_image(
+        char_id, lang, provider, cover_bytes,
+        content_type=cover_meta.get("content_type") or "image/png",
+        image_type="upload" if is_manual else "aigc")
     if images:
         report["images"] += 1
 
@@ -1076,6 +1105,49 @@ def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | s
         landing_page_url=landing_url, provider=provider)
     assert_valid_import_character_req(
         request, page_config=page_config, public_asset_hosts=public_asset_hosts)
+    return request, landing_html, report
+
+
+@_locked
+def import_character_to_arca(char_id: str) -> dict:
+    """Push one character straight to POST /internal/import/character.
+
+    Builds the same fully validated ImportCharacterReq used by the zip export
+    (assets uploaded, contract asserted), then calls the SKILL's internal import
+    endpoint.  Idempotent by (provider, external_character_id): re-running hits
+    the same character with ``new_created=false``.  The returned platform
+    character_id is written back onto the local record for traceability.
+    """
+    from . import arca_client
+
+    record = load_character(char_id)
+    lang = record.get("lang", "zh")
+    request, _landing_html, report = build_validated_import_request(char_id)
+    data = arca_client.import_character(request, lang)
+
+    cid = data.get("character_id")
+    new_created = bool(data.get("new_created"))
+    record["arca_character_id"] = cid
+    record["arca_imported"] = True
+    record["arca_imported_at"] = int(time.time())
+    record["exported"] = True
+    record["exported_at"] = int(time.time())
+    save_character(record)
+
+    return {
+        "char_id": char_id,
+        "arca_character_id": cid,
+        "new_created": new_created,
+        "provider": request.get("provider"),
+        "external_character_id": request.get("external_character_id"),
+        "images": report.get("images", 0),
+    }
+
+
+def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | str]], dict]:
+    """Build exactly one importing-arca-character delivery JSON (zip payload)."""
+    request, landing_html, report = build_validated_import_request(char_id)
+    folder_base = report["folder"]
 
     files: list[tuple[str, bytes | str]] = [(
         "character.json", json.dumps(request, ensure_ascii=False, indent=2))]
@@ -1083,6 +1155,7 @@ def _build_character_files(char_id: str) -> tuple[str, list[tuple[str, bytes | s
         files.append(("landing.html", landing_html))
 
     # mark the character record as exported
+    record = load_character(char_id)
     record["exported"] = True
     record["exported_at"] = int(time.time())
     save_character(record)
@@ -1204,9 +1277,10 @@ def delete_character(char_id: str) -> bool:
         p.unlink()
         deleted_any = True
 
-    for img in config.IMAGE_DIR.glob(f"{char_id}_*.png"):
-        img.unlink(missing_ok=True)
-        deleted_any = True
+    for img in config.IMAGE_DIR.glob(f"{char_id}_*"):
+        if img.is_file():
+            img.unlink(missing_ok=True)
+            deleted_any = True
 
     post_dir = config.POST_DIR / char_id
     if post_dir.exists():
@@ -1428,6 +1502,60 @@ def generate_cover(
     }
     save_character(record)
     return record
+
+
+@_locked
+def replace_cover(char_id: str, data: bytes, filename: str = "") -> dict:
+    """Replace a character's cover with a manually uploaded image.
+
+    The uploaded bytes are stored verbatim (no resize/re-encode) so export ships
+    the original image at full resolution.  The cover record is marked
+    ``manual`` and drops generation-only fields (prompt/spec/style) so later
+    passes and the UI treat it as an uploaded, not generated, main picture.
+    """
+    if not data:
+        raise ValueError("empty cover image")
+    record = load_character(char_id)
+    ext = Path(filename or "").suffix.lower()
+    content_type = _COVER_MIME.get(ext)
+    if content_type is None:
+        content_type = _sniff_image_mime(data)
+        if content_type is None:
+            raise ValueError("unsupported image type; expected png/jpg/webp/gif")
+        ext = f".{_MIME_EXT[content_type]}"
+
+    # Remove any prior cover files for this character so a replaced cover with a
+    # different extension does not leave the stale generated one on disk/OSS.
+    old_lp = (record.get("cover") or {}).get("local_path")
+    save_path = config.IMAGE_DIR / f"{char_id}_cover_manual{ext}"
+    storage.save_file(save_path, data, content_type)
+    if old_lp and Path(old_lp) != save_path:
+        old_path = Path(old_lp)
+        if old_path.parent == config.IMAGE_DIR:
+            old_path.unlink(missing_ok=True)
+            storage.delete_oss_file(old_path)
+
+    record["cover"] = {
+        "manual": True,
+        "content_type": content_type,
+        "url": _served_image_url({"local_path": str(save_path)}),
+        "local_path": str(save_path),
+    }
+    save_character(record)
+    return record
+
+
+def _sniff_image_mime(data: bytes) -> str | None:
+    """Best-effort image type detection from magic bytes."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return None
 
 
 # --------------------------------------------------------------------------

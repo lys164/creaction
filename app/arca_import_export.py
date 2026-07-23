@@ -7,6 +7,7 @@ stored output into the exact ``ImportCharacterReq`` needed by
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -16,6 +17,8 @@ from urllib.parse import urlparse
 from .arca_mapping import normalize_gender
 from .persona_export import build_personality_text, to_export_schema
 
+
+_log = logging.getLogger(__name__)
 
 CONTRACT_NAME = "importing-arca-character"
 SPECIES = frozenset({"人类", "精灵", "兽人", "动物", "其他"})
@@ -76,6 +79,8 @@ _SPECIES_ALIASES = {
     "other": "其他", "其它": "其他", "其他": "其他",
 }
 _SINGLE_USER_PLACEHOLDER = re.compile(r"(?<!\{)\{user\}(?!\})")
+# 双花括号占位符（规范形态）：tts 行合成时后端会剔除它，构建时同步剔除以对齐存库文本。
+_USER_PLACEHOLDER = re.compile(r"\{\{\s*user\s*\}\}")
 
 
 @dataclass(frozen=True)
@@ -117,7 +122,7 @@ def build_import_character_req(
     form: dict[str, Any] = {
         "name": _text(persona.get("name")),
         "gender": normalize_gender(_text(persona.get("gender"))),
-        "species": _canonical_species(persona.get("species")),
+        "species": _canonical_species(persona.get("species"), page_config),
         "tags": _normalise_tags(persona.get("tags"), page_config),
         "voice_id": _text(persona.get("voice")),
         "profile": _text(persona.get("profile")),
@@ -252,10 +257,15 @@ def _validate_page_config(issues: list[ContractViolation], form: dict,
     if not isinstance(tags, list) or not tags:
         issues.append(ContractViolation(f"{prefix}.tags", "must be a non-empty array"))
     elif tag_keys:
-        for index, tag in enumerate(tags):
-            if tag not in tag_keys:
-                issues.append(ContractViolation(
-                    f"{prefix}.tags[{index}]", "is not a page_config character tag"))
+        # SKILL 口径：tag 属软校验（不在集合内只记日志、不拒导入），后端本身也
+        # 只对 tag 做软校验。集合外的值没有 i18n 翻译，这里记 warning 供事后核对，
+        # 但不再作为硬违约拦截导入。
+        off_config = [tag for tag in tags if tag not in tag_keys]
+        if off_config:
+            _log.warning(
+                "%s: %d tag(s) not in page_config character_tags (soft check, "
+                "imported as-is, no i18n translation): %s",
+                prefix, len(off_config), ", ".join(map(str, off_config)))
     if not voice_ids:
         issues.append(ContractViolation("page_config.voices", "is unavailable"))
     elif form.get("voice_id") not in voice_ids:
@@ -285,9 +295,8 @@ def _validate_opening(issues: list[ContractViolation], opening: Any, path: str) 
             if resource_id is not None and not isinstance(resource_id, str):
                 issues.append(ContractViolation(
                     f"{item_path}.tts_resource_id", "must be empty or a platform resource id"))
-            if "{{user}}" in _text(item.get("text")):
-                issues.append(ContractViolation(
-                    f"{item_path}.text", "must not use {{user}} in a tts row"))
+            # SKILL 口径：tts 行的 {{user}} 由后端合成时剔除、存库文本同步改写，属正常
+            # 兼容行为而非违约。构建阶段（_opening_prologue）已剔除，故此处不再硬拒。
 
 
 def _validate_images(issues: list[ContractViolation], images: Any, path: str) -> None:
@@ -356,8 +365,25 @@ def _validate_landing_url(issues: list[ContractViolation], url: Any,
             issues.append(ContractViolation(path, "must point to the public OSS bucket"))
 
 
-def _canonical_species(value: Any) -> str:
+def _canonical_species(value: Any, page_config: dict | None = None) -> str:
+    """把 species 反解成 page_config 下发的规范 tag_key（5 个中文 key）。
+
+    优先用 page_config 的 species 枚举做反解：tag_key 原样保留、本地化 tag_name
+    （如韩语「인간」、日语「その他」、繁中「人類」）映射回对应 tag_key，无需维护
+    多语言别名表。page_config 缺失或查不到时，退回内建别名表（覆盖英文导出包等
+    page_config 不下发的形态）兜底。"""
     raw = _text(value)
+    if isinstance(page_config, dict):
+        lookup: dict[str, str] = {}
+        for item in page_config.get("species") or []:
+            key = _text((item or {}).get("tag_key"))
+            name = _text((item or {}).get("tag_name"))
+            if key:
+                lookup[key] = key
+                if name:
+                    lookup[name] = key
+        if raw in lookup:
+            return lookup[raw]
     return _SPECIES_ALIASES.get(raw.lower(), raw)
 
 
@@ -412,6 +438,11 @@ def _opening_prologue(opening: Any) -> list[dict]:
         else:
             continue
         text = _SINGLE_USER_PLACEHOLDER.sub("{{user}}", _text(text))
+        if output_type == "tts":
+            # SKILL 口径：tts 行念不出占位符，后端合成时会剔除 {{user}} 且存库文本
+            # 同步改写为剔除后的版本。这里在构建时就对齐这一最终形态，避免把动态
+            # 称呼残留进语音行；想保留 {{user}} 动态称呼应改用 output_type=text 行。
+            text = _USER_PLACEHOLDER.sub("", text).strip()
         if not text:
             continue
         item = {"text": text, "output_type": output_type}

@@ -121,6 +121,16 @@
       <button id="btnBatchDelete" class="ghost danger">🗑 批次刪除</button>
       <button id="btnRetryDelete" class="ghost danger hidden" title="重試上次刪除失敗的角色">↻ 重試失敗項</button>
       <button id="btnBatchExport" class="ghost">📦 批次匯出</button>
+      <button id="btnExportTable" class="ghost" title="把勾選角色導出成 CSV 表格（含本地 character_id 與 arca 平台 character_id）">📄 導出表格(CSV)</button>
+      <span class="char-style-batch">
+        <select id="batchStyleTag" title="業務 style 標籤">
+          <option value="real">real</option>
+          <option value="cute">cute</option>
+          <option value="fantasy">fantasy</option>
+        </select>
+        <button id="btnBatchStyle" class="ghost" title="給勾選角色打業務 style 標籤（real/cute/fantasy）">🏷 打 style 標籤</button>
+      </span>
+      <button id="btnBatchImport" class="ghost" title="按 SKILL 契約直推勾選角色到後端 /internal/import/character：全量契約校驗後導入，(provider, external_character_id) 幂等">📥 契約導入後端</button>
       <button id="btnArcaSync" class="ghost" title="匯出勾選角色到 POPOP：彈窗可選強制重推/同時推送帖子">☁️ 匯出到POPOP</button>
       <button id="btnStorageMigrate" class="ghost" title="把本地 data/ 存量資料全量遷移到 arca 通用儲存（JSON 記錄→儲存中臺，圖片→OSS）。冪等可重跑；需已配置 ARCA_STORAGE_KEY">☁️⇪ 存量遷移到雲端</button>
       <span id="selCount" class="muted"></span>

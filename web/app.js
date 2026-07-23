@@ -1,6 +1,8 @@
 const LANGS = ["zh", "ja", "ko", "en"];
 const LANG_NAMES = { zh: "中", ja: "日", ko: "韓", en: "EN" };
 const LANG_NAMES_FULL = { zh: "簡體中文", ja: "日本語", ko: "한국어", en: "English" };
+// 業務 style 標籤（real|cute|fantasy）的顯示名，用於角色卡徽章與批量打標籤。
+const STYLE_NAMES = { real: "real", cute: "cute", fantasy: "fantasy" };
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -483,6 +485,9 @@ function charCardHtml(c) {
   const arcaTag = c.arca_synced
     ? `<span class="export-badge done" title="該角色已同步到 arca-i18n">☁️ 已同步</span>`
     : "";
+  const styleTag = c.style
+    ? `<span class="style-badge ${esc(c.style)}" title="業務 style 標籤">${STYLE_NAMES[c.style] || esc(c.style)}</span>`
+    : `<span class="style-badge none" title="尚未打 style 標籤">style?</span>`;
   const arcaDelBtn = c.arca_synced
     ? `<button class="card-arca-del" title="從POPOP刪除此角色（軟刪，本地資料不受影響）">☁️🗑</button>`
     : "";
@@ -490,7 +495,7 @@ function charCardHtml(c) {
     <label class="char-pick" title="多選"><input type="checkbox" class="csel" value="${esc(c.char_id)}" /></label>
     ${arcaDelBtn}${cover}<div class="meta"><div class="name">${langTag}${
     esc(c.name) || "(未命名)"
-  }</div><div class="tag">${c.has_identity ? "已生成外貌DNA" : "未生成外貌"}${exportTag}${arcaTag}</div></div>
+  }</div><div class="tag">${c.has_identity ? "已生成外貌DNA" : "未生成外貌"}${exportTag}${arcaTag}${styleTag}</div></div>
   </div>`;
 }
 
@@ -699,6 +704,112 @@ $("#btnBatchExport").addEventListener("click", async () => {
     loadCharacters();
   } catch (e) {
     toast("匯出失敗：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+});
+
+$("#btnExportTable").addEventListener("click", async () => {
+  const ids = selectedCharIds();
+  if (!ids.length) return toast("請先勾選角色", "err");
+  const btn = $("#btnExportTable");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "導出中…";
+  try {
+    const res = await fetch("/api/characters/export_table", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ char_ids: ids }),
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (e) {}
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `characters_${ids.length}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast(`已導出 ${ids.length} 個角色的表格`, "ok");
+  } catch (e) {
+    toast("導出表格失敗：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+});
+
+$("#btnBatchStyle").addEventListener("click", async () => {
+  const ids = selectedCharIds();
+  if (!ids.length) return toast("請先勾選角色", "err");
+  const style = $("#batchStyleTag").value;
+  const btn = $("#btnBatchStyle");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "打標籤中…";
+  try {
+    const r = await api("/api/characters/set_style", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ char_ids: ids, style }),
+    });
+    const okN = (r.updated || []).length;
+    const errN = Object.keys(r.errors || {}).length;
+    // 本地列表即時更新 style，免整表重載
+    (r.updated || []).forEach((cid) => {
+      const c = CHAR_LIST.find((x) => x.char_id === cid);
+      if (c) c.style = r.style;
+    });
+    renderCharList();
+    if (errN) {
+      console.warn("打 style 標籤失敗明細:", r.errors);
+      toast(`已打 style=${r.style}：成功 ${okN}，失敗 ${errN}。詳見主控台。`, "err");
+    } else {
+      toast(`已給 ${okN} 個角色打上 style=${r.style}`, "ok");
+    }
+  } catch (e) {
+    toast("打 style 標籤失敗：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+});
+
+$("#btnBatchImport").addEventListener("click", async () => {
+  const ids = selectedCharIds();
+  if (!ids.length) return toast("請先勾選角色", "err");
+  if (!confirm(`按 SKILL 契約直推 ${ids.length} 個角色到後端 /internal/import/character？\n每個角色會上傳資產並做全量契約校驗，(provider, external_character_id) 幂等：重複導入命中同一角色不重複建。`)) return;
+  const btn = $("#btnBatchImport");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "導入中…";
+  try {
+    const result = await runTask("/api/characters/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ char_ids: ids }),
+    }, (done, total) => {
+      btn.textContent = `導入中… ${done}/${total}`;
+    });
+    const okN = (result.imported || []).length;
+    const errEntries = Object.entries(result.errors || {});
+    const created = (result.imported || []).filter((x) => x.new_created).length;
+    if (errEntries.length) {
+      console.warn("契約導入失敗明細:", result.errors);
+      toast(`導入完成：成功 ${okN}（新建 ${created}），失敗 ${errEntries.length}。詳見主控台。`, "err");
+    } else {
+      toast(`已導入 ${okN} 個角色（新建 ${created}，更新 ${okN - created}）`, "ok");
+    }
+    loadCharacters();
+  } catch (e) {
+    toast("契約導入失敗：" + e.message, "err");
   } finally {
     btn.disabled = false;
     btn.textContent = old;
@@ -945,6 +1056,10 @@ async function showCharDetail(charId) {
           </select></label>
         <button class="primary" id="btnCover">重繪封面圖</button>
         <div id="coverStatus" class="status"></div>
+        <label class="field" style="margin-top:8px"><span>手動替換封面${rec.cover && rec.cover.manual ? "（目前：手動上傳）" : ""}</span>
+          <input type="file" id="coverReplaceFile" accept="image/png,image/jpeg,image/webp,image/gif" /></label>
+        <button class="ghost" id="btnReplaceCover">⬆️ 上傳替換封面（匯出用原圖）</button>
+        <div id="coverReplaceStatus" class="status"></div>
         <button class="ghost" id="btnOpening" style="margin-top:8px">💬 單獨重寫開場白</button>
         <div id="openingStatus" class="status"></div>
       </div>
@@ -957,6 +1072,7 @@ async function showCharDetail(charId) {
           <textarea id="personaJson" spellcheck="false" style="width:100%;min-height:420px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.5">${escapeHtml(JSON.stringify(p, null, 2))}</textarea>
           <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
             <button class="primary" id="btnSavePersona">儲存人設</button>
+            <button class="ghost" id="btnFixPersonaJson">🔧 修復格式</button>
             <button class="ghost" id="btnCancelPersona">取消</button>
             <span id="personaEditStatus" class="status"></span>
           </div>
@@ -1000,6 +1116,30 @@ async function showCharDetail(charId) {
     }
   });
 
+  $("#btnReplaceCover").addEventListener("click", async () => {
+    const input = $("#coverReplaceFile");
+    const file = input.files && input.files[0];
+    const cs = $("#coverReplaceStatus");
+    if (!file) return toast("請先選擇圖片", "err");
+    cs.innerHTML = `<span class="spinner"></span> 上傳中…`;
+    $("#btnReplaceCover").disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append("char_id", charId);
+      fd.append("file", file);
+      const r = await fetch("/api/cover/replace", { method: "POST", body: fd });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+      cs.innerHTML = "封面已替換（匯出用原圖）。";
+      toast("封面替換成功", "ok");
+      showCharDetail(charId);
+    } catch (e) {
+      cs.innerHTML = "失敗：" + e.message;
+      toast("封面替換失敗：" + e.message, "err");
+    } finally {
+      $("#btnReplaceCover").disabled = false;
+    }
+  });
+
   $("#btnOpening").addEventListener("click", async () => {
     const os = $("#openingStatus");
     os.innerHTML = `<span class="spinner"></span> 正在依據人設重寫開場白…`;
@@ -1034,14 +1174,44 @@ async function showCharDetail(charId) {
     $("#personaJson").value = JSON.stringify(p, null, 2);
     $("#personaEditStatus").innerHTML = "";
   });
+  $("#btnFixPersonaJson").addEventListener("click", () => {
+    const st = $("#personaEditStatus");
+    const ta = $("#personaJson");
+    const r = repairJsonText(ta.value);
+    if (r.ok) {
+      ta.value = JSON.stringify(r.value, null, 2);
+      if (r.applied.length) {
+        st.innerHTML = "已修復：" + esc(r.applied.join("、")) + "。請確認內容無誤後儲存。";
+        toast("JSON 已自動修復", "ok");
+      } else {
+        st.innerHTML = "格式本來就正確，無需修復。";
+        toast("格式正確", "ok");
+      }
+    } else {
+      st.innerHTML = "無法自動修復：" + esc(r.error || "請檢查引號是否成對") +
+        "。常見原因：字串值裡直接換行、引號沒成對、或用了全形引號。";
+      toast("無法自動修復，請手動檢查", "err");
+    }
+  });
+
   $("#btnSavePersona").addEventListener("click", async () => {
     const st = $("#personaEditStatus");
     let parsed;
     try {
       parsed = JSON.parse($("#personaJson").value);
     } catch (err) {
-      st.innerHTML = "JSON 格式錯誤：" + err.message;
-      return toast("人設 JSON 格式錯誤", "err");
+      // 嚴格解析失敗時，自動嘗試修復一次，成功則回填並提示。
+      const r = repairJsonText($("#personaJson").value);
+      if (r.ok) {
+        parsed = r.value;
+        $("#personaJson").value = JSON.stringify(r.value, null, 2);
+        st.innerHTML = "已自動修復格式（" + esc(r.applied.join("、") || "重新格式化") + "）並儲存。";
+        toast("已自動修復 JSON 格式", "ok");
+      } else {
+        st.innerHTML = "JSON 格式錯誤：" + esc(r.error || err.message) +
+          "。可點「🔧 修復格式」嘗試自動修復。";
+        return toast("人設 JSON 格式錯誤", "err");
+      }
     }
     $("#btnSavePersona").disabled = true;
     st.innerHTML = `<span class="spinner"></span> 儲存中…`;
@@ -1072,6 +1242,110 @@ function escapeHtml(s) {
 function esc(s) {
   if (s == null) return "";
   return escapeHtml(String(s));
+}
+
+// ========== JSON 自動修復 ==========
+// 逐字掃描，追蹤是否在字串內。把字串內的裸換行/Tab/回車轉義成 \n \t \r，
+// 這是「Unterminated string」最常見的成因（在字串值裡直接敲了 Enter）。
+function jsonEscapeCtrlInStrings(text) {
+  let out = "", inStr = false, escaped = false, changed = false;
+  for (const ch of text) {
+    if (inStr) {
+      if (escaped) { out += ch; escaped = false; continue; }
+      if (ch === "\\") { out += ch; escaped = true; continue; }
+      if (ch === '"') { out += ch; inStr = false; continue; }
+      if (ch === "\n") { out += "\\n"; changed = true; continue; }
+      if (ch === "\r") { out += "\\r"; changed = true; continue; }
+      if (ch === "\t") { out += "\\t"; changed = true; continue; }
+      out += ch;
+    } else {
+      if (ch === '"') inStr = true;
+      out += ch;
+    }
+  }
+  return { text: out, changed };
+}
+
+// 去掉物件/陣列結尾多餘的逗號（僅在字串外處理）。
+function jsonStripTrailingCommas(text) {
+  let out = "", inStr = false, escaped = false, changed = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; out += ch; continue; }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === "}" || text[j] === "]") { changed = true; continue; }
+    }
+    out += ch;
+  }
+  return { text: out, changed };
+}
+
+// 把全形/智慧引號、全形標點還原成半形（結構修復的最後手段）。
+function jsonNormalizePunct(text) {
+  const before = text;
+  const out = text
+    .replace(/[\u201C\u201D\u2033\uFF02]/g, '"')
+    .replace(/[\u2018\u2019\u2032]/g, "'")
+    .replace(/\uFF0C/g, ",").replace(/\uFF1A/g, ":")
+    .replace(/\uFF1B/g, ";")
+    .replace(/\uFF5B/g, "{").replace(/\uFF5D/g, "}")
+    .replace(/\uFF3B/g, "[").replace(/\uFF3D/g, "]");
+  return { text: out, changed: out !== before };
+}
+
+// 分層嘗試修復：由溫和到激進，每步都試著 parse，成功即回傳。
+// 回傳 { ok, value, text, applied[] }。
+function repairJsonText(raw) {
+  const applied = [];
+  const tryParse = (s) => { try { return JSON.parse(s); } catch (e) { return undefined; } };
+  let v = tryParse(raw);
+  if (v !== undefined) return { ok: true, value: v, text: raw, applied };
+
+  let s = raw;
+  const ctrl = jsonEscapeCtrlInStrings(s);
+  if (ctrl.changed) { s = ctrl.text; applied.push("字串內換行/Tab→轉義"); }
+  v = tryParse(s);
+  if (v !== undefined) return { ok: true, value: v, text: s, applied };
+
+  const tc = jsonStripTrailingCommas(s);
+  if (tc.changed) { s = tc.text; applied.push("移除多餘結尾逗號"); }
+  v = tryParse(s);
+  if (v !== undefined) return { ok: true, value: v, text: s, applied };
+
+  const punct = jsonNormalizePunct(s);
+  if (punct.changed) {
+    s = punct.text; applied.push("全形引號/標點→半形");
+    const ctrl2 = jsonEscapeCtrlInStrings(s);
+    if (ctrl2.changed) s = ctrl2.text;
+    const tc2 = jsonStripTrailingCommas(s);
+    if (tc2.changed) s = tc2.text;
+  }
+  v = tryParse(s);
+  if (v !== undefined) return { ok: true, value: v, text: s, applied };
+
+  return { ok: false, value: undefined, text: s, applied, error: jsonErrorHint(s) };
+}
+
+// 從 JSON.parse 的錯誤訊息推算大概位置，給出「第 N 行」提示。
+function jsonErrorHint(s) {
+  try { JSON.parse(s); return ""; } catch (e) {
+    const m = /position (\d+)/.exec(e.message);
+    if (m) {
+      const pos = +m[1];
+      const line = s.slice(0, pos).split("\n").length;
+      return `${e.message}（大約在第 ${line} 行）`;
+    }
+    return e.message;
+  }
 }
 
 // ========== POSTS VIEW ==========

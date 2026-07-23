@@ -20,6 +20,13 @@ def _page_config():
         ],
         "voices": [{"voice_id": "voice_001", "voice_name": "示例音色"}],
         "setting_options": [{"tag_key": key} for key in SETTING_KEYS],
+        "species": [
+            {"tag_key": "人类", "tag_name": "人類"},
+            {"tag_key": "精灵", "tag_name": "精靈"},
+            {"tag_key": "兽人", "tag_name": "獸人"},
+            {"tag_key": "动物", "tag_name": "動物"},
+            {"tag_key": "其他", "tag_name": "其他"},
+        ],
     }
 
 
@@ -99,6 +106,32 @@ def test_builds_complete_import_character_req_from_existing_persona():
         request, page_config=_page_config(), public_asset_hosts={"public.example"})
 
 
+def test_species_resolves_via_page_config_localized_names():
+    """species 用 page_config 的 species 枚举反解本地化 tag_name → 规范 tag_key。"""
+    ko_pc = dict(_page_config())
+    ko_pc["species"] = [
+        {"tag_key": "人类", "tag_name": "인간"},
+        {"tag_key": "精灵", "tag_name": "엘프"},
+        {"tag_key": "兽人", "tag_name": "오크"},
+        {"tag_key": "动物", "tag_name": "동물"},
+        {"tag_key": "其他", "tag_name": "다른"},
+    ]
+    cases = [
+        (_page_config(), "獸人", "兽人"),   # 繁中 tag_name 反解
+        (_page_config(), "其他", "其他"),   # 直接是 tag_key
+        (ko_pc, "인간", "人类"),            # 韩语 tag_name 反解
+        (ko_pc, "동물", "动物"),            # 韩语 tag_name 反解
+        (ko_pc, "human", "人类"),           # page_config 无英文，走内建别名兜底
+    ]
+    for pc, raw, expected in cases:
+        record = _record()
+        record["persona"]["species"] = raw
+        request = build_import_character_req(
+            record, page_config=pc, images=_main_image(),
+            landing_page_url=None, provider="popop-pipeline")
+        assert request["character_create_form"]["species"] == expected, raw
+
+
 def test_validator_rejects_non_contract_values_instead_of_repairing_them():
     request = build_import_character_req(
         _record(), page_config=_page_config(), images=_main_image(),
@@ -107,14 +140,37 @@ def test_validator_rejects_non_contract_values_instead_of_repairing_them():
     form["tags"] = ["高冷"]
     form["voice_id"] = "invented-voice"
     form["images"][0]["is_main_pic"] = False
-    form["opening_prologue"][1]["text"] = "你好，{{user}}"
 
     paths = {issue.path for issue in validate_import_character_req(
         request, page_config=_page_config())}
-    assert "request.character_create_form.tags[0]" in paths
+    # voice_id 与主图仍是硬违约（SKILL 铁律 1/2 的必填与音色校验对导入无条件生效）
     assert "request.character_create_form.voice_id" in paths
     assert "request.character_create_form.images" in paths
-    assert "request.character_create_form.opening_prologue[1].text" in paths
+    # SKILL 口径：tag 属软校验（不在集合内只记日志、不拒），集合外 tag 不进违约
+    assert "request.character_create_form.tags[0]" not in paths
+
+
+def test_tts_row_user_placeholder_is_not_a_violation():
+    """SKILL 口径：tts 行的 {{user}} 由后端合成时剔除、存库文本同步改写，非违约。
+
+    构建阶段应把 tts 行的 {{user}} 剔除；即便直接塞进 form 也不应被校验硬拒。"""
+    request = build_import_character_req(
+        _record(), page_config=_page_config(), images=_main_image(),
+        landing_page_url=None, provider="popop-pipeline")
+    form = request["character_create_form"]
+    # 构建阶段：tts 行不应残留 {{user}}
+    for row in form.get("opening_prologue", []):
+        if row.get("output_type") == "tts":
+            assert "{{user}}" not in row["text"]
+    # 校验阶段：即便人为塞入，也不再作为违约
+    tts_rows = [i for i, r in enumerate(form.get("opening_prologue", []))
+                if r.get("output_type") == "tts"]
+    if tts_rows:
+        idx = tts_rows[0]
+        form["opening_prologue"][idx]["text"] = "老样子？{{user}}"
+        paths = {issue.path for issue in validate_import_character_req(
+            request, page_config=_page_config())}
+        assert f"request.character_create_form.opening_prologue[{idx}].text" not in paths
 
 
 def test_landing_validator_rejects_inline_and_non_public_assets():

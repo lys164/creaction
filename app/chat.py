@@ -52,6 +52,7 @@ CHAT_PROMPT_TEMPLATE = r"""# 你是誰
 
 ## Text（預設）
 - 純文字格式，模擬真人網聊口語化風格，直白，拒絕術語或小說體
+- **嚴禁小說體/旁白/動作描寫**：不准出現 `[廚房傳來聲音]`、`(他端著早餐走回來)`、`*嘆氣*`、`（過了一會兒）` 這類環境音、第三人稱敘述、括號動作。你只是在打字聊天，看不到對方、對方也看不到你，只能發文字訊息。要傳遞畫面或動作，改用 image 型別，不要用文字演出來。
 - 符號：嚴禁使用引號（""/‘’/“”），允許空格代替逗號或停頓，行尾嚴禁使用句號（. 或 。）
 - 碎片化回覆，完整想法需拆分到多條訊息中，長短句交替（大部分時候單氣泡20字以下，偶爾長訊息）
 - 允許單獨傳送單獨符號（如 ？、！、...）、一個詞、一個字（啊，哦）、疊字（如對對，行行行）
@@ -766,12 +767,53 @@ def send_message(char_id: str, message: str, context: dict | None = None,
     return {"reply": items, "session": _public_session(session)}
 
 
+def append_proactive_message(char_id: str, content: str) -> dict:
+    """Append a durable, proactive character message triggered while the player
+    is peeking the phone (B-tier probe).
+
+    Written into the real normal session so the phone's talk red-dot and the
+    chat screen show the same message. Never reveals awareness of the peek.
+    """
+    record = pipeline.load_character(char_id)
+    session = _latest_session(char_id, mode="normal")
+    if session is None:
+        session = _new_session(char_id, {}, _opening_items(record), mode="normal")
+    if _last_assistant_text(session).strip() == _clean_text(content).strip():
+        return _public_session(session)
+    items = [{"type": "text", "data": {"content": content}}]
+    session["messages"].append({
+        "role": "assistant",
+        "items": items,
+        "raw": json.dumps(items, ensure_ascii=False),
+        "is_proactive_probe": True,
+        "created": int(time.time()),
+    })
+    session["updated"] = int(time.time())
+    _save_session(session)
+    return _public_session(session)
+
+
+def _last_assistant_text(session: dict) -> str:
+    """最後一條 assistant 訊息的純文字（供防重複用）。"""
+    for m in reversed(session.get("messages", [])):
+        if m.get("role") != "assistant":
+            continue
+        for it in (m.get("items") or []):
+            if (it.get("type") or "text") == "text":
+                return _clean_text((it.get("data") or {}).get("content"))
+        return ""
+    return ""
+
+
 def append_phone_event(char_id: str, content: str, event: str = "") -> dict:
     """Append a durable, proactive character message after a phone risk event."""
     record = pipeline.load_character(char_id)
     session = _latest_session(char_id, mode="normal")
     if session is None:
         session = _new_session(char_id, {}, _opening_items(record), mode="normal")
+    # 防重複：若最後一條就是同一句抓捕訊息，不再追加（避免截圖裡那種連發兩條）。
+    if _last_assistant_text(session).strip() == _clean_text(content).strip():
+        return _public_session(session)
     session["context"] = {**session.get("context", {}),
                           "phone_event": f"手机窥探风险：{event}"}
     session["messages"].append({
@@ -785,3 +827,47 @@ def append_phone_event(char_id: str, content: str, event: str = "") -> dict:
     session["updated"] = int(time.time())
     _save_session(session)
     return _public_session(session)
+
+
+def clear_phone_events(char_id: str, mode: str = "normal") -> dict:
+    """移除最新會話裡被抓捕寫入的「你是不是動我手機了」等 phone_event 訊息，
+    以及沒有內容的空 assistant 佔位。用於修復殘留 / 重置被抓狀態。"""
+    session = _latest_session(char_id, mode=mode)
+    if session is None:
+        return {"cleared": 0}
+    msgs = session.get("messages") or []
+
+    def _empty_assistant(m: dict) -> bool:
+        if m.get("role") != "assistant":
+            return False
+        items = m.get("items") or []
+        return not any(str((it.get("data") or {}).get("content", "")).strip()
+                       for it in items if isinstance(it, dict))
+
+    kept = [m for m in msgs if not m.get("is_phone_event") and not _empty_assistant(m)]
+    removed = len(msgs) - len(kept)
+    if removed:
+        session["messages"] = kept
+        ctx = session.get("context") or {}
+        ctx.pop("phone_event", None)
+        session["context"] = ctx
+        session["updated"] = int(time.time())
+        _save_session(session)
+    return {"cleared": removed, "session_id": session.get("session_id")}
+
+
+def clear_sessions(char_id: str, mode: str | None = None) -> dict:
+    """刪掉某角色的偷看聊天會話（本地＋遠端），讓 demo 每次進入乾淨重來。
+    只清會話記錄，不動預生成的付費 App 內容與相冊生圖。mode 省略＝清全部模式。"""
+    prefix = f"{char_id}__"
+    rows = storage.list_json(
+        "chats", _chat_dir(char_id), match={"char_id": char_id},
+        remote_key_to_local=lambda k: k[len(prefix):] if k.startswith(prefix) else None,
+    )
+    deleted = 0
+    for sid, obj in rows.items():
+        if mode and (obj or {}).get("mode", "normal") != mode:
+            continue
+        storage.delete_json("chats", f"{char_id}__{sid}", _session_path(char_id, sid))
+        deleted += 1
+    return {"deleted": deleted}

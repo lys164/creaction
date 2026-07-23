@@ -7,6 +7,7 @@ the phone generator's rich, cross-app story content.
 """
 from __future__ import annotations
 
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -14,13 +15,21 @@ from typing import Any
 from . import config, phone_check_gen, schedule_pipeline, storage
 
 
+# 只有「輸錯密碼」才累積到被抓；翻刪除相冊/開未讀/代發等越界行為不再計入
+# 「你是不是動我手機」的觸發（它們仍可留痕，但不會導致被抓）。
 RISK_POINTS = {
     "wrong_pin": 3,
-    "unread_opened": 1,
-    "draft_sent": 2,
-    "deleted_album_opened": 1,
+    "unread_opened": 0,
+    "draft_sent": 0,
+    "deleted_album_opened": 0,
 }
 RISK_LIMIT = 3
+
+# ── 主動試探（B 檔）：玩家讀到重磅 item 後，角色可能給「나」發來一條擦邊訊息 ──
+# 鐵律：永遠不承認知道你在看（實錘只走 caught）；一次偷看 session 最多 PROBE_LIMIT 條。
+PROBE_LIMIT = 2       # 單次偷看 session 最多主動發幾條
+PROBE_PROB = 0.6      # 每次讀到重磅時觸發的機率（間歇性獎勵，非必觸發）
+PROBE_MIN_GAP = 25    # 兩條主動訊息之間的最小間隔（秒），避免連環轟炸
 
 
 def _path(char_id: str) -> Path:
@@ -39,6 +48,9 @@ def _load(char_id: str) -> dict:
         "chat_turns": int(item.get("chat_turns") or 0),
         "chat_session_id": str(item.get("chat_session_id") or ""),
         "events": list(item.get("events") or [])[-24:],
+        "probe_count": int(item.get("probe_count") or 0),
+        "probe_last": int(item.get("probe_last") or 0),
+        "probed_focus": list(item.get("probed_focus") or [])[-8:],
         "updated": int(item.get("updated") or 0),
     }
 
@@ -258,7 +270,7 @@ def enter(char_id: str, session_id: str = "") -> dict:
     state.update({
         "risk": 0, "caught": False, "entry_started": int(time.time()),
         "chat_turns": 0, "chat_session_id": session_id or state.get("chat_session_id", ""),
-        "events": [],
+        "events": [], "probe_count": 0, "probe_last": 0, "probed_focus": [],
     })
     _save(state)
     return runtime(char_id)
@@ -285,13 +297,34 @@ def _password_context(char_id: str, state: dict) -> str:
     )
 
 
+def _ambiguity_guard(char_id: str) -> str:
+    """把手機裡那條『看著有問題、但解釋得通』的未解暧昧，變成角色在聊天裡
+    守口如瓶的點：玩家試探時，角色也保持不實錘，讓暧昧從手機 UI 活到聊天裡。"""
+    dossier = phone_check_gen.find_by_char_id(char_id) or {}
+    content = dossier.get("content") or {}
+    meta = content.get("meta") or {}
+    secret = _txt(meta.get("secret"))
+    if not secret:
+        return ""
+    return (
+        "【你心裡有一件沒說出口的事，這是你的潛台詞，不是要交代的劇情】"
+        f"{secret[:300]} —— 若對方在聊天裡旁敲側擊、試探到這件事，你可以有反應"
+        "（迴避、岔開、欲言又止、半真半假），但【絕不主動全盤托出、也不徹底否認】。"
+        "保持這份懸而未決：往好想解釋得通，往壞想也說得過去。這份曖昧是你們關係的燃料。"
+    )
+
+
 def chat_context(char_id: str, session_id: str | None = None) -> str:
     state = _load(char_id)
     if not state["entry_started"] or state["caught"]:
         return ""
     if session_id and state["chat_session_id"] and state["chat_session_id"] != session_id:
         return ""
-    return _password_context(char_id, state)
+    parts = [_password_context(char_id, state)]
+    guard = _ambiguity_guard(char_id)
+    if guard:
+        parts.append(guard)
+    return "\n".join(p for p in parts if p)
 
 
 def note_chat_turn(char_id: str, session_id: str) -> None:
@@ -306,6 +339,15 @@ def note_chat_turn(char_id: str, session_id: str) -> None:
 
 
 def record_event(char_id: str, event: str, detail: str = "") -> dict:
+    # 只有「輸錯密碼」才會讓角色主動發消息。peek_hot（讀到重磅線索）不再觸發主動試探，
+    # 僅作為無副作用的心理焦點信號返回，避免非 wrong_pin 情況下角色憑空發訊息。
+    if event == "peek_hot":
+        st = _load(char_id)
+        return {
+            "risk": st["risk"], "risk_limit": RISK_LIMIT,
+            "caught": st["caught"], "caught_now": False,
+            "message": "", "probe": {"sent": False, "disabled": True},
+        }
     state = _load(char_id)
     points = RISK_POINTS.get(event, 0)
     if event == "clear_trace":
@@ -328,3 +370,100 @@ def record_event(char_id: str, event: str, detail: str = "") -> dict:
         "caught": state["caught"], "caught_now": caught_now,
         "message": message,
     }
+
+
+def _resolve_focus(dossier: dict, focus: str) -> str:
+    """把前端上報的 focus（多半是 clue id，如 'h1'，或一段 item 文字）
+    還原成『玩家此刻讀到了什麼』的一句話，餵給主動試探的 LLM。"""
+    focus = (focus or "").strip()
+    if not focus:
+        return ""
+    content = dossier.get("content") or {}
+    for clue in (content.get("clues") or []):
+        if isinstance(clue, dict) and str(clue.get("id")) == focus:
+            return _txt(clue.get("text"))
+    # 不是已知 clue id：當作 item 文字直接用（截斷）
+    return focus[:120]
+
+
+def _probe_messages(char_name: str, persona_brief: str, secret_bible: str,
+                    chat_lines: str, focus_desc: str) -> list[dict]:
+    sys = (
+        f"你是韓國戀愛推理遊戲裡的角色「{char_name}」，正在通訊軟體上跟對方（玩家）聊天。"
+        "此刻對方正在偷看你的手機——但【你完全不知道這件事】。"
+        "系統會告訴你對方剛看到你手機裡的哪個痕跡，你要『恰好在這個時間點』給對方發一條訊息。"
+        "\n# 鐵律（違反即毀掉體驗）\n"
+        "1. 你永遠不知道、也絕不能暗示對方在看你手機。不許出現『你在看我手機嗎』『別亂翻』之類的話。\n"
+        "2. 訊息內容要和對方剛看到的痕跡【語義相關，但錯開一層】——像是巧合般擦邊，"
+        "讓對方後背發涼『他怎麼突然說這個』，但你這句話本身完全解釋得通、是日常會發的。\n"
+        "3. 絕不實錘、不點破中心秘密。曖昧要懸而未決，你只是若無其事地生活、順口說一句。\n"
+        "4. 就是一條網聊訊息：口語、短、可碎片化，符合你的人設語氣。不寫旁白動作，不用引號。\n"
+        "# 輸出\n只輸出一個 JSON object：{\"text\": \"你要發的那條訊息\"}。不要解釋、不要 markdown。"
+    )
+    blocks = [
+        f"# 你的人設\n{persona_brief}",
+        f"# 你的中心秘密（只有你自己知道，是這條訊息的潛台詞來源，絕不可說破）\n{secret_bible or '（暫無，保守發揮）'}",
+    ]
+    if chat_lines:
+        blocks.append("# 你和對方最近的聊天（延續語氣與稱呼，只能用這裡出現過的梗指向對方）\n" + chat_lines)
+    else:
+        blocks.append("# 你和對方最近的聊天\n（還在初期，只發最輕的擦邊，不要編造親密史）")
+    blocks.append(
+        "# 對方此刻剛在你手機裡看到的痕跡（你不知道這件事，但請讓你的訊息『恰好』擦到它的邊）\n"
+        + focus_desc)
+    return [{"role": "system", "content": sys},
+            {"role": "user", "content": "\n\n".join(blocks)}]
+
+
+def proactive_probe(char_id: str, focus: str = "") -> dict:
+    """玩家讀到重磅 item 時可能觸發：角色『恰好』給玩家發來一條擦邊、不實錘的訊息。
+
+    受單次偷看 session 的條數上限、間隔與機率節流。生成的訊息會被寫進真實的
+    normal 聊天會話（durable），讓小手機 talk 的紅點和聊天界面看到的是同一條。
+    任何一步失敗都安靜跳過（絕不打斷偷看流程）。
+    """
+    state = _load(char_id)
+    now = int(time.time())
+    if not state["entry_started"] or state["caught"]:
+        return {"sent": False, "reason": "no active peek"}
+    if state["probe_count"] >= PROBE_LIMIT:
+        return {"sent": False, "reason": "cap reached"}
+    if now - state["probe_last"] < PROBE_MIN_GAP:
+        return {"sent": False, "reason": "too soon"}
+    if random.random() > PROBE_PROB:
+        return {"sent": False, "reason": "no roll"}
+
+    dossier = phone_check_gen.find_by_char_id(char_id)
+    if not dossier:
+        return {"sent": False, "reason": "no dossier"}
+    focus_desc = _resolve_focus(dossier, focus)
+    if not focus_desc or focus_desc in state["probed_focus"]:
+        return {"sent": False, "reason": "no/repeat focus"}
+
+    try:
+        from . import api_client, chat, pipeline
+        record = pipeline.load_character(char_id)
+        persona = record.get("persona") or {}
+        char_name = _txt(persona.get("name")) or char_id
+        secret_bible = phone_check_gen._secret_bible(dossier)
+        chat_lines = phone_check_gen._chat_lines_text(char_id, char_name)
+        messages = _probe_messages(char_name, phone_check_gen._persona_brief(persona),
+                                   secret_bible, chat_lines, focus_desc)
+        raw = api_client.chat(messages, model=config.CHAT_MODEL,
+                              temperature=0.95, max_tokens=400)
+        data = api_client.parse_json_text(raw)
+        text = ""
+        if isinstance(data, dict):
+            text = _txt(data.get("text"))
+        if not text:
+            return {"sent": False, "reason": "empty gen"}
+        chat.append_proactive_message(char_id, text)
+    except Exception as e:  # noqa: BLE001 主動試探絕不打斷偷看
+        return {"sent": False, "reason": f"gen failed: {e}"}
+
+    state["probe_count"] += 1
+    state["probe_last"] = now
+    state["probed_focus"].append(focus_desc)
+    _save(state)
+    return {"sent": True, "text": text, "sender": char_name,
+            "probe_count": state["probe_count"], "probe_limit": PROBE_LIMIT}
